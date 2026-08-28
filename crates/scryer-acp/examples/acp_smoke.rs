@@ -58,6 +58,7 @@ async fn main() {
             "Call the scryer MCP tool `get_health` and reply with ONLY the first line of \
              its output. Do not read any files."
                 .to_string(),
+            "ACP smoke test".to_string(),
             vec!["mcp__scryer__*".into()],
             tx,
         )

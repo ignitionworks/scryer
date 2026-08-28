@@ -252,7 +252,10 @@ pub(crate) async fn start_preview_fixture_session(
     ];
 
     runtime
-        .start_session(agent_binary, mode, cwd, model_name, effort, mcp_binary, prompt, allowed_tools, event_tx)
+        .start_session(
+            agent_binary, mode, cwd, model_name, effort, mcp_binary, prompt,
+            format!("Preview fixture: {node_name}"), allowed_tools, event_tx,
+        )
         .await
 }
 

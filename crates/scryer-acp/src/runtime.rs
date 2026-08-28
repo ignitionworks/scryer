@@ -10,6 +10,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::client::ScryerClient;
 use crate::events::{AgentEvent, Usage};
+use crate::manifest::{finish_run_manifest, start_run_manifest, RunOutcome};
 use crate::{AcpKind, AgentKind};
 
 /// How the agent should be launched.
@@ -31,6 +32,8 @@ enum RuntimeCommand {
         effort: String,
         mcp_binary: String,
         prompt: String,
+        /// What this session was started to do, for its run record.
+        label: String,
         allowed_tools: Vec<String>,
         event_tx: mpsc::UnboundedSender<AgentEvent>,
         result_tx: oneshot::Sender<Result<String, String>>,
@@ -75,6 +78,7 @@ impl AcpRuntime {
         effort: String,
         mcp_binary: String,
         prompt: String,
+        label: String,
         allowed_tools: Vec<String>,
         event_tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<String, String> {
@@ -88,6 +92,7 @@ impl AcpRuntime {
                 effort,
                 mcp_binary,
                 prompt,
+                label,
                 allowed_tools,
                 event_tx,
                 result_tx,
@@ -137,6 +142,7 @@ fn runtime_thread(
                     effort,
                     mcp_binary,
                     prompt,
+                    label,
                     allowed_tools,
                     event_tx,
                     result_tx,
@@ -157,11 +163,12 @@ fn runtime_thread(
                     let result = match mode {
                         LaunchMode::Cli { kind } => start_cli_session(
                             &agent_binary, &kind, &cwd, &model_name, &effort, &mcp_binary,
-                            &prompt, &tool_refs, id, event_tx, done_tx.clone(),
+                            &prompt, &label, &session_id, &tool_refs, id, event_tx,
+                            done_tx.clone(),
                         ),
                         LaunchMode::Acp { kind } => start_acp_session(
                             &agent_binary, &kind, &cwd, &model_name, &effort, &mcp_binary,
-                            &prompt, id, event_tx, done_tx.clone(),
+                            &prompt, &label, &session_id, id, event_tx, done_tx.clone(),
                         ).await,
                     };
 
@@ -199,6 +206,37 @@ fn runtime_thread(
 // CLI mode: spawn `agent -p` with MCP config flags
 // ---------------------------------------------------------------------------
 
+/// The agent name a run record carries — the same vocabulary the settings use.
+fn agent_label(kind: &AgentKind) -> &'static str {
+    match kind {
+        AgentKind::ClaudeCode => "claudeCode",
+        AgentKind::Codex => "codex",
+        AgentKind::Other => "other",
+    }
+}
+
+/// The agent name an ACP run record carries.
+fn acp_agent_label(kind: &AcpKind) -> &'static str {
+    match kind {
+        AcpKind::Copilot => "copilot",
+        AcpKind::Adapter => "adapter",
+    }
+}
+
+/// Close out a run record, if one was written. A project whose `.scryer` could
+/// not be written has no record to finish, and that is not an error worth
+/// failing a session over.
+fn finish_manifest(
+    path: &Option<std::path::PathBuf>,
+    outcome: RunOutcome,
+    error: Option<String>,
+    usage: Option<Usage>,
+) {
+    if let Some(path) = path {
+        finish_run_manifest(path, outcome, error, usage);
+    }
+}
+
 fn start_cli_session(
     agent_binary: &str,
     kind: &AgentKind,
@@ -207,6 +245,8 @@ fn start_cli_session(
     effort: &str,
     mcp_binary: &str,
     prompt: &str,
+    label: &str,
+    session_id: &str,
     allowed_tools: &[&str],
     id: u64,
     event_tx: mpsc::UnboundedSender<AgentEvent>,
@@ -314,6 +354,17 @@ fn start_cli_session(
     let stdout_log_path = log_dir.join(format!("session-{id}.jsonl"));
     let stderr_log_path = log_dir.join(format!("session-{id}.err.log"));
 
+    // The run record beside that transcript: what this session was asked to do.
+    // The transcript alone cannot say — the prompt went over stdin and the
+    // session keeps no history of its own.
+    let manifest_path = start_run_manifest(
+        cwd, id, session_id, label, agent_label(kind), model_name, effort, prompt, true,
+    );
+    // The agent reports its turn total once, at the end; keep the last value
+    // seen so the record can close with what the run actually consumed.
+    let last_usage = std::sync::Arc::new(std::sync::Mutex::new(None::<Usage>));
+    let usage_for_stdout = last_usage.clone();
+
     tokio::task::spawn_local(async move {
         // Stream stdout and stderr to detect activity and tool call events.
         // Claude Code writes JSON events to stdout; some agents use stderr.
@@ -337,6 +388,7 @@ fn start_cli_session(
                             let _ = writeln!(f, "{line}");
                         }
                         if let Some(usage) = extract_usage(&line) {
+                            *usage_for_stdout.lock().unwrap() = Some(usage);
                             let _ = event_tx_stdout.send(AgentEvent::Usage { usage });
                         }
                         if let Some(msg) = summarize_event(&line) {
@@ -383,8 +435,10 @@ fn start_cli_session(
         tokio::select! {
             result = monitor => {
                 let (status, last_stderr) = result;
+                let usage = *last_usage.lock().unwrap();
                 match status {
                     Ok(s) if s.success() => {
+                        finish_manifest(&manifest_path, RunOutcome::Completed, None, usage);
                         let _ = event_tx.send(AgentEvent::Completed {
                             stop_reason: "end_turn".into(),
                         });
@@ -396,6 +450,9 @@ fn start_cli_session(
                         } else {
                             stderr_line
                         };
+                        finish_manifest(
+                            &manifest_path, RunOutcome::Failed, Some(err_msg.clone()), usage,
+                        );
                         let _ = event_tx.send(AgentEvent::Failed { error: err_msg });
                     }
                     Err(e) => {
@@ -405,12 +462,21 @@ fn start_cli_session(
                         } else {
                             stderr_line
                         };
+                        finish_manifest(
+                            &manifest_path, RunOutcome::Failed, Some(err_msg.clone()), usage,
+                        );
                         let _ = event_tx.send(AgentEvent::Failed { error: err_msg });
                     }
                 }
             }
             _ = cancel_rx => {
                 kill_process_tree(&mut child, child_pid).await;
+                finish_manifest(
+                    &manifest_path,
+                    RunOutcome::Cancelled,
+                    None,
+                    *last_usage.lock().unwrap(),
+                );
                 let _ = event_tx.send(AgentEvent::Cancelled);
             }
         }
@@ -615,6 +681,8 @@ async fn start_acp_session(
     effort: &str,
     mcp_binary: &str,
     prompt: &str,
+    label: &str,
+    session_id: &str,
     id: u64,
     event_tx: mpsc::UnboundedSender<AgentEvent>,
     done_tx: mpsc::UnboundedSender<RuntimeCommand>,
@@ -709,6 +777,12 @@ async fn start_acp_session(
     let sid = session.session_id.clone();
     let child_pid = child.id();
 
+    // An ACP session tees no transcript — the protocol is stdout — so its run
+    // record is the only trace of what it was asked to do.
+    let manifest_path = start_run_manifest(
+        cwd, id, session_id, label, acp_agent_label(kind), model_name, effort, prompt, false,
+    );
+
     tokio::task::spawn_local(async move {
         // `child` is owned by this task for the life of the session. It was
         // spawned `kill_on_drop`, so leaving it in the starting frame killed the
@@ -730,14 +804,17 @@ async fn start_acp_session(
                             StopReason::Cancelled => "cancelled",
                             _ => "other",
                         };
+                        finish_manifest(&manifest_path, RunOutcome::Completed, None, None);
                         let _ = event_tx.send(AgentEvent::Completed {
                             stop_reason: reason.to_string(),
                         });
                     }
                     Err(e) => {
-                        let _ = event_tx.send(AgentEvent::Failed {
-                            error: format!("{e}"),
-                        });
+                        let error = format!("{e}");
+                        finish_manifest(
+                            &manifest_path, RunOutcome::Failed, Some(error.clone()), None,
+                        );
+                        let _ = event_tx.send(AgentEvent::Failed { error });
                     }
                 }
             }
@@ -747,6 +824,7 @@ async fn start_acp_session(
                 // the session it was cancelled out of.
                 let _ = connection.cancel(CancelNotification::new(sid)).await;
                 kill_process_tree(&mut child, child_pid).await;
+                finish_manifest(&manifest_path, RunOutcome::Cancelled, None, None);
                 let _ = event_tx.send(AgentEvent::Cancelled);
             }
         }
@@ -823,10 +901,38 @@ mod session_tests {
             String::new(),
             String::new(),
             prompt.into(),
+            "test run".into(),
             Vec::new(),
             tx,
         )
         .await
+    }
+
+    /// A session leaves a run record beside its transcript, naming what it was
+    /// asked to do and how it ended — the only trace of either, since the
+    /// prompt went over stdin and the agent keeps no history.
+    #[tokio::test]
+    async fn a_session_leaves_a_run_record_beside_its_transcript() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().to_string_lossy().into_owned();
+        let rt = AcpRuntime::new();
+
+        let (tx, mut rx) = feed();
+        start(&rt, "true", "the prompt it was given", &cwd, tx).await.unwrap();
+        while let Some(ev) = rx.recv().await {
+            if matches!(ev, AgentEvent::Completed { .. }) {
+                break;
+            }
+        }
+
+        let record = tmp.path().join(".scryer/build-logs/session-0.json");
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+        assert_eq!(v["label"], "test run");
+        assert_eq!(v["prompt"], "the prompt it was given");
+        assert_eq!(v["transcript"], "session-0.jsonl");
+        assert_eq!(v["outcome"], "completed");
+        assert!(v["sessionId"].as_str().unwrap().starts_with("sync-"));
     }
 
     /// The caller's start_session resolves over the session's dedicated
