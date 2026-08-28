@@ -1,9 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Token usage (and cost) an agent reports at the end of a turn. Populated from
 /// the CLI `result` event (Claude Code) or token-count event (Codex); summed
 /// across the many sessions a build runs so the orchestrator can log a total.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
     pub input_tokens: u64,

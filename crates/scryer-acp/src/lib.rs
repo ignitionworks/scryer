@@ -1,9 +1,11 @@
 pub mod client;
 pub mod events;
+pub mod manifest;
 pub mod prompt;
 pub mod runtime;
 
 pub use events::{AgentEvent, Usage};
+pub use manifest::{RunManifest, RunOutcome};
 pub use runtime::AcpRuntime;
 
 /// Which agent harness we're dealing with.

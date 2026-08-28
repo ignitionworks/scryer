@@ -315,6 +315,9 @@ async fn run_wave(
     effort: &str,
     mcp_binary: &str,
     prompt: String,
+    // What this session is for, in the orchestrator's words — it names the
+    // session's run record for anything reading the build from outside.
+    label: String,
     app: &tauri::AppHandle,
 ) -> Result<(WaveOutcome, scryer_acp::Usage), String> {
     let (tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -327,6 +330,7 @@ async fn run_wave(
             effort.to_string(),
             mcp_binary.to_string(),
             prompt,
+            label,
             vec!["mcp__scryer__*".into()],
             tx,
         )
@@ -597,7 +601,7 @@ pub(crate) async fn start_model_build(
                 );
                 let outcome = run_wave(
                     &runtime, &agent_binary, &mode, &cwd, &model_name, &effort, &mcp_binary,
-                    prompt, &app,
+                    prompt, "Model build: system and containers".to_string(), &app,
                 )
                 .await;
                 {
@@ -691,7 +695,7 @@ pub(crate) async fn start_model_build(
                     );
                     run_wave(
                         &runtime, &agent_binary, &mode, &cwd, &model_name, &effort, &mcp_binary,
-                        w2, &app,
+                        w2, format!("Model build: {name}"), &app,
                     )
                     .await
                 };
@@ -828,6 +832,7 @@ pub(crate) async fn start_model_build(
                 &effort,
                 &mcp_binary,
                 repair_prompt,
+                "Model build: repair validation issues".to_string(),
                 &app,
             )
             .await
@@ -1123,7 +1128,7 @@ pub(crate) async fn start_drift_check(
                 let d_start = std::time::Instant::now();
                 let outcome = run_wave(
                     &runtime, &agent_binary, &mode, &cwd, &model_name, &effort, &mcp_binary,
-                    prompt, &app,
+                    prompt, format!("Drift check: {node_name}"), &app,
                 )
                 .await;
                 {

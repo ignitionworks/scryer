@@ -151,6 +151,7 @@ async fn main() {
             effort,
             mcp_binary,
             prompt,
+            format!("Bench: fill {container_dir}"),
             vec!["mcp__scryer__*".into()],
             tx,
         )

@@ -53,6 +53,7 @@ async fn run_session(
     effort: &str,
     mcp_binary: &str,
     prompt: String,
+    label: &str,
 ) -> Result<(scryer_acp::Usage, f64), String> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let start = std::time::Instant::now();
@@ -65,6 +66,7 @@ async fn run_session(
             effort.to_string(),
             mcp_binary.to_string(),
             prompt,
+            label.to_string(),
             vec!["mcp__scryer__*".into()],
             tx,
         )
@@ -193,7 +195,7 @@ async fn main() {
         handles.push(tokio::spawn(async move {
             let _p = sem.acquire().await.unwrap();
             eprintln!("[bench] +{:>5.1}s start system pass", 0.0);
-            match run_session(&runtime, &binary, &kind, &project, &model_name, &effort, &mcp_binary, prompt).await {
+            match run_session(&runtime, &binary, &kind, &project, &model_name, &effort, &mcp_binary, prompt, "Bench: system pass").await {
                 Ok((usage, secs)) => results.lock().await.push(("(system pass)".into(), secs, usage)),
                 Err(e) => eprintln!("[bench] system pass FAILED: {e}"),
             }
@@ -219,7 +221,8 @@ async fn main() {
             let prompt = scryer_acp::prompt::build_container_prompt(
                 &project, &job.name, &job.id, &job.evidence_json,
             );
-            match run_session(&runtime, &binary, &kind, &project, &model_name, &effort, &mcp_binary, prompt).await {
+            let label = format!("Bench: fill {}", job.name);
+            match run_session(&runtime, &binary, &kind, &project, &model_name, &effort, &mcp_binary, prompt, &label).await {
                 Ok((usage, secs)) => results.lock().await.push((job.name.clone(), secs, usage)),
                 Err(e) => eprintln!("[bench] '{}' FAILED: {e}", job.name),
             }
