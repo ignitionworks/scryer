@@ -953,6 +953,143 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
 
+    // --- Clojure ---
+    //
+    // Before the grammar landed, `parse_file` returned `None` for every `.clj`
+    // file, so `resolve_span`'s symbol branch could never run. Every Clojure
+    // anchor silently degraded to a line range — and a symbol-only anchor
+    // degraded all the way to the WHOLE FILE. These cases pin the behavior
+    // that degradation cost.
+
+    const CLJ: &str = "(ns app.core)\n\n(defn alpha\n  [x]\n  (inc x))\n\n(defn beta\n  [x]\n  (dec x))\n";
+
+    /// A symbol-only anchor (no recorded line range) resolves to the `defn`,
+    /// not to the whole file. Without a grammar this anchor fingerprinted
+    /// every line in `app/core.clj`, so editing ANY unrelated function in the
+    /// file reported the claim as drifted.
+    #[test]
+    fn clj_symbol_only_anchor_covers_the_defn_not_the_file() {
+        let (_dir, r) = project_with("src/core.clj", CLJ);
+        let mut m = leaf_model("alpha", "src/core.clj", 1, 1);
+        m.source_map.get_mut("r1").unwrap()[0].line = None;
+        m.source_map.get_mut("r1").unwrap()[0].end_line = None;
+        scryer_core::write_model_at(&r, &m).unwrap();
+        reconcile(&r);
+
+        // Edit `beta` — a different claim's code entirely.
+        touch_gate();
+        std::fs::write(
+            r.project_path().join("src/core.clj"),
+            CLJ.replace("(dec x)", "(dec (dec x))"),
+        )
+        .unwrap();
+
+        let check = check_anchors(&r).unwrap();
+        assert!(
+            check.observations.is_empty(),
+            "editing beta is not drift for alpha: {:?}",
+            check.observations
+        );
+
+        // Editing alpha itself still is.
+        touch_gate();
+        std::fs::write(
+            r.project_path().join("src/core.clj"),
+            CLJ.replace("(inc x)", "(inc (inc x))"),
+        )
+        .unwrap();
+        let check = check_anchors(&r).unwrap();
+        assert_eq!(check.observations.len(), 1);
+        assert_eq!(check.observations[0].state, AnchorState::Changed);
+    }
+
+    /// A `defn` that moves without changing is re-anchored silently, exactly
+    /// as it is for every grammar-backed language.
+    #[test]
+    fn clj_moved_defn_is_reanchored_not_drift() {
+        let (_dir, r) = project_with("src/core.clj", CLJ);
+        scryer_core::write_model_at(&r, &leaf_model("alpha", "src/core.clj", 3, 5)).unwrap();
+        reconcile(&r);
+
+        touch_gate();
+        std::fs::write(
+            r.project_path().join("src/core.clj"),
+            format!(";; pad\n;; pad\n{CLJ}"),
+        )
+        .unwrap();
+
+        let check = check_anchors(&r).unwrap();
+        assert!(check.observations.is_empty(), "{:?}", check.observations);
+        assert_eq!(check.reanchored, 1);
+        let m = read_model_at(&r).unwrap();
+        assert_eq!(m.source_map["r1"][0].line, Some(5));
+        assert_eq!(m.source_map["r1"][0].end_line, Some(7));
+    }
+
+    /// The verdict that was previously UNREACHABLE for Clojure: the anchored
+    /// `defn` is gone while the file lives on. Without a grammar there is no
+    /// symbol to miss, so this could only ever report `changed` — "your code
+    /// was edited" — for a claim whose code no longer exists.
+    #[test]
+    fn clj_deleted_defn_is_broken_not_changed() {
+        let (_dir, r) = project_with("src/core.clj", CLJ);
+        scryer_core::write_model_at(&r, &leaf_model("alpha", "src/core.clj", 3, 5)).unwrap();
+        reconcile(&r);
+
+        touch_gate();
+        std::fs::write(
+            r.project_path().join("src/core.clj"),
+            "(ns app.core)\n\n(defn beta\n  [x]\n  (dec x))\n",
+        )
+        .unwrap();
+
+        let check = check_anchors(&r).unwrap();
+        assert_eq!(check.observations.len(), 1);
+        assert_eq!(check.observations[0].state, AnchorState::Broken);
+    }
+
+    /// `defmethod` siblings share one name, like Rust impl methods. The
+    /// hash-first match must adopt the def carrying the remembered content,
+    /// and a shrinking population must read as `broken` rather than blaming a
+    /// surviving sibling — the `peers` machinery, which a grammarless Clojure
+    /// anchor could never reach.
+    #[test]
+    fn clj_defmethod_siblings_use_peers() {
+        let src = "(ns app.render)\n\n(defmethod render :html\n  [x]\n  (str x))\n\n(defmethod render :text\n  [x]\n  (pr-str x))\n";
+        let (_dir, r) = project_with("src/render.clj", src);
+        scryer_core::write_model_at(&r, &leaf_model("render", "src/render.clj", 3, 5)).unwrap();
+        reconcile(&r);
+
+        // Delete the :html method; the :text sibling survives.
+        touch_gate();
+        std::fs::write(
+            r.project_path().join("src/render.clj"),
+            "(ns app.render)\n\n(defmethod render :text\n  [x]\n  (pr-str x))\n",
+        )
+        .unwrap();
+
+        let check = check_anchors(&r).unwrap();
+        assert_eq!(check.observations.len(), 1);
+        assert_eq!(
+            check.observations[0].state,
+            AnchorState::Broken,
+            "the anchored method was deleted, not edited"
+        );
+    }
+
+    /// `ExtentResolver` returned `None` for every Clojure file, silently
+    /// disabling the validation pass that keeps an explicit line range a
+    /// PROPER subset of its enclosing symbol.
+    #[test]
+    fn clj_extent_resolver_finds_the_defn_extent() {
+        let (dir, r) = project_with("src/core.clj", CLJ);
+        let _ = r;
+        let mut res = ExtentResolver::new(dir.path());
+        assert_eq!(res.extent("src/core.clj", "alpha", None), Some((3, 5)));
+        assert_eq!(res.extent("src/core.clj", "beta", None), Some((7, 9)));
+        assert_eq!(res.extent("src/core.clj", "gamma", None), None);
+    }
+
     /// An edit elsewhere in the file is not drift for this anchor; an edit
     /// inside the anchored symbol is.
     #[test]

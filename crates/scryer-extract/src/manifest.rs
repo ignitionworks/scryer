@@ -9,6 +9,7 @@
 //! declared strings (a Dockerfile's `FROM <image>`), never a filename→ecosystem
 //! lookup table.
 
+use crate::lang;
 use scryer_core::scan;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -29,6 +30,11 @@ pub struct Container {
     /// The declared go.mod module path (`module github.com/acme/proj`) — the
     /// prefix Go import specs spell to reach this container's packages.
     pub go_module: Option<String>,
+    /// Source roots this unit declares for Clojure namespace resolution —
+    /// deps.edn / bb.edn `:paths`, shadow-cljs.edn / project.clj
+    /// `:source-paths`. Relative to `dir`. A Clojure namespace maps to a file
+    /// path under one of these, so without them `app.db` is unresolvable.
+    pub clj_paths: Vec<String>,
 }
 
 /// One manifest file found in a candidate directory.
@@ -178,6 +184,7 @@ pub fn discover_containers_from_files(
             technology: None,
             dep_dirs: Vec::new(),
             go_module: None,
+            clj_paths: Vec::new(),
         });
     }
     containers
@@ -206,6 +213,11 @@ fn manifest_role(filename: &str) -> Option<bool> {
             | "Package.swift"
             | "deno.json"
             | "deno.jsonc"
+            | "deps.edn"
+            | "project.clj"
+            | "shadow-cljs.edn"
+            | "bb.edn"
+            | "build.boot"
     ) || filename == "requirements.txt"
         || (filename.starts_with("requirements") && filename.ends_with(".txt"))
         || filename.ends_with(".csproj")
@@ -245,6 +257,7 @@ fn scan_dir(project: &Path, dir: &str, signals: &[Signal]) -> DirScan {
     let mut dep_dirs: Vec<String> = Vec::new();
     let mut technology: Option<String> = None;
     let mut go_module: Option<String> = None;
+    let mut clj_paths: Vec<String> = Vec::new();
     // A real unit unless the only thing we saw is a Cargo workspace root.
     let mut is_unit = false;
 
@@ -297,6 +310,23 @@ fn scan_dir(project: &Path, dir: &str, signals: &[Signal]) -> DirScan {
                         .map(|s| s.to_string())
                 });
             }
+            // Clojure build descriptors declare their source roots, which is
+            // the only way `app.db` maps to a file path.
+            "deps.edn" | "bb.edn" => {
+                is_unit = true;
+                clj_paths.extend(lang::edn_string_vec(&text, ":paths"));
+            }
+            "shadow-cljs.edn" => {
+                is_unit = true;
+                clj_paths.extend(lang::edn_string_vec(&text, ":source-paths"));
+            }
+            "project.clj" => {
+                is_unit = true;
+                if let Some((project, paths)) = lang::project_clj_header(&text) {
+                    name = name.or(Some(project));
+                    clj_paths.extend(paths);
+                }
+            }
             _ => {
                 is_unit = true;
                 if sig.deploy && technology.is_none() && sig.filename.starts_with("Dockerfile") {
@@ -323,12 +353,15 @@ fn scan_dir(project: &Path, dir: &str, signals: &[Signal]) -> DirScan {
 
     dep_dirs.sort();
     dep_dirs.dedup();
+    clj_paths.sort();
+    clj_paths.dedup();
     scan.container = Some(Container {
         dir: dir.to_string(),
         name,
         technology,
         dep_dirs,
         go_module,
+        clj_paths,
     });
     scan
 }
@@ -756,7 +789,73 @@ serde = "1"
         assert_eq!(manifest_role("requirements-dev.txt"), Some(false));
         assert_eq!(manifest_role("pyproject.toml"), Some(false));
         assert_eq!(manifest_role("package.json"), Some(false));
+        assert_eq!(manifest_role("deps.edn"), Some(false));
+        assert_eq!(manifest_role("project.clj"), Some(false));
+        assert_eq!(manifest_role("shadow-cljs.edn"), Some(false));
+        assert_eq!(manifest_role("bb.edn"), Some(false));
         assert_eq!(manifest_role("README.md"), None);
+    }
+
+    /// A Clojure namespace maps to a file path under a DECLARED source root,
+    /// so `:paths` is what makes `app.db` resolvable at all.
+    #[test]
+    fn clojure_source_roots_read_from_declared_manifests() {
+        let deps = r#"{:paths ["src" "resources"]
+ :deps {org.clojure/clojure {:mvn/version "1.11.1"}}
+ :aliases {:test {:extra-paths ["test"]}}}
+"#;
+        assert_eq!(lang::edn_string_vec(deps, ":paths"), vec!["src", "resources"]);
+        // A key that isn't there, and a nested `:extra-paths` that is NOT the
+        // top-level `:paths`, both read as nothing.
+        assert!(lang::edn_string_vec(deps, ":source-paths").is_empty());
+        assert!(lang::edn_string_vec(deps, ":extra-paths").is_empty());
+
+        let shadow = r#"{:source-paths ["src/main" "src/test"]
+ :builds {:app {:target :browser}}}
+"#;
+        assert_eq!(
+            lang::edn_string_vec(shadow, ":source-paths"),
+            vec!["src/main", "src/test"]
+        );
+
+        // Leiningen: the group qualifier is dropped from the display name, as
+        // it is for every other ecosystem.
+        let lein = r#"(defproject acme/my-app "0.1.0-SNAPSHOT"
+  :description "A thing"
+  :dependencies [[org.clojure/clojure "1.11.1"]]
+  :source-paths ["src/clj"]
+  :test-paths ["test/clj"])
+"#;
+        assert_eq!(
+            lang::project_clj_header(lein),
+            Some((
+                "my-app".to_string(),
+                vec!["src/clj".to_string(), "test/clj".to_string()]
+            ))
+        );
+        assert_eq!(lang::project_clj_header("(ns not-a-project)"), None);
+    }
+
+    /// A `deps.edn` makes its directory a unit and hands the resolver its
+    /// source roots.
+    #[test]
+    fn clojure_container_discovered_with_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |rel: &str, text: &str| {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+            path
+        };
+        let files = vec![
+            write("svc/deps.edn", r#"{:paths ["src" "test"]}"#),
+            write("svc/src/app/core.clj", "(ns app.core)\n"),
+        ];
+        let containers = discover_containers_from_files(root, &files);
+        let svc = containers.iter().find(|c| c.dir == "svc").expect("svc unit");
+        assert_eq!(svc.name, "svc");
+        assert_eq!(svc.clj_paths, vec!["src", "test"]);
     }
 
     #[test]
