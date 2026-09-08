@@ -66,6 +66,7 @@ pub const SOURCE_EXTS: &[&str] = &[
     "cpp", "cc", "cxx", "hpp", "hh", "hxx", // C++
     "cs", // C#
     "php", // PHP
+    "clj", "cljs", "cljc", "cljr", // Clojure / ClojureScript / cross-platform / CLR
 ];
 
 /// Is this project-relative path product source code — a file whose change can
@@ -81,6 +82,12 @@ pub fn is_product_code(rel_path: &str) -> bool {
         return false;
     }
     if rel_path.ends_with(".d.ts") {
+        return false;
+    }
+    // Leiningen/boot build descriptors are Clojure by extension but are a
+    // unit's dependency manifest, not its architecture — a version bump there
+    // should not demand an architecture reconciliation.
+    if rel_path.ends_with("project.clj") || rel_path.ends_with("build.boot") {
         return false;
     }
     let mut segs = rel_path.split('/');
@@ -102,7 +109,9 @@ fn classify_file(name: &str, rel_path: &Path) -> Option<Category> {
         | "setup.cfg" | "pom.xml" | "build.gradle" | "build.gradle.kts" | "Gemfile"
         | "composer.json" | "mix.exs" | "pubspec.yaml" | "Package.swift"
         | "Makefile" | "CMakeLists.txt" | "deno.json" | "deno.jsonc"
-        | "bun.lock" | "flake.nix" => return Some(Category::Manifest),
+        | "bun.lock" | "flake.nix"
+        | "deps.edn" | "project.clj" | "shadow-cljs.edn" | "bb.edn"
+        | "build.boot" => return Some(Category::Manifest),
         _ => {}
     }
     if name.ends_with(".csproj") || name.ends_with(".fsproj") || name.ends_with(".sln") {

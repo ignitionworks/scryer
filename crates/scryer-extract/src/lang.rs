@@ -28,6 +28,7 @@ pub fn language_for_ext(ext: &str) -> Option<Language> {
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => tree_sitter_cpp::LANGUAGE,
         "cs" => tree_sitter_c_sharp::LANGUAGE,
         "php" => tree_sitter_php::LANGUAGE_PHP,
+        "clj" | "cljs" | "cljc" | "cljr" => tree_sitter_clojure::LANGUAGE,
         _ => return None,
     };
     Some(f.into())
@@ -48,7 +49,8 @@ const VUE_EXT: &str = "vue";
 
 /// Import-resolution coverage tier of a source extension: `full` when the
 /// link audit sees the language's real declared imports (Rust paths, TS/JS
-/// imports + tsconfig aliases, Python module paths, Go module paths),
+/// imports + tsconfig aliases, Python module paths, Go module paths, Clojure
+/// `ns` requires),
 /// `nameHeuristic` when it only has bare-identifier coincidence within a
 /// container — where a real cross-container link can audit as asserted-only.
 /// `None` for extensions with no grammar. Health reports this so the audit's
@@ -58,7 +60,7 @@ pub fn import_resolution_tier(ext: &str) -> Option<&'static str> {
         return None;
     }
     Some(match family_for_ext(ext) {
-        Family::Rust | Family::TsLike | Family::Python | Family::Go => "full",
+        Family::Rust | Family::TsLike | Family::Python | Family::Go | Family::Clojure => "full",
         Family::CLike | Family::Generic => "nameHeuristic",
     })
 }
@@ -70,6 +72,7 @@ enum Family {
     Python,
     Go,
     CLike,
+    Clojure,
     Generic,
 }
 
@@ -80,6 +83,7 @@ fn family_for_ext(ext: &str) -> Family {
         "py" | "pyi" => Family::Python,
         "go" => Family::Go,
         "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Family::CLike,
+        "clj" | "cljs" | "cljc" | "cljr" => Family::Clojure,
         _ => Family::Generic,
     }
 }
@@ -110,12 +114,15 @@ pub struct Ident {
 
 /// A multi-segment qualified path reference — a Rust `use` path or
 /// fully-qualified call/type site (`scryer_extract::anchors::write_baseline`),
-/// or a Go `pkg.Name` selector/type reference. The resolver maps the head
-/// segment to a container (Rust: the crate manifest map; Go: the file's
-/// import bindings) and the tail to a symbol, producing the cross-container
-/// edges that bare-name resolution cannot. TS/JS and Python emit
-/// [`ImportRef`] instead (their specs are module paths, not segment lists);
-/// the generic-fallback languages emit neither yet.
+/// a Go `pkg.Name` selector/type reference, or a Clojure `alias/sym` call
+/// site. The resolver maps the head segment to a container (Rust: the crate
+/// manifest map), a package directory (Go: the file's import bindings) or a
+/// namespace file (Clojure: the `ns` form's `:as` aliases), and the tail to a
+/// symbol, producing the cross-container edges that bare-name resolution
+/// cannot. TS/JS and Python emit [`ImportRef`] alone (their specs are module
+/// paths, not segment lists); Clojure emits both, since `ns` declares the
+/// namespace and usage sites spell the alias. The generic-fallback languages
+/// emit neither yet.
 #[derive(Debug, Clone)]
 pub struct PathRef {
     /// Path segments head-to-leaf, e.g. `["scryer_extract", "anchors", "write_baseline"]`.
@@ -143,6 +150,12 @@ pub struct ImportRef {
     pub names: Vec<ImportedSym>,
     /// 1-based line of the import statement or call site.
     pub line: u32,
+    /// The namespace QUALIFIER this import binds, for languages that bind one
+    /// alongside (or instead of) symbols — Clojure's `[app.db :as db]`. Usage
+    /// sites spell `db/query`, so the alias is joined against [`PathRef`]
+    /// heads rather than resolved here. `None` everywhere else: a TS namespace
+    /// import or a Go package qualifier is already carried in `names`.
+    pub alias: Option<String>,
 }
 
 /// One imported symbol: the name in the SOURCE module (what an edge targets)
@@ -207,11 +220,18 @@ pub fn parse_file_with(path: &Path, source: &str, parser: &mut Parser) -> Option
         Family::Python => collect_python(root, bytes, &mut defs),
         Family::Go => collect_go(root, bytes, &mut defs),
         Family::CLike => collect_c(root, bytes, &mut defs),
+        Family::Clojure => collect_clojure(root, bytes, &mut defs),
         Family::Generic => collect_generic(root, bytes, &mut defs),
     }
 
     let mut idents: Vec<Ident> = Vec::new();
-    collect_idents(root, bytes, &mut idents);
+    match family_for_ext(ext) {
+        // Clojure identifiers are `sym_lit`s, not `identifier`s, and a
+        // qualified one (`db/query`) contributes its bare leaf here and its
+        // alias head to `paths` below.
+        Family::Clojure => collect_clj_idents(root, bytes, &mut idents),
+        _ => collect_idents(root, bytes, &mut idents),
+    }
 
     // Qualified path references for cross-container resolution: Rust `use` /
     // scoped paths, Go `pkg.Name` selector and type references (resolved
@@ -224,6 +244,7 @@ pub fn parse_file_with(path: &Path, source: &str, parser: &mut Parser) -> Option
             collect_qualified_paths(root, bytes, &mut paths);
         }
         Family::Go => collect_go_paths(root, bytes, &mut paths),
+        Family::Clojure => collect_clj_paths(root, bytes, &mut paths),
         _ => {}
     }
 
@@ -232,11 +253,15 @@ pub fn parse_file_with(path: &Path, source: &str, parser: &mut Parser) -> Option
         Family::TsLike => collect_ts_imports(root, bytes, &mut imports),
         Family::Python => collect_py_imports(root, bytes, &mut imports),
         Family::Go => collect_go_imports(root, bytes, &mut imports),
+        Family::Clojure => collect_clj_imports(root, bytes, &mut imports),
         _ => {}
     }
 
     let mut test_blocks: Vec<Def> = Vec::new();
-    collect_string_named_calls(root, bytes, &mut test_blocks);
+    match family_for_ext(ext) {
+        Family::Clojure => collect_clj_string_named_forms(root, bytes, &mut test_blocks),
+        _ => collect_string_named_calls(root, bytes, &mut test_blocks),
+    }
 
     Some(FileParse {
         defs,
@@ -705,6 +730,7 @@ fn collect_go_imports(node: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                 names: binding.map(|b| vec![ImportedSym::same(&b)]).unwrap_or_default(),
                 spec,
                 line: n.start_position().row as u32 + 1,
+                alias: None,
             });
             continue;
         }
@@ -874,6 +900,627 @@ fn collect_generic(node: Node, bytes: &[u8], defs: &mut Vec<Def>) {
 
 // --- identifier occurrences (reference graph input) ---
 
+// --- Clojure ---
+//
+// tree-sitter-clojure is primitives-only BY DESIGN: `defn` lives in
+// `clojure.core` as a macro, not in the language's syntax, so the grammar
+// exposes `list_lit` / `vec_lit` / `sym_lit` and stops there. There is no
+// `function_definition` node and no `name` field to read, which is why both
+// `collect_generic` (matches node kinds containing "function"/"class") and
+// `collect_idents` (matches kind `identifier`) find exactly nothing here.
+//
+// Definitions are therefore recognized STRUCTURALLY: a list whose head symbol
+// is a `def…` form, taking the following symbol as the name. That shape is not
+// a workaround — it is the only rule that can work, and it earns something a
+// fixed node-kind list could never have: user-defined defining macros
+// (`defroutes`, `defstate`, `defcomponent`, `defsc`) resolve for free.
+
+/// Head symbols that read as `def…` but define nothing.
+const CLJ_NON_DEF_HEADS: &[&str] = &["default"];
+
+/// `ns` reference forms whose bodies name other Clojure namespaces. `:use` is
+/// the pre-1.4 spelling and still appears; `:require-macros` is ClojureScript.
+const CLJ_REQUIRE_KEYS: &[&str] = &[":require", ":require-macros", ":use"];
+
+/// Head symbols of top-level namespace-loading calls, outside any `ns` form.
+const CLJ_REQUIRE_HEADS: &[&str] = &["require", "use", "require-macros"];
+
+/// The bare name of a `sym_lit`: its `sym_name` child, with any namespace
+/// qualifier dropped (`query` for `db/query`, `def` for `s/def`). The
+/// qualifier is recovered separately by [`collect_clj_paths`].
+fn clj_sym_name(node: Node, bytes: &[u8]) -> Option<String> {
+    clj_child_text(node, "sym_name", bytes)
+}
+
+/// The namespace qualifier of a `sym_lit` — `db` in `db/query`, `None` for a
+/// bare symbol.
+fn clj_sym_ns(node: Node, bytes: &[u8]) -> Option<String> {
+    clj_child_text(node, "sym_ns", bytes)
+}
+
+fn clj_child_text(node: Node, kind: &str, bytes: &[u8]) -> Option<String> {
+    named_children(node)
+        .into_iter()
+        .find(|c| c.kind() == kind)?
+        .utf8_text(bytes)
+        .ok()
+        .map(|s| s.to_string())
+}
+
+/// A form's meaningful children. Metadata and comments attach to the form
+/// rather than acting as arguments of it, so `(defn ^:private f [x])` still
+/// reads as head / name / params once they're dropped.
+fn clj_payload<'a>(node: Node<'a>) -> Vec<Node<'a>> {
+    named_children(node)
+        .into_iter()
+        .filter(|c| !matches!(c.kind(), "comment" | "meta_lit" | "old_meta_lit"))
+        .collect()
+}
+
+/// The head of a form when it is a plain symbol, namespace qualifier dropped.
+fn clj_head(node: Node, bytes: &[u8]) -> Option<String> {
+    let head = *clj_payload(node).first()?;
+    if head.kind() != "sym_lit" {
+        return None;
+    }
+    clj_sym_name(head, bytes)
+}
+
+/// The head of a form when it is a keyword — `:require` in `(:require …)`.
+fn clj_head_kwd(node: Node, bytes: &[u8]) -> Option<String> {
+    let head = *clj_payload(node).first()?;
+    if head.kind() != "kwd_lit" {
+        return None;
+    }
+    head.utf8_text(bytes).ok().map(|s| s.to_string())
+}
+
+/// Subtrees holding DATA rather than evaluated code: quoted forms and
+/// reader-discarded forms. A `defn` inside one defines nothing — this is
+/// precisely the `defn`-as-macro-argument ambiguity that keeps higher-level
+/// constructs out of the grammar, and skipping these subtrees is how we avoid
+/// inheriting it.
+fn clj_is_unevaluated(kind: &str) -> bool {
+    matches!(
+        kind,
+        "quoting_lit" | "syn_quoting_lit" | "var_quoting_lit" | "dis_expr"
+    )
+}
+
+/// A plausible Clojure name. The grammar has already established that the
+/// token IS a symbol or keyword, so this only rejects degenerate cases — the
+/// `is_identifier` gate the other families use would discard most real
+/// Clojure names (`fetch-user`, `put!`, `empty?`, `*warn-on-reflection*`).
+fn is_clj_name(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with(|c: char| c.is_ascii_digit())
+        && !s.contains(|c: char| c.is_whitespace())
+}
+
+/// Is this head symbol a defining form?
+///
+/// `declare` is deliberately excluded: a forward declaration has no body, so
+/// minting it would put a same-named peer at a span that holds no definition —
+/// inflating `peers` and muddying the anchor checker's "my def was deleted
+/// while a sibling survived" test.
+fn clj_is_def_head(head: &str) -> bool {
+    head.starts_with("def") && !CLJ_NON_DEF_HEADS.contains(&head)
+}
+
+/// The text of a `str_lit`, surrounding quotes trimmed.
+fn clj_str_text(node: Node, bytes: &[u8]) -> Option<String> {
+    let raw = node.utf8_text(bytes).ok()?;
+    let inner = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"'))?;
+    (!inner.is_empty()).then(|| inner.to_string())
+}
+
+fn collect_clojure(root: Node, bytes: &[u8], defs: &mut Vec<Def>) {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if clj_is_unevaluated(n.kind()) {
+            continue;
+        }
+        if n.kind() == "list_lit" {
+            if let Some(head) = clj_head(n, bytes) {
+                // `(comment …)` is Clojure's rich-comment idiom: a scratch
+                // buffer that happens to be readable code. Its defs are not
+                // definitions, and minting them would anchor claims to
+                // throwaway experiments.
+                if head == "comment" {
+                    continue;
+                }
+                if clj_is_def_head(&head) {
+                    push_clj_def(n, bytes, &head, defs);
+                    continue; // a def's body holds no further definitions
+                }
+            }
+        }
+        for child in named_children(n) {
+            stack.push(child);
+        }
+    }
+    // The walk is a stack, so emit in document order for a stable extraction.
+    defs.sort_by(|a, b| (a.start_line, &a.name).cmp(&(b.start_line, &b.name)));
+}
+
+fn push_clj_def(list: Node, bytes: &[u8], head: &str, defs: &mut Vec<Def>) {
+    let kids = clj_payload(list);
+    let Some(&name_node) = kids.get(1) else {
+        return;
+    };
+    let name = match name_node.kind() {
+        "sym_lit" => clj_sym_name(name_node, bytes),
+        // `(s/def ::email string?)` — a spec is named by a keyword, and that
+        // keyword is what a sourceMap anchor would spell for it.
+        "kwd_lit" => name_node.utf8_text(bytes).ok().map(|s| s.to_string()),
+        _ => None,
+    };
+    let Some(name) = name.filter(|n| is_clj_name(n)) else {
+        return;
+    };
+
+    // Data shapes: a record/type declares positional fields in a vector, a
+    // protocol/interface declares method signatures as inner lists.
+    let is_data_shape = matches!(
+        head,
+        "defrecord" | "deftype" | "defstruct" | "defprotocol" | "definterface"
+    );
+    let mut fields: Vec<String> = Vec::new();
+    if is_data_shape {
+        for k in &kids[2..] {
+            match k.kind() {
+                "vec_lit" => {
+                    fields.extend(
+                        clj_payload(*k)
+                            .into_iter()
+                            .filter(|f| f.kind() == "sym_lit")
+                            .filter_map(|f| clj_sym_name(f, bytes)),
+                    );
+                    // The FIRST vector is the field list; later ones are the
+                    // parameter vectors of inline protocol implementations.
+                    break;
+                }
+                "list_lit" => {
+                    if let Some(method) = clj_head(*k, bytes) {
+                        fields.push(method);
+                    }
+                }
+                _ => {} // docstring, options map
+            }
+        }
+    }
+    let (start_line, end_line) = line_span(list);
+    defs.push(Def {
+        name,
+        start_line,
+        end_line,
+        fields,
+        is_data_shape,
+    });
+}
+
+/// Every UNQUALIFIED symbol occurrence — the input to the bare-name scopes,
+/// which is where a same-namespace reference resolves.
+///
+/// A qualified symbol (`db/query`, `lib/query`) is deliberately excluded: it
+/// is exact evidence and [`collect_clj_paths`] resolves it through the `ns`
+/// form's alias bindings. Contributing its leaf here as well would let
+/// `lib/query` — a call into an external library — resolve by bare-name
+/// coincidence to a same-named local def, minting an edge that does not exist.
+fn collect_clj_idents(root: Node, bytes: &[u8], out: &mut Vec<Ident>) {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if clj_is_unevaluated(n.kind()) {
+            continue;
+        }
+        if n.kind() == "sym_lit" && clj_sym_ns(n, bytes).is_none() {
+            if let Some(name) = clj_sym_name(n, bytes).filter(|s| is_clj_name(s)) {
+                out.push(Ident {
+                    name,
+                    line: n.start_position().row as u32 + 1,
+                });
+            }
+        }
+        for child in named_children(n) {
+            stack.push(child);
+        }
+    }
+}
+
+/// Namespace-qualified references (`db/query`, `str/join`) — the Clojure
+/// counterpart of a Go `pkg.Name` selector. The head segment is an alias the
+/// file's own `ns` form bound, so the resolver can follow it to one namespace
+/// file and resolve the leaf there.
+fn collect_clj_paths(root: Node, bytes: &[u8], out: &mut Vec<PathRef>) {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if clj_is_unevaluated(n.kind()) {
+            continue;
+        }
+        if n.kind() == "sym_lit" {
+            if let (Some(ns), Some(name)) = (clj_sym_ns(n, bytes), clj_sym_name(n, bytes)) {
+                if is_clj_name(&ns) && is_clj_name(&name) {
+                    out.push(PathRef {
+                        segments: vec![ns, name],
+                        line: n.start_position().row as u32 + 1,
+                    });
+                }
+            }
+        }
+        for child in named_children(n) {
+            stack.push(child);
+        }
+    }
+}
+
+/// The `ns` form's namespace references, plus top-level `(require …)`.
+///
+/// `(ns app.core (:require [app.db :as db] [clojure.string :refer [join]]))`
+/// yields one [`ImportRef`] per required namespace: `spec` is the namespace (a
+/// dotted path the resolver maps to a file), `names` the `:refer`red symbols
+/// (which bind bare locals), `alias` the `:as` qualifier (used as `db/query`,
+/// joined against [`PathRef`] heads).
+///
+/// `(:import (java.time Instant))` is emitted too. Those specs are Java
+/// packages that resolve to no repo file, but emitting them still BINDS
+/// `Instant` to something external — which is what stops it misresolving to a
+/// same-named local def.
+fn collect_clj_imports(root: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        // Unlike the other Clojure collectors this one must descend THROUGH
+        // quotes: `(require '[app.db :as db])` quotes its spec, and that quote
+        // is calling convention, not data.
+        if n.kind() == "dis_expr" {
+            continue;
+        }
+        if n.kind() == "list_lit" {
+            let line = n.start_position().row as u32 + 1;
+            match clj_head(n, bytes).as_deref() {
+                Some("ns") => {
+                    // payload: `ns`, the namespace name, then reference forms
+                    // (a docstring or attribute map may sit between).
+                    for form in clj_payload(n).into_iter().skip(2) {
+                        if form.kind() != "list_lit" {
+                            continue;
+                        }
+                        let Some(key) = clj_head_kwd(form, bytes) else {
+                            continue;
+                        };
+                        let specs = clj_payload(form).into_iter().skip(1);
+                        if CLJ_REQUIRE_KEYS.contains(&key.as_str()) {
+                            for spec in specs {
+                                push_clj_ns_spec(spec, bytes, "", line, out);
+                            }
+                        } else if key == ":import" {
+                            for spec in specs {
+                                push_clj_class_spec(spec, bytes, line, out);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Some(head) if CLJ_REQUIRE_HEADS.contains(&head) => {
+                    for arg in clj_payload(n).into_iter().skip(1) {
+                        let inner = if arg.kind() == "quoting_lit" {
+                            clj_payload(arg).into_iter().next().unwrap_or(arg)
+                        } else {
+                            arg
+                        };
+                        push_clj_ns_spec(inner, bytes, "", line, out);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        for child in named_children(n) {
+            stack.push(child);
+        }
+    }
+}
+
+/// One `:require` spec: a bare `app.db`, a `[app.db :as db :refer [q]]`
+/// vector, or a prefix list `[app [db :as db] [http :as http]]` (legal, and
+/// still seen in older code). `prefix` is the accumulated namespace head when
+/// recursing into a prefix list.
+fn push_clj_ns_spec(node: Node, bytes: &[u8], prefix: &str, line: u32, out: &mut Vec<ImportRef>) {
+    let qualify = |ns: &str| {
+        if prefix.is_empty() {
+            ns.to_string()
+        } else {
+            format!("{prefix}.{ns}")
+        }
+    };
+    if node.kind() == "sym_lit" {
+        if let Some(ns) = clj_sym_name(node, bytes).filter(|s| is_clj_name(s)) {
+            out.push(ImportRef {
+                spec: qualify(&ns),
+                names: Vec::new(),
+                line,
+                alias: None,
+            });
+        }
+        return;
+    }
+    // `:use` occasionally spells its specs as lists rather than vectors.
+    if !matches!(node.kind(), "vec_lit" | "list_lit") {
+        return;
+    }
+    let kids = clj_payload(node);
+    let Some(&base) = kids.first().filter(|k| k.kind() == "sym_lit") else {
+        return;
+    };
+    let Some(ns) = clj_sym_name(base, bytes).filter(|s| is_clj_name(s)) else {
+        return;
+    };
+    // Prefix list: the head names a package and every sibling is its own spec.
+    if kids.get(1).is_some_and(|k| matches!(k.kind(), "vec_lit" | "list_lit")) {
+        let nested = qualify(&ns);
+        for spec in &kids[1..] {
+            push_clj_ns_spec(*spec, bytes, &nested, line, out);
+        }
+        return;
+    }
+
+    let mut alias = None;
+    let mut names: Vec<ImportedSym> = Vec::new();
+    let mut opts = kids[1..].iter();
+    while let Some(key) = opts.next() {
+        let Some(key) = clj_kwd_text(*key, bytes) else {
+            continue;
+        };
+        let Some(&value) = opts.next() else {
+            break;
+        };
+        match key.as_str() {
+            // `:as-alias` binds a qualifier without loading — same binding
+            // shape, so the same edge evidence.
+            ":as" | ":as-alias" => {
+                alias = clj_sym_name(value, bytes).filter(|s| is_clj_name(s));
+            }
+            // `:only` is `:use`'s spelling of `:refer`. `:refer :all` names no
+            // individual symbol, so it stays whole-module evidence.
+            ":refer" | ":only" => {
+                if value.kind() == "vec_lit" {
+                    names.extend(
+                        clj_payload(value)
+                            .into_iter()
+                            .filter(|v| v.kind() == "sym_lit")
+                            .filter_map(|v| clj_sym_name(v, bytes))
+                            .filter(|s| is_clj_name(s))
+                            .map(|s| ImportedSym::same(&s)),
+                    );
+                }
+            }
+            // `:rename {orig new}` — `new` is the local binding, `orig` the
+            // name in the source namespace, exactly ImportedSym's split.
+            ":rename" => {
+                if value.kind() == "map_lit" {
+                    let pairs = clj_payload(value);
+                    for pair in pairs.chunks(2) {
+                        if let [from, to] = pair {
+                            if let (Some(name), Some(local)) =
+                                (clj_sym_name(*from, bytes), clj_sym_name(*to, bytes))
+                            {
+                                names.push(ImportedSym { name, local });
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out.push(ImportRef {
+        spec: qualify(&ns),
+        names,
+        line,
+        alias,
+    });
+}
+
+/// One `:import` spec: `java.util.UUID` (fully-qualified class) or
+/// `(java.time Instant Duration)` (package + classes). Split so the package is
+/// the `spec` and the class names are the bindings.
+fn push_clj_class_spec(node: Node, bytes: &[u8], line: u32, out: &mut Vec<ImportRef>) {
+    if node.kind() == "sym_lit" {
+        let Some(fqcn) = clj_sym_name(node, bytes).filter(|s| is_clj_name(s)) else {
+            return;
+        };
+        let Some((pkg, class)) = fqcn.rsplit_once('.') else {
+            return;
+        };
+        out.push(ImportRef {
+            spec: pkg.to_string(),
+            names: vec![ImportedSym::same(class)],
+            line,
+            alias: None,
+        });
+        return;
+    }
+    if !matches!(node.kind(), "vec_lit" | "list_lit") {
+        return;
+    }
+    let kids = clj_payload(node);
+    let Some(&pkg_node) = kids.first().filter(|k| k.kind() == "sym_lit") else {
+        return;
+    };
+    let Some(pkg) = clj_sym_name(pkg_node, bytes) else {
+        return;
+    };
+    let names: Vec<ImportedSym> = kids[1..]
+        .iter()
+        .filter(|k| k.kind() == "sym_lit")
+        .filter_map(|k| clj_sym_name(*k, bytes))
+        .filter(|s| is_clj_name(s))
+        .map(|s| ImportedSym::same(&s))
+        .collect();
+    if names.is_empty() {
+        return;
+    }
+    out.push(ImportRef {
+        spec: pkg,
+        names,
+        line,
+        alias: None,
+    });
+}
+
+/// The text of a `kwd_lit`, colons included (`:as`, `::email`).
+fn clj_kwd_text(node: Node, bytes: &[u8]) -> Option<String> {
+    (node.kind() == "kwd_lit")
+        .then(|| node.utf8_text(bytes).ok())
+        .flatten()
+        .map(|s| s.to_string())
+}
+
+/// String-named Clojure forms — `(testing "adds a user" …)`, `(facts "…" …)`:
+/// any list whose head is a symbol and whose first argument is a literal
+/// string, spanning the whole form. The Clojure counterpart of
+/// [`collect_string_named_calls`], and just as broad: over-collection is
+/// harmless because `test_blocks` is consulted only when a recorded symbol
+/// matches no `defs` entry, and never feeds link resolution.
+fn collect_clj_string_named_forms(root: Node, bytes: &[u8], out: &mut Vec<Def>) {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if clj_is_unevaluated(n.kind()) {
+            continue;
+        }
+        if n.kind() == "list_lit" {
+            let kids = clj_payload(n);
+            if let (Some(&head), Some(&arg)) = (kids.first(), kids.get(1)) {
+                if head.kind() == "sym_lit" && arg.kind() == "str_lit" {
+                    if let Some(name) = clj_str_text(arg, bytes) {
+                        let (start_line, end_line) = line_span(n);
+                        out.push(Def {
+                            name,
+                            start_line,
+                            end_line,
+                            fields: Vec::new(),
+                            is_data_shape: false,
+                        });
+                    }
+                }
+            }
+        }
+        for child in named_children(n) {
+            stack.push(child);
+        }
+    }
+}
+
+// --- Clojure/EDN build descriptors ---
+//
+// A Clojure namespace maps to a FILE PATH under a declared source root, so
+// resolving `app.db` needs `deps.edn`'s `:paths` (or the equivalent). EDN is
+// Clojure data, so the grammar already bundled above reads it — no second
+// parser, no regex over braces.
+
+/// Parse Clojure/EDN source, for callers that walk the tree themselves.
+fn parse_clj(source: &str) -> Option<tree_sitter::Tree> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_clojure::LANGUAGE.into()).ok()?;
+    parser.parse(source, None)
+}
+
+/// The value of a top-level EDN map key, read as a vector of strings:
+/// `deps.edn`'s `{:paths ["src" "resources"]}` -> `["src", "resources"]`.
+/// Empty when the key is absent or its value isn't a vector of literals.
+pub fn edn_string_vec(source: &str, key: &str) -> Vec<String> {
+    let Some(tree) = parse_clj(source) else {
+        return Vec::new();
+    };
+    let bytes = source.as_bytes();
+    let Some(map) = clj_payload(tree.root_node())
+        .into_iter()
+        .find(|n| n.kind() == "map_lit")
+    else {
+        return Vec::new();
+    };
+    let entries = clj_payload(map);
+    for pair in entries.chunks(2) {
+        if let [k, v] = pair {
+            if clj_kwd_text(*k, bytes).as_deref() == Some(key) {
+                return clj_string_vec(*v, bytes);
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// The string literals of a `vec_lit`, in order.
+fn clj_string_vec(node: Node, bytes: &[u8]) -> Vec<String> {
+    if node.kind() != "vec_lit" {
+        return Vec::new();
+    }
+    clj_payload(node)
+        .into_iter()
+        .filter(|n| n.kind() == "str_lit")
+        .filter_map(|n| clj_str_text(n, bytes))
+        .collect()
+}
+
+/// A Leiningen `project.clj` header: the declared project name and its
+/// `:source-paths`. `(defproject my-group/my-app "0.1.0" :source-paths [..])`
+/// -> `("my-app", ["src", ..])`. The name drops any group qualifier, matching
+/// how the other ecosystems' display names read.
+pub fn project_clj_header(source: &str) -> Option<(String, Vec<String>)> {
+    let tree = parse_clj(source)?;
+    let bytes = source.as_bytes();
+    let form = clj_payload(tree.root_node())
+        .into_iter()
+        .find(|n| n.kind() == "list_lit" && clj_head(*n, bytes).as_deref() == Some("defproject"))?;
+    let kids = clj_payload(form);
+    let name = clj_sym_name(*kids.get(1)?, bytes).filter(|s| is_clj_name(s))?;
+
+    // Options begin after the name and version; read every :source-paths-ish
+    // key rather than assuming a fixed position.
+    let mut paths = Vec::new();
+    let mut opts = kids[2..].iter();
+    while let Some(k) = opts.next() {
+        let Some(k) = clj_kwd_text(*k, bytes) else {
+            continue; // the version string, or a positional we don't read
+        };
+        let Some(&v) = opts.next() else { break };
+        if k == ":source-paths" || k == ":test-paths" {
+            paths.extend(clj_string_vec(v, bytes));
+        }
+    }
+    Some((name, paths))
+}
+
+/// Conventional Clojure source roots, used when a unit declares none (or has
+/// no build descriptor at all). Deliberately a fallback, not a default: a
+/// declared `:paths` always wins.
+pub const CLJ_FALLBACK_ROOTS: &[&str] = &[
+    "src",
+    "test",
+    "src/main/clojure",
+    "src/test/clojure",
+    "src/main/cljs",
+];
+
+/// Candidate file paths for a Clojure namespace under one source root, most
+/// preferred first. Namespace segments are dot-separated and `-` in a segment
+/// is `_` on disk (the loader's munging), so `app.some-ns` lives at
+/// `<root>/app/some_ns.clj`. `prefer` is the importing file's extension, so a
+/// `.cljs` file resolves a `.cljs` sibling ahead of a `.clj` one.
+pub fn clj_ns_candidates(root: &str, ns: &str, prefer: &str) -> Vec<String> {
+    let path = ns.replace('.', "/").replace('-', "_");
+    let base = if root.is_empty() {
+        path
+    } else {
+        format!("{root}/{path}")
+    };
+    let exts: &[&str] = match prefer {
+        "cljs" => &["cljs", "cljc", "clj"],
+        "cljr" => &["cljr", "cljc", "clj"],
+        _ => &["clj", "cljc", "cljs"],
+    };
+    exts.iter().map(|e| format!("{base}.{e}")).collect()
+}
+
 fn collect_idents(root: Node, bytes: &[u8], out: &mut Vec<Ident>) {
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -1030,6 +1677,7 @@ fn collect_py_imports(root: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                             spec: spec.to_string(),
                             names: Vec::new(),
                             line,
+                            alias: None,
                         });
                     }
                 }
@@ -1075,6 +1723,7 @@ fn collect_py_imports(root: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                     spec: spec.to_string(),
                     names,
                     line: n.start_position().row as u32 + 1,
+                    alias: None,
                 });
                 continue;
             }
@@ -1108,6 +1757,7 @@ fn collect_ts_imports(root: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                         spec,
                         names,
                         line: n.start_position().row as u32 + 1,
+                        alias: None,
                     });
                 }
                 continue; // nothing else importable inside
@@ -1135,6 +1785,7 @@ fn collect_ts_imports(root: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                         spec,
                         names,
                         line: n.start_position().row as u32 + 1,
+                        alias: None,
                     });
                     continue;
                 }
@@ -1150,6 +1801,7 @@ fn collect_ts_imports(root: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                             spec,
                             names: ts_binding_names(n, bytes),
                             line: n.start_position().row as u32 + 1,
+                            alias: None,
                         });
                     }
                 }
@@ -1851,12 +2503,238 @@ async function f(p: string) { return import(p); }
     /// read `nameHeuristic`; no grammar, no tier.
     #[test]
     fn resolution_tier_classifies_full_and_name_heuristic() {
-        for ext in ["rs", "ts", "tsx", "py", "go"] {
+        for ext in ["rs", "ts", "tsx", "py", "go", "clj", "cljs", "cljc"] {
             assert_eq!(import_resolution_tier(ext), Some("full"), "{ext}");
         }
         for ext in ["c", "cpp", "h"] {
             assert_eq!(import_resolution_tier(ext), Some("nameHeuristic"), "{ext}");
         }
         assert_eq!(import_resolution_tier("xyz"), None);
+    }
+
+    // --- Clojure ---
+
+    /// The nasty cases all at once: `def…` forms of every arity, metadata
+    /// before the name, a user-defined defining macro, a spec keyword name,
+    /// and the three ways Clojure holds code that is NOT a definition.
+    const CLJ_SRC: &str = r#"(ns app.core
+  "Docstring."
+  (:require [app.db :as db]
+            [clojure.string :as str :refer [join trim]]
+            [app.util :refer :all]
+            app.plain
+            [app [http :as http] [mail :as mail]]
+            [app.legacy :as leg :rename {old-name new-name}])
+  (:import (java.time Instant Duration)
+           java.util.UUID))
+
+(def ^:private max-retries 3)
+
+(defn fetch-user
+  "Look up a user."
+  [id]
+  (db/query {:id id}))
+
+(defn- helper [x] (inc x))
+
+(defrecord User [id email created-at]
+  Store
+  (put! [this k v] nil))
+
+(defprotocol Store
+  "A place to put things."
+  (put! [this k v])
+  (get! [this k]))
+
+(defmulti render :kind)
+(defmethod render :html [x] (str/join x))
+(defmethod render :text [x] (str x))
+
+(defonce cache (atom {}))
+
+(s/def ::email string?)
+
+(defroutes app-routes
+  (GET "/" [] "hi"))
+
+(comment
+  (defn scratch [] 1))
+
+'(defn quoted [] 1)
+
+#_(defn discarded [] 1)
+
+(deftest fetch-user-test
+  (testing "returns a user"
+    (is (= 1 1))))
+"#;
+
+    fn clj_parse() -> FileParse {
+        parse_file(Path::new("app/core.clj"), CLJ_SRC).expect("clojure parses")
+    }
+
+    #[test]
+    fn clojure_def_forms_collected() {
+        let p = clj_parse();
+        let names: Vec<&str> = p.defs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "max-retries",     // def, with ^:private metadata before the name
+                "fetch-user",      // defn with a docstring
+                "helper",          // defn-
+                "User",            // defrecord
+                "Store",           // defprotocol
+                "render",          // defmulti
+                "render",          // defmethod :html
+                "render",          // defmethod :text
+                "cache",           // defonce
+                "::email",         // s/def, named by a keyword
+                "app-routes",      // defroutes: a user-defined defining macro
+                "fetch-user-test", // deftest
+            ]
+        );
+    }
+
+    /// `(comment …)`, `'quoted` and `#_discarded` forms hold readable code
+    /// that defines nothing — the ambiguity that keeps `defn` out of the
+    /// grammar in the first place.
+    #[test]
+    fn clojure_unevaluated_forms_define_nothing() {
+        let p = clj_parse();
+        for ghost in ["scratch", "quoted", "discarded"] {
+            assert!(
+                !p.defs.iter().any(|d| d.name == ghost),
+                "{ghost} is not a definition"
+            );
+        }
+    }
+
+    /// A forward declaration has no body: minting it would add a same-named
+    /// peer at a span holding no definition.
+    #[test]
+    fn clojure_declare_is_not_a_def() {
+        let src = "(declare later-fn)\n\n(defn later-fn [] 1)\n";
+        let p = parse_file(Path::new("a.clj"), src).unwrap();
+        assert_eq!(p.defs.len(), 1);
+        assert_eq!((p.defs[0].start_line, p.defs[0].end_line), (3, 3));
+    }
+
+    #[test]
+    fn clojure_def_spans_whole_form() {
+        let p = clj_parse();
+        let f = p.defs.iter().find(|d| d.name == "fetch-user").unwrap();
+        assert_eq!((f.start_line, f.end_line), (14, 17));
+    }
+
+    #[test]
+    fn clojure_data_shapes_carry_fields() {
+        let p = clj_parse();
+        let rec = p.defs.iter().find(|d| d.name == "User").unwrap();
+        assert!(rec.is_data_shape);
+        // Only the field vector — not the params of the inline `put!` impl.
+        assert_eq!(rec.fields, vec!["id", "email", "created-at"]);
+
+        // A protocol is an interface: its methods are its declared members.
+        let proto = p.defs.iter().find(|d| d.name == "Store").unwrap();
+        assert!(proto.is_data_shape);
+        assert_eq!(proto.fields, vec!["put!", "get!"]);
+
+        let f = p.defs.iter().find(|d| d.name == "fetch-user").unwrap();
+        assert!(!f.is_data_shape && f.fields.is_empty());
+    }
+
+    #[test]
+    fn clojure_ns_requires_become_imports() {
+        let p = clj_parse();
+        let by_spec = |spec: &str| p.imports.iter().find(|i| i.spec == spec).unwrap();
+
+        // `:as` binds a qualifier, not symbols.
+        let db = by_spec("app.db");
+        assert_eq!(db.alias.as_deref(), Some("db"));
+        assert!(db.names.is_empty());
+
+        // `:as` and `:refer` together.
+        let s = by_spec("clojure.string");
+        assert_eq!(s.alias.as_deref(), Some("str"));
+        assert_eq!(
+            s.names.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            vec!["join", "trim"]
+        );
+
+        // `:refer :all` names no symbol — whole-namespace evidence only.
+        let all = by_spec("app.util");
+        assert!(all.names.is_empty() && all.alias.is_none());
+
+        // A bare symbol spec.
+        assert!(by_spec("app.plain").names.is_empty());
+
+        // Prefix list: `[app [http :as http] …]` -> `app.http`, `app.mail`.
+        assert_eq!(by_spec("app.http").alias.as_deref(), Some("http"));
+        assert_eq!(by_spec("app.mail").alias.as_deref(), Some("mail"));
+
+        // `:rename` splits source name from local binding.
+        let leg = by_spec("app.legacy");
+        assert_eq!(
+            leg.names,
+            vec![ImportedSym {
+                name: "old-name".to_string(),
+                local: "new-name".to_string(),
+            }]
+        );
+    }
+
+    /// `:import` targets Java packages that resolve to no repo file, but
+    /// emitting them still binds `Instant`/`UUID` to something external so
+    /// they can't misresolve to a same-named local def.
+    #[test]
+    fn clojure_java_imports_split_package_from_class() {
+        let p = clj_parse();
+        let time = p.imports.iter().find(|i| i.spec == "java.time").unwrap();
+        assert_eq!(
+            time.names.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            vec!["Instant", "Duration"]
+        );
+        let util = p.imports.iter().find(|i| i.spec == "java.util").unwrap();
+        assert_eq!(util.names[0].name, "UUID");
+    }
+
+    #[test]
+    fn clojure_top_level_require_is_read() {
+        let src = "(require '[app.db :as db])\n(use 'app.legacy)\n";
+        let p = parse_file(Path::new("a.clj"), src).unwrap();
+        let db = p.imports.iter().find(|i| i.spec == "app.db").unwrap();
+        assert_eq!(db.alias.as_deref(), Some("db"));
+        assert!(p.imports.iter().any(|i| i.spec == "app.legacy"));
+    }
+
+    /// A qualified call site is exact evidence: the alias was bound by this
+    /// file's own `ns` form, so `db/query` is resolvable where bare `query`
+    /// would only be a coincidence.
+    #[test]
+    fn clojure_qualified_calls_become_paths() {
+        let p = clj_parse();
+        assert!(p
+            .paths
+            .iter()
+            .any(|r| r.segments == vec!["db".to_string(), "query".to_string()] && r.line == 17));
+        // The leaf of a QUALIFIED symbol is not also an ident: letting
+        // `db/query` feed the bare-name scopes would let an external
+        // `lib/query` misresolve to a same-named local def.
+        assert!(!p.idents.iter().any(|i| i.name == "query"));
+        // Unqualified symbols still are — that is how a same-namespace
+        // reference resolves.
+        assert!(p.idents.iter().any(|i| i.name == "atom"));
+    }
+
+    #[test]
+    fn clojure_testing_blocks_anchor_by_name() {
+        let p = clj_parse();
+        let t = p
+            .test_blocks
+            .iter()
+            .find(|d| d.name == "returns a user")
+            .expect("testing block");
+        assert_eq!(t.start_line, 49);
     }
 }
