@@ -3579,6 +3579,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
+ "tree-sitter-clojure",
  "tree-sitter-cpp",
  "tree-sitter-go",
  "tree-sitter-highlight",

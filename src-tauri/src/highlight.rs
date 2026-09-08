@@ -74,6 +74,55 @@ fn class_for(idx: usize) -> &'static str {
     }
 }
 
+/// Scryer's own Clojure form query, concatenated onto upstream's literal-only
+/// one (the same layering the TypeScript config does over JavaScript).
+///
+/// The grammar is primitives-only: `(defn f [] …)` is a list whose head is an
+/// ordinary symbol, so there is no keyword node for a query to capture and no
+/// `name` field to find the defined symbol by. Both are matched on symbol TEXT
+/// instead — which is also the only approach that can colour a reader-defined
+/// form like `defroutes`.
+///
+/// Pattern order is load-bearing. `defrecord` matches both the general `^def`
+/// rule and the type-defining one, so its name is captured twice — and
+/// tree-sitter-highlight resolves that to the LATER pattern. The type rule
+/// therefore comes last, or `User` would read as a function.
+const CLOJURE_FORMS_QUERY: &str = r#"
+;; Any other `def…` form — including user-defined defining macros
+;; (`defroutes`, `defstate`, `defsc`), which is the whole point of matching on
+;; text. The defined name is not anchored to sit immediately after the head, so
+;; that `(def ^:private conn …)` still colours `conn` through its metadata; the
+;; cost is that a bare `(def a b)` colours `b` too.
+(list_lit
+  .
+  (sym_lit (sym_name) @keyword)
+  (sym_lit (sym_name) @function)
+  (#match? @keyword "^def"))
+
+;; Type-defining forms name a type, not a function.
+(list_lit
+  .
+  (sym_lit (sym_name) @keyword)
+  (sym_lit (sym_name) @type)
+  (#any-of? @keyword
+    "defrecord" "deftype" "defprotocol" "definterface" "defstruct"))
+
+;; Special forms, and the core macros that read as syntax.
+(list_lit
+  .
+  (sym_lit (sym_name) @keyword)
+  (#any-of? @keyword
+    "if" "do" "let" "let*" "quote" "var" "fn" "fn*" "loop" "loop*" "recur"
+    "throw" "try" "catch" "finally" "new" "set!" "monitor-enter" "monitor-exit"
+    "ns" "in-ns" "require" "use" "import" "refer" "load" "comment"
+    "letfn" "if-let" "if-some" "if-not" "when" "when-let" "when-some"
+    "when-not" "when-first" "cond" "condp" "case" "for" "doseq" "dotimes"
+    "while" "doto" "binding" "with-open" "with-local-vars" "with-redefs"
+    "lazy-seq" "delay" "future" "locking" "assert"
+    "->" "->>" "some->" "some->>" "as->" "cond->" "cond->>"
+    "deftest" "testing" "is" "are"))
+"#;
+
 fn build(language: Language, name: &str, query: &str) -> Option<HighlightConfiguration> {
     let mut cfg = HighlightConfiguration::new(language, name, query, "", "").ok()?;
     cfg.configure(HL_NAMES);
@@ -123,6 +172,14 @@ fn config_for_ext(ext: &str) -> Option<HighlightConfiguration> {
             tree_sitter_c_sharp::HIGHLIGHTS_QUERY,
         ),
         "php" => build(tree_sitter_php::LANGUAGE_PHP.into(), "php", tree_sitter_php::HIGHLIGHTS_QUERY),
+        "clj" | "cljs" | "cljc" | "cljr" => {
+            let q = format!(
+                "{}\n{}",
+                tree_sitter_clojure::HIGHLIGHTS_QUERY,
+                CLOJURE_FORMS_QUERY
+            );
+            build(tree_sitter_clojure::LANGUAGE.into(), "clojure", &q)
+        }
         _ => None,
     }
 }
@@ -197,6 +254,61 @@ mod tests {
             lines.iter().flatten().map(|s| s.kind.as_str()).collect();
         assert!(kinds.contains("keyword"), "fn/let collapse to keyword: {kinds:?}");
         assert!(kinds.contains("string"), "the literal collapses to string: {kinds:?}");
+    }
+
+    /// Clojure has no keyword or definition NODE — `defn` is a plain symbol —
+    /// so the form query matches on symbol text. A malformed query would make
+    /// `build` return None silently and fall back to plain text, so this
+    /// asserts the classes actually land.
+    #[test]
+    fn clojure_forms_highlight_by_symbol_text() {
+        let src = "(ns app.core)\n\n(defn fetch-user\n  \"Doc.\"\n  [id]\n  (when (pos? id)\n    (inc id)))\n\n(defrecord User [id])\n\n(def ^:private conn nil)\n";
+        let lines = highlight_lines(Path::new("core.clj"), src).expect("clojure is bundled");
+
+        let originals: Vec<&str> = src.lines().collect();
+        for (line, original) in lines.iter().zip(&originals) {
+            let joined: String = line.iter().map(|s| s.text.as_str()).collect();
+            assert_eq!(&joined, original, "segments must concatenate back");
+        }
+
+        // Look up the class a given piece of text was given.
+        let kind_of = |needle: &str| -> Vec<&str> {
+            lines
+                .iter()
+                .flatten()
+                .filter(|s| s.text == needle)
+                .map(|s| s.kind.as_str())
+                .collect()
+        };
+        assert_eq!(kind_of("defn"), vec!["keyword"], "a defining form reads as syntax");
+        assert_eq!(kind_of("fetch-user"), vec!["function"], "the defined name");
+        assert_eq!(kind_of("ns"), vec!["keyword"]);
+        assert_eq!(kind_of("when"), vec!["keyword"], "a core macro reads as syntax");
+        assert_eq!(
+            kind_of("defrecord"),
+            vec!["keyword"],
+            "a type-defining form still reads as syntax"
+        );
+        assert_eq!(
+            kind_of("User"),
+            vec!["type"],
+            "defrecord names a type, so its pattern must precede the ^def rule"
+        );
+        assert_eq!(
+            kind_of("conn"),
+            vec!["function"],
+            "the name is found through its ^:private metadata"
+        );
+        assert_eq!(kind_of("\"Doc.\""), vec!["string"], "upstream's literal query still applies");
+        // An ordinary call is not syntax: it stays in a default-class run
+        // (segments coalesce, so `pos?` is not its own segment).
+        assert!(
+            lines
+                .iter()
+                .flatten()
+                .any(|s| s.kind.is_empty() && s.text.contains("pos?")),
+            "pos? is an ordinary call, left at the default colour"
+        );
     }
 
     /// An unsupported language yields None so the caller renders plain text.

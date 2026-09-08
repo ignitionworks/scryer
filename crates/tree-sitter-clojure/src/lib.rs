@@ -16,6 +16,13 @@ unsafe extern "C" {
 /// The tree-sitter [`LanguageFn`] for the Clojure grammar.
 pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_clojure) };
 
+/// Upstream's highlight query, verbatim. It covers literals, comments and
+/// quasiquotation only — with `defn` being a macro rather than syntax, there is
+/// no node for a query to call a keyword. Callers wanting form highlighting
+/// concatenate their own text-predicate query on top, the way the TypeScript
+/// config layers on the JavaScript one.
+pub const HIGHLIGHTS_QUERY: &str = include_str!("../grammar-src/queries/highlights.scm");
+
 #[cfg(test)]
 mod tests {
     #[test]
