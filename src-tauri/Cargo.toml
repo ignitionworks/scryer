@@ -48,6 +48,8 @@ tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-php = "0.24"
+# Vendored — see crates/tree-sitter-clojure/README.md.
+tree-sitter-clojure = { path = "../crates/tree-sitter-clojure" }
 
 
 [dev-dependencies]

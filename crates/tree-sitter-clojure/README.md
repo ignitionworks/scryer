@@ -37,7 +37,8 @@ its direct `tree-sitter` dependency.
 1. Fetch the upstream release: `cargo download tree-sitter-clojure` (or clone
    the repo and run `tree-sitter generate`).
 2. Copy `src/parser.c`, `src/tree_sitter/parser.h`, and `src/node-types.json`
-   into `grammar-src/src/`.
+   into `grammar-src/src/`, and `queries/highlights.scm` into
+   `grammar-src/queries/`.
 3. Update the commit hash above; run `cargo test -p tree-sitter-clojure`.
 
 `node-types.json` is not compiled — it is kept as the reference for the node
