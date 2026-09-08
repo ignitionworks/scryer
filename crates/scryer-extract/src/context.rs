@@ -501,6 +501,24 @@ fn build_edges(
             .push(file);
     }
 
+    // Clojure source roots per container dir: declared `:paths` first, then
+    // the conventional layout, then the container dir and the project root.
+    // A namespace resolves to a file path under one of these.
+    let mut clj_roots: HashMap<&str, Vec<String>> = HashMap::new();
+    for c in containers {
+        let join = |p: &str| match (c.dir.as_str(), p) {
+            ("", p) => p.to_string(),
+            (d, "") => d.to_string(),
+            (d, p) => format!("{d}/{p}"),
+        };
+        let mut roots: Vec<String> = c.clj_paths.iter().map(|p| join(p)).collect();
+        roots.extend(crate::lang::CLJ_FALLBACK_ROOTS.iter().map(|r| join(r)));
+        roots.push(c.dir.clone());
+        roots.push(String::new());
+        roots.dedup();
+        clj_roots.insert(c.dir.as_str(), roots);
+    }
+
     let mut sym_edges: HashSet<(String, String)> = HashSet::new();
     let mut file_edges: HashSet<(String, String)> = HashSet::new();
 
@@ -527,7 +545,12 @@ fn build_edges(
         // it to a same-name local def.
         let is_python = file.ends_with(".py") || file.ends_with(".pyi");
         let is_go = file.ends_with(".go");
+        let file_ext = file.rsplit('.').next().unwrap_or("");
+        let is_clojure = matches!(file_ext, "clj" | "cljs" | "cljc" | "cljr");
         let mut imported_locals: HashMap<&str, Option<&str>> = HashMap::new();
+        // Clojure only: `ns` alias -> the namespace's file, joined against the
+        // file's qualified references below.
+        let mut clj_alias_files: HashMap<&str, &str> = HashMap::new();
         // Go only: package qualifier -> package directory, joined against the
         // file's qualified references below.
         let mut go_pkg_dirs: HashMap<&str, String> = HashMap::new();
@@ -553,7 +576,23 @@ fn build_edges(
             // Python only: the module path as a directory base, kept even when
             // no module FILE resolved, for the submodule fallback below.
             let mut module_base: Option<String> = None;
-            if is_python {
+            if is_clojure {
+                target_file = clj_roots
+                    .get(container_dir.unwrap_or(""))
+                    .and_then(|roots| resolve_clj_ns(&imp.spec, roots, file_ext, &inventory));
+                // `:as` binds a QUALIFIER, not symbols: usage sites spell
+                // `db/query`, so the binding is joined against `paths` below
+                // rather than resolved to a def here. The local is consumed
+                // either way — it is lexically bound to another namespace, so
+                // letting it fall through to the bare-name scopes would
+                // misattribute it to a same-named local def.
+                if let Some(alias) = imp.alias.as_deref() {
+                    if let Some(t) = target_file {
+                        clj_alias_files.insert(alias, t);
+                    }
+                    imported_locals.insert(alias, None);
+                }
+            } else if is_python {
                 (target_file, module_base) = resolve_py_import(
                     file,
                     &imp.spec,
@@ -688,6 +727,42 @@ fn build_edges(
                     }
                 }
             }
+        }
+
+        // --- Clojure qualified references: `alias/sym` via the ns bindings ---
+        // The alias is exact lexical evidence — this file's own `ns` form bound
+        // it — and a Clojure namespace IS one file, so the leaf resolves among
+        // that file's defs, unique-or-skip. A `/` on anything else (a Java
+        // static, a shadowing local) simply fails the binding join.
+        if is_clojure {
+            for pref in &f.parse.paths {
+                let (Some(alias), Some(name)) = (pref.segments.first(), pref.segments.get(1))
+                else {
+                    continue;
+                };
+                let Some(&dst_file) = clj_alias_files.get(alias.as_str()) else {
+                    continue; // unaliased qualifier, or an unresolved namespace
+                };
+                let Some(cands) = file_names
+                    .get(dst_file)
+                    .and_then(|m| m.get(name.as_str()))
+                else {
+                    continue;
+                };
+                if cands.len() != 1 {
+                    continue; // ambiguous — skip, never guess
+                }
+                let dst_key = cands[0];
+                if dst_file != file {
+                    file_edges.insert((file.to_string(), dst_file.to_string()));
+                }
+                if let Some(src) = enclosing(file, pref.line) {
+                    if src != dst_key {
+                        sym_edges.insert((src.to_string(), dst_key.to_string()));
+                    }
+                }
+            }
+            continue; // the scopes below read Rust/Go semantics
         }
 
         // --- Go qualified references: `pkg.Name` via the import bindings ---
@@ -1002,6 +1077,27 @@ fn resolve_py_import<'a>(
         }
     }
     (None, None) // external package: consume locals, no edges
+}
+
+/// Map a Clojure namespace to the file that declares it: the first candidate
+/// path that exists, searching the container's source roots in priority order.
+/// A namespace is exactly one file, so there is nothing to disambiguate —
+/// unlike Python there is no package/`__init__` case, and unlike Go no
+/// directory-as-unit case. An unresolved spec is an external dependency.
+fn resolve_clj_ns<'a>(
+    spec: &str,
+    roots: &[String],
+    prefer_ext: &str,
+    inventory: &HashSet<&'a str>,
+) -> Option<&'a str> {
+    for root in roots {
+        for cand in crate::lang::clj_ns_candidates(root, spec, prefer_ext) {
+            if let Some(&hit) = inventory.get(cand.as_str()) {
+                return Some(hit);
+            }
+        }
+    }
+    None
 }
 
 /// Map a Go import path to a repo directory via the containers' declared
@@ -1467,6 +1563,7 @@ mod tests {
             technology: None,
             dep_dirs: Vec::new(),
             go_module: None,
+            clj_paths: Vec::new(),
         }
     }
 
@@ -1481,6 +1578,7 @@ mod tests {
                 })
                 .collect(),
             line,
+            alias: None,
         }
     }
 
@@ -1501,6 +1599,17 @@ mod tests {
                 paths: vec![],
                 imports,
             },
+        }
+    }
+
+    /// A real Clojure file, parsed for real — the point of these cases is the
+    /// grammar-to-edge chain, not a hand-built FileParse.
+    fn clj_file(rel_path: &str, source: &str) -> ParsedFile {
+        ParsedFile {
+            rel_path: rel_path.to_string(),
+            source: source.to_string(),
+            parse: crate::lang::parse_file(std::path::Path::new(rel_path), source)
+                .expect("clojure parses"),
         }
     }
 
@@ -2404,6 +2513,135 @@ fn add_one(x: u32) -> u32 {
             ctx.symbol_edges.is_empty(),
             "imported `fetch` must not resolve to the local store.py def"
         );
+    }
+
+
+    // --- Clojure ---
+
+    fn clj_container(dir: &str, name: &str, paths: &[&str]) -> Container {
+        Container {
+            clj_paths: paths.iter().map(|p| p.to_string()).collect(),
+            ..container(dir, name)
+        }
+    }
+
+    /// The dominant Clojure idiom: `:as` binds an alias and call sites spell
+    /// `alias/sym`. The alias is exact lexical evidence, so this yields a real
+    /// symbol edge where a bare name would only be a coincidence.
+    #[test]
+    fn clj_aliased_calls_resolve_across_namespaces() {
+        let files = vec![
+            clj_file(
+                "src/app/db.clj",
+                "(ns app.db)\n\n(defn query [q] q)\n\n(defn insert! [r] r)\n",
+            ),
+            clj_file(
+                "src/app/core.clj",
+                "(ns app.core\n  (:require [app.db :as db]))\n\n(defn fetch-user\n  [id]\n  (db/query {:id id}))\n",
+            ),
+        ];
+        let containers = vec![clj_container("", "app", &["src"])];
+        let ctx = build_context("proj", &containers, &files, &[]);
+
+        assert!(has_file_edge(&ctx, "src/app/core.clj", "src/app/db.clj"));
+        assert!(has_sym_edge(&ctx, "fetch-user", "query"));
+        // `insert!` is never referenced — no edge invented for it.
+        assert!(!has_sym_edge(&ctx, "fetch-user", "insert!"));
+    }
+
+    /// `-` in a namespace segment is `_` on disk. Without the munging the
+    /// namespace resolves to nothing and every edge is silently lost.
+    #[test]
+    fn clj_namespace_munging_resolves_to_the_file() {
+        let files = vec![
+            clj_file("src/app/user_store.clj", "(ns app.user-store)\n\n(defn save! [u] u)\n"),
+            clj_file(
+                "src/app/core.clj",
+                "(ns app.core\n  (:require [app.user-store :as store]))\n\n(defn run [u] (store/save! u))\n",
+            ),
+        ];
+        let containers = vec![clj_container("", "app", &["src"])];
+        let ctx = build_context("proj", &containers, &files, &[]);
+        assert!(has_file_edge(&ctx, "src/app/core.clj", "src/app/user_store.clj"));
+        assert!(has_sym_edge(&ctx, "run", "save!"));
+    }
+
+    /// `:refer`red names bind bare locals, so they resolve like any import.
+    #[test]
+    fn clj_referred_names_resolve() {
+        let files = vec![
+            clj_file("src/app/db.clj", "(ns app.db)\n\n(defn query [q] q)\n"),
+            clj_file(
+                "src/app/core.clj",
+                "(ns app.core\n  (:require [app.db :refer [query]]))\n\n(defn run [id] (query id))\n",
+            ),
+        ];
+        let containers = vec![clj_container("", "app", &["src"])];
+        let ctx = build_context("proj", &containers, &files, &[]);
+        assert!(has_file_edge(&ctx, "src/app/core.clj", "src/app/db.clj"));
+        assert!(has_sym_edge(&ctx, "run", "query"));
+    }
+
+    /// A declared `:paths` root beats the conventional layout, and a namespace
+    /// outside every root is an external dependency — no edge, no guess.
+    #[test]
+    fn clj_declared_source_root_is_honored() {
+        let files = vec![
+            clj_file("app/src/main/app/db.clj", "(ns app.db)\n\n(defn query [q] q)\n"),
+            clj_file(
+                "app/src/main/app/core.clj",
+                "(ns app.core\n  (:require [app.db :as db]\n            [ring.core :as ring]))\n\n(defn run [id] (db/query (ring/wrap id)))\n",
+            ),
+        ];
+        let containers = vec![clj_container("app", "app", &["src/main"])];
+        let ctx = build_context("proj", &containers, &files, &[]);
+        assert!(has_file_edge(
+            &ctx,
+            "app/src/main/app/core.clj",
+            "app/src/main/app/db.clj"
+        ));
+        assert!(has_sym_edge(&ctx, "run", "query"));
+        // `ring.core` is an external library: it resolves to no file, so the
+        // alias is consumed and nothing is minted.
+        assert!(!ctx
+            .file_edges
+            .iter()
+            .any(|e| e.dst.contains("ring")));
+    }
+
+    /// An unresolved alias must not fall back to bare-name coincidence: a
+    /// `lib/query` call is NOT this project's `query`.
+    #[test]
+    fn clj_external_alias_does_not_misresolve_to_a_local_def() {
+        let files = vec![
+            clj_file("src/app/db.clj", "(ns app.db)\n\n(defn query [q] q)\n"),
+            clj_file(
+                "src/app/core.clj",
+                "(ns app.core\n  (:require [external.lib :as lib]))\n\n(defn run [id] (lib/query id))\n",
+            ),
+        ];
+        let containers = vec![clj_container("", "app", &["src"])];
+        let ctx = build_context("proj", &containers, &files, &[]);
+        assert!(
+            !has_sym_edge(&ctx, "run", "query"),
+            "lib/query is external, not app.db/query"
+        );
+    }
+
+    /// A `(comment …)` block is a scratch buffer. Code in it must not create
+    /// architecture — neither a def nor an edge.
+    #[test]
+    fn clj_rich_comment_creates_no_edges() {
+        let files = vec![
+            clj_file("src/app/db.clj", "(ns app.db)\n\n(defn query [q] q)\n"),
+            clj_file(
+                "src/app/core.clj",
+                "(ns app.core\n  (:require [app.db :as db]))\n\n(defn run [id] id)\n\n(comment\n  (db/query 1))\n",
+            ),
+        ];
+        let containers = vec![clj_container("", "app", &["src"])];
+        let ctx = build_context("proj", &containers, &files, &[]);
+        assert!(!has_sym_edge(&ctx, "run", "query"));
     }
 
     fn go_container(dir: &str, name: &str, module: &str) -> Container {
