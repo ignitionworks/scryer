@@ -13260,6 +13260,11 @@
           "id": "resp-h36w17",
           "statement": "**When** a client names no project, **stream** nothing rather than everything",
           "lastTouchedAt": 1789075613
+        },
+        {
+          "id": "resp-dgxexx",
+          "statement": "**When** the hook endpoint records a touch, **publish** it on the event stream resolved to the claims and nodes it reaches",
+          "lastTouchedAt": 1789075978
         }
       ]
     },
@@ -21861,6 +21866,12 @@
         "symbol": "sign_off_as"
       }
     ],
+    "resp-dgxexx": [
+      {
+        "pattern": "crates/scryer-app/src/hooks.rs",
+        "symbol": "resolve"
+      }
+    ],
     "resp-dpr8pk": [
       {
         "pattern": "src/inbox.ts",
@@ -23767,6 +23778,12 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "sign_off_records_the_actor_who_gave_the_go_ahead"
+      }
+    ],
+    "resp-dgxexx": [
+      {
+        "pattern": "crates/scryer-app/src/hooks.rs",
+        "symbol": "a_recorded_touch_is_published_carrying_the_claims_and_nodes_it_reaches"
       }
     ],
     "resp-dpr8pk": [
