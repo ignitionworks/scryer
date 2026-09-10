@@ -13336,6 +13336,39 @@
           "lastTouchedAt": 1786085524
         }
       ]
+    },
+    {
+      "id": "node-3yfzg3",
+      "kind": "component",
+      "name": "Annotations",
+      "parentId": "node-2",
+      "description": "A slot through which a host supplies marks per node id - badges and highlights carrying a label, an image and a tone. The desktop supplies none.",
+      "responsibilities": [
+        {
+          "id": "resp-9y7ckz",
+          "statement": "**When** a host supplies marks for a node, **badge** its row in the model tree",
+          "lastTouchedAt": 1789076308
+        },
+        {
+          "id": "resp-x2dtcs",
+          "statement": "**When** a host supplies marks for a node, **show** them on its node page",
+          "lastTouchedAt": 1789076308
+        },
+        {
+          "id": "resp-f8x39g",
+          "statement": "**When** a host supplies marks for a node, **draw** them on its diagram card",
+          "lastTouchedAt": 1789076308
+        },
+        {
+          "id": "resp-c88gf7",
+          "statement": "**While** no host supplies marks, **render** nothing",
+          "lastTouchedAt": 1789076308
+        }
+      ],
+      "directives": [
+        "Know nothing about who or why a mark exists; render what the host supplies.",
+        "Keep the annotation slot in its own files; never spread render hooks through upstream's components."
+      ]
     }
   ],
   "links": [
@@ -17042,6 +17075,24 @@
       "dst": "node-664",
       "label": "proxies previews",
       "method": "HTTP"
+    },
+    {
+      "id": "link-node-227-node-3yfzg3",
+      "src": "node-227",
+      "dst": "node-3yfzg3",
+      "label": "reads marks for tree rows"
+    },
+    {
+      "id": "link-node-245-node-3yfzg3",
+      "src": "node-245",
+      "dst": "node-3yfzg3",
+      "label": "reads marks for the page"
+    },
+    {
+      "id": "link-node-230-node-3yfzg3",
+      "src": "node-230",
+      "dst": "node-3yfzg3",
+      "label": "reads marks for cards"
     }
   ],
   "groups": [
@@ -21842,6 +21893,12 @@
         "symbol": "dispatch"
       }
     ],
+    "resp-9y7ckz": [
+      {
+        "pattern": "src/annotations/Annotations.tsx",
+        "symbol": "TreeRowMarks"
+      }
+    ],
     "resp-a44pxh": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -21858,6 +21915,12 @@
       {
         "pattern": "src-tauri/src/project.rs",
         "symbol": "read_fold_refusals"
+      }
+    ],
+    "resp-c88gf7": [
+      {
+        "pattern": "src/annotations/marks.ts",
+        "symbol": "marksFor"
       }
     ],
     "resp-csjk7a": [
@@ -21888,6 +21951,12 @@
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
         "symbol": "ScryerServer"
+      }
+    ],
+    "resp-f8x39g": [
+      {
+        "pattern": "src/annotations/Annotations.tsx",
+        "symbol": "DiagramCardMarks"
       }
     ],
     "resp-h36w17": [
@@ -22037,6 +22106,12 @@
       {
         "pattern": "crates/scryer-app/src/commands/mod.rs",
         "symbol": "dispatch"
+      }
+    ],
+    "resp-x2dtcs": [
+      {
+        "pattern": "src/annotations/Annotations.tsx",
+        "symbol": "NodePageMarks"
       }
     ],
     "resp-x31891": [
@@ -23752,6 +23827,12 @@
         "symbol": "a_named_command_reaches_its_function_and_returns_its_result"
       }
     ],
+    "resp-9y7ckz": [
+      {
+        "pattern": "tests/annotations.test.ts",
+        "symbol": "separates the chips beside a node from the wash over it"
+      }
+    ],
     "resp-a44pxh": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -23772,6 +23853,12 @@
       {
         "pattern": "src-tauri/src/project.rs",
         "symbol": "canvas_sign_off_and_saves_keep_the_developer_as_the_author_of_intent"
+      }
+    ],
+    "resp-c88gf7": [
+      {
+        "pattern": "tests/annotations.test.ts",
+        "symbol": "resolves to nothing for every shape of absent feed"
       }
     ],
     "resp-csjk7a": [
@@ -23814,6 +23901,12 @@
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
         "symbol": "every_description_ends_with_a_rules_line_that_resolves"
+      }
+    ],
+    "resp-f8x39g": [
+      {
+        "pattern": "tests/annotations.test.ts",
+        "symbol": "gives a node ONE highlight — the loudest tone wins"
       }
     ],
     "resp-h36w17": [
@@ -23958,6 +24051,12 @@
         "symbol": "an_unknown_command_is_refused_naming_the_ones_that_exist"
       }
     ],
+    "resp-x2dtcs": [
+      {
+        "pattern": "tests/annotations.test.ts",
+        "symbol": "hands each surface the marks for its own node"
+      }
+    ],
     "resp-x31891": [
       {
         "pattern": "crates/scryer-extract/src/context.rs",
@@ -24003,6 +24102,11 @@
     "node-3": [
       {
         "pattern": "crates/scryer-acp/**/*"
+      }
+    ],
+    "node-3yfzg3": [
+      {
+        "pattern": "src/annotations/**"
       }
     ],
     "node-4": [
