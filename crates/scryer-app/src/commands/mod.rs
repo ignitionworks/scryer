@@ -7,9 +7,13 @@
 //! (`invoke(cmd, args)` in upstream's frontend, `POST /api/cmd/{name}` over
 //! HTTP) gets the same functions without knowing their signatures.
 
+pub mod agent_state;
 pub mod agents;
+pub mod build;
 pub(crate) mod highlight;
+pub mod mcp_setup;
 pub mod observability;
+pub mod preview;
 pub mod project;
 pub mod source_view;
 pub(crate) mod symbols;
@@ -77,7 +81,7 @@ pub type Actor<'a> = Option<&'a str>;
 /// `invoke(cmd, args)` payload verbatim. The desktop's `cwd` argument is
 /// accepted under its own name and under `projectPath`, because upstream spells
 /// the same thing both ways across its commands.
-pub fn dispatch(
+pub async fn dispatch(
     state: &AppState,
     command: &str,
     args: &serde_json::Value,
@@ -93,10 +97,18 @@ pub fn dispatch(
         "read_history" => json(project::read_history(state, &a.project()?)?),
         "read_fold_refusals" => json(project::read_fold_refusals(state, &a.project()?)?),
         "get_subagent_settings" => json(project::get_subagent_settings()),
-        "get_drift_status" => json(observability::get_drift_status(state, &a.project()?)?),
-        "get_model_health" => json(observability::get_model_health(state, &a.project()?)?),
-        "get_test_statuses" => json(observability::get_test_statuses(state, &a.project()?)?),
-        "get_probe_statuses" => json(observability::get_probe_statuses(state, &a.project()?)?),
+        "get_drift_status" => {
+            json(blocking(state, a.project()?, observability::get_drift_status).await?)
+        }
+        "get_model_health" => {
+            json(blocking(state, a.project()?, observability::get_model_health).await?)
+        }
+        "get_test_statuses" => {
+            json(blocking(state, a.project()?, observability::get_test_statuses).await?)
+        }
+        "get_probe_statuses" => {
+            json(blocking(state, a.project()?, observability::get_probe_statuses).await?)
+        }
         "read_source_span" => json(source_view::read_source_span(
             a.project()?,
             a.string("file")?,
@@ -214,14 +226,32 @@ pub fn dispatch(
             actor,
         )?),
 
-        // ── named, not served yet ────────────────────────────────────────────
-        "start_model_build" => agents::start_model_build(command),
-        "start_drift_check" => agents::start_drift_check(command),
-        "cancel_agent_session" => agents::cancel_agent_session(command),
-        "ensure_preview_server" => agents::ensure_preview_server(command),
-        "start_preview_fixture_session" => agents::start_preview_fixture_session(command),
-        "detect_ai_tools" => agents::detect_ai_tools(command),
-        "setup_mcp_integration" => agents::setup_mcp_integration(command),
+        // ── agent runs and the preview sidecar ──────────────────────────────
+        "start_model_build" => json(build::start_model_build(state, &a.project()?).await?),
+        "start_drift_check" => json(build::start_drift_check(state, &a.project()?).await?),
+        "cancel_agent_session" => json(preview::cancel_agent_session(state, &a.project()?).await?),
+        "ensure_preview_server" => {
+            json(preview::ensure_preview_server(state, &a.project()?).await?)
+        }
+        "start_preview_fixture_session" => json(
+            preview::start_preview_fixture_session(
+                state,
+                &a.project()?,
+                &a.string("nodeId")?,
+                &a.string("renderStatus")?,
+                a.opt_string("renderError").as_deref(),
+            )
+            .await?,
+        ),
+
+        // ── the machine's AI-tool config ────────────────────────────────────
+        "detect_ai_tools" => json(mcp_setup::detect_ai_tools(a.project().ok())),
+        "setup_mcp_integration" => json(mcp_setup::setup_mcp_integration(
+            a.string("action")?,
+            a.project()?,
+        )?),
+
+        // ── named, not served ───────────────────────────────────────────────
         "open_in_editor" => agents::open_in_editor(command),
 
         _ => Err(CommandError::UnknownCommand {
@@ -229,6 +259,21 @@ pub fn dispatch(
             available: COMMANDS.to_vec(),
         }),
     }
+}
+
+/// Run one of the passes that parse the whole repo — health, drift, and the
+/// two status reads are seconds on a big project — off the async runtime's
+/// worker threads. The desktop does the same with `tauri::async_runtime::
+/// spawn_blocking`; a service that did not would stall every other caller.
+async fn blocking<T: Send + 'static>(
+    state: &AppState,
+    project: String,
+    work: fn(&AppState, &str) -> CommandResult<T>,
+) -> CommandResult<T> {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || work(&state, &project))
+        .await
+        .map_err(|e| CommandError::failed(format!("task failed: {e}")))?
 }
 
 fn json<T: serde::Serialize>(value: T) -> CommandResult<serde_json::Value> {
@@ -325,8 +370,8 @@ mod tests {
     /// A named command reaches the function behind it and its result comes
     /// back — the whole point of the surface. `read_model` is the shortest
     /// round trip through it that touches real state.
-    #[test]
-    fn a_named_command_reaches_its_function_and_returns_its_result() {
+    #[tokio::test]
+    async fn a_named_command_reaches_its_function_and_returns_its_result() {
         let (_dir, state, path) = project();
 
         let out = dispatch(
@@ -335,6 +380,7 @@ mod tests {
             &serde_json::json!({ "cwd": path }),
             None,
         )
+        .await
         .unwrap();
         let raw = out
             .as_str()
@@ -349,6 +395,7 @@ mod tests {
             &serde_json::json!({ "projectPath": path }),
             None,
         )
+        .await
         .unwrap();
         assert_eq!(legacy, serde_json::json!(false));
     }
@@ -356,8 +403,8 @@ mod tests {
     /// A name the service does not serve is refused, and the refusal names the
     /// ones it does — so a client built against a different build can see what
     /// it should have asked for instead of guessing.
-    #[test]
-    fn an_unknown_command_is_refused_naming_the_ones_that_exist() {
+    #[tokio::test]
+    async fn an_unknown_command_is_refused_naming_the_ones_that_exist() {
         let (_dir, state, path) = project();
 
         let err = dispatch(
@@ -366,6 +413,7 @@ mod tests {
             &serde_json::json!({ "cwd": path }),
             None,
         )
+        .await
         .unwrap_err();
 
         match &err {
@@ -385,21 +433,43 @@ mod tests {
 
     /// A command that exists but this build does not serve refuses as
     /// `notImplemented`, which a client can tell apart from a typo.
-    #[test]
-    fn a_command_not_served_yet_refuses_as_not_implemented() {
+    #[tokio::test]
+    async fn a_command_the_service_will_not_run_refuses_as_not_implemented() {
         let (_dir, state, path) = project();
         let err = dispatch(
             &state,
-            "start_model_build",
+            "open_in_editor",
             &serde_json::json!({ "cwd": path }),
             None,
         )
+        .await
         .unwrap_err();
         assert!(
             matches!(err, CommandError::NotImplemented { .. }),
             "{err:?}"
         );
         assert_eq!(err.status(), 501);
+    }
+
+    /// Every command on the surface has a function that does its work — the
+    /// one exception being `open_in_editor`, which a service cannot honour
+    /// (there is nobody at the machine it runs on to show a file to).
+    #[tokio::test]
+    async fn every_command_but_one_actually_runs() {
+        let (_dir, state, path) = project();
+        let mut refused = Vec::new();
+        for command in COMMANDS {
+            // A bare project argument is enough to get past dispatch and into
+            // the function; a missing second argument reads as badArguments,
+            // which is the function answering, not the surface refusing.
+            let args = serde_json::json!({ "cwd": path, "projectPath": path });
+            if let Err(CommandError::NotImplemented { command, .. }) =
+                dispatch(&state, command, &args, None).await
+            {
+                refused.push(command);
+            }
+        }
+        assert_eq!(refused, vec!["open_in_editor".to_string()]);
     }
 
     /// The surface names every command the desktop's `invoke_handler` does —
@@ -413,10 +483,12 @@ mod tests {
 
     /// A call missing an argument the command needs is a `badArguments`
     /// refusal, never a panic.
-    #[test]
-    fn a_malformed_call_is_refused_not_panicked() {
+    #[tokio::test]
+    async fn a_malformed_call_is_refused_not_panicked() {
         let (_dir, state, _path) = project();
-        let err = dispatch(&state, "read_model", &serde_json::json!({}), None).unwrap_err();
+        let err = dispatch(&state, "read_model", &serde_json::json!({}), None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, CommandError::BadArguments { .. }), "{err:?}");
         assert_eq!(err.status(), 400);
     }

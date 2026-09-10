@@ -23940,6 +23940,10 @@
     "resp-j8dkfg": [
       {
         "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "every_command_but_one_actually_runs"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
         "symbol": "the_surface_names_all_thirty_nine_desktop_commands"
       }
     ],

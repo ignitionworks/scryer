@@ -101,22 +101,13 @@ async fn post_command(
         .map(|ConnectInfo(a)| a.ip());
     let ActorHeader(actor) = ActorHeader::read(&headers, peer);
 
-    // Health and drift passes parse the whole repo — seconds on a big project.
-    // Off the async runtime's worker, like the desktop's spawn_blocking.
-    let result =
-        tokio::task::spawn_blocking(move || dispatch(&state.app, &name, &args, actor.as_deref()))
-            .await;
-
-    match result {
-        Ok(Ok(value)) => (StatusCode::OK, Json(value)).into_response(),
-        Ok(Err(e)) => (
+    // The passes that parse the whole repo take themselves off the runtime's
+    // workers (see `commands::blocking`), so awaiting here is safe.
+    match dispatch(&state.app, &name, &args, actor.as_deref()).await {
+        Ok(value) => (StatusCode::OK, Json(value)).into_response(),
+        Err(e) => (
             StatusCode::from_u16(e.status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             Json(serde_json::json!({ "error": e, "message": e.to_string() })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "message": format!("command task failed: {e}") })),
         )
             .into_response(),
     }
