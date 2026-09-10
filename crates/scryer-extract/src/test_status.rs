@@ -36,6 +36,12 @@ pub struct ClaimRecord {
     /// record can only ever read as stale.
     #[serde(default)]
     pub fingerprints: BTreeMap<String, String>,
+    /// WHO reported the run, when the caller named an actor. An opaque string
+    /// — the cache knows nothing about people or sessions. Absent on an
+    /// unattributed ingest and on every cache written before the field
+    /// existed, so upstream's caches still load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
 }
 
 /// One claim's probe history: how many deliberate breaks were tried against
@@ -209,6 +215,16 @@ fn now_secs() -> u64 {
 /// record means "this outcome was true of THIS code". A claim already in the
 /// cache is replaced: the cache holds the latest word, not a history.
 pub fn record_test_results(r: &ModelRef, report: &ReportMatch) -> Result<usize, String> {
+    record_test_results_as(r, report, None)
+}
+
+/// [`record_test_results`], naming the ACTOR who reported the run. `None`
+/// records the verdict unattributed rather than refusing it.
+pub fn record_test_results_as(
+    r: &ModelRef,
+    report: &ReportMatch,
+    actor: Option<&str>,
+) -> Result<usize, String> {
     if report.claims.is_empty() {
         return Ok(0);
     }
@@ -231,6 +247,10 @@ pub fn record_test_results(r: &ModelRef, report: &ReportMatch) -> Result<usize, 
             cases: verdict.cases,
             recorded_at,
             fingerprints,
+            by: actor
+                .map(str::trim)
+                .filter(|a| !a.is_empty())
+                .map(str::to_string),
         };
         match cache.results.iter_mut().find(|c| &&c.resp_id == resp_id) {
             Some(existing) => *existing = record,
@@ -491,10 +511,19 @@ pub fn test_blast_radius(r: &ModelRef) -> Result<Vec<RadiusFile>, String> {
 /// match summary out — unmatched, ambiguous, and unseen included, so the
 /// caller can surface what the report did NOT settle alongside what it did.
 pub fn ingest_report(r: &ModelRef, xml: &str) -> Result<IngestSummary, String> {
+    ingest_report_as(r, xml, None)
+}
+
+/// [`ingest_report`], naming the ACTOR who reported the run.
+pub fn ingest_report_as(
+    r: &ModelRef,
+    xml: &str,
+    actor: Option<&str>,
+) -> Result<IngestSummary, String> {
     let model = working_model(r)?;
     let cases = parse_junit(xml)?;
     let report = match_report(&model.test_map, &cases);
-    let recorded = record_test_results(r, &report)?;
+    let recorded = record_test_results_as(r, &report, actor)?;
     Ok(IngestSummary { cases: cases.len(), recorded, report })
 }
 
@@ -765,6 +794,27 @@ mod tests {
     fn fresh_statuses(r: &ModelRef) -> Vec<ClaimTestStatus> {
         ingest_report(r, REPORT).unwrap();
         test_statuses(r).unwrap()
+    }
+
+    /// A verdict recorded BY a named actor stores that actor beside the
+    /// outcome; one recorded with no actor is stored unattributed rather than
+    /// refused. A cache written before the field existed still loads.
+    #[test]
+    fn a_verdict_recorded_by_a_named_actor_stores_the_actor() {
+        let (_dir, r) = project();
+        let model = working_model(&r).unwrap();
+        let report = match_report(&model.test_map, &parse_junit(REPORT).unwrap());
+        record_test_results_as(&r, &report, Some("jesseh")).unwrap();
+        assert_eq!(read_cache(&r).results[0].by.as_deref(), Some("jesseh"));
+
+        record_test_results(&r, &report).unwrap();
+        assert!(read_cache(&r).results[0].by.is_none(), "no actor: unattributed");
+
+        let legacy: ClaimRecord = serde_json::from_str(
+            r#"{"respId":"r1","outcome":"passed","cases":1,"recordedAt":0}"#,
+        )
+        .unwrap();
+        assert!(legacy.by.is_none());
     }
 
     #[test]

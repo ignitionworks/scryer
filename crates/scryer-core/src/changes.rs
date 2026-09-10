@@ -67,6 +67,12 @@ pub struct ChangeMeta {
 pub struct SignOff {
     /// Unix seconds.
     pub at: u64,
+    /// WHO gave the go-ahead, when the caller named an actor. An opaque string
+    /// — the ledger knows nothing about people, sessions or teams. Absent on a
+    /// sign-off nobody signed, and on every file written before the field
+    /// existed, so upstream's models still load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
     /// Element key ([`element_key`]) → the entry's signed content.
     #[serde(default)]
     pub entries: BTreeMap<String, SignedEntry>,
@@ -234,6 +240,18 @@ fn signed_entry(model: &ScryModel, key: &str) -> SignedEntry {
 /// it now stands). Returns the number of entries captured. The caller persists
 /// the plan.
 pub fn sign_off(model: &mut ScryModel, change_id: &str, now: u64) -> Result<usize, String> {
+    sign_off_as(model, change_id, now, None)
+}
+
+/// [`sign_off`], naming the ACTOR who gave the go-ahead. `None` re-stamps
+/// without disturbing whoever signed before — a canvas save re-stamps every
+/// signed change ([`restamp_signoffs`]) and must never erase the signature.
+pub fn sign_off_as(
+    model: &mut ScryModel,
+    change_id: &str,
+    now: u64,
+    actor: Option<&str>,
+) -> Result<usize, String> {
     let keys: Vec<String> = model
         .change_map
         .iter()
@@ -248,7 +266,13 @@ pub fn sign_off(model: &mut ScryModel, change_id: &str, now: u64) -> Result<usiz
         .iter_mut()
         .find(|c| c.id == change_id)
         .ok_or_else(|| format!("no open change '{change_id}'"))?;
-    meta.signed_off = Some(SignOff { at: now, entries });
+    let previously = meta.signed_off.as_ref().and_then(|s| s.by.clone());
+    let by = actor
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .map(str::to_string)
+        .or(previously);
+    meta.signed_off = Some(SignOff { at: now, by, entries });
     Ok(n)
 }
 
@@ -602,6 +626,36 @@ mod tests {
         write_planned_at,
     };
     use tempfile::tempdir;
+
+    /// A change signed off by a NAMED actor records who beside the snapshot;
+    /// one signed with no actor stays unattributed rather than being refused,
+    /// and a later unattributed re-stamp (a canvas save) never erases the
+    /// signature. A snapshot written before the field existed still loads.
+    #[test]
+    fn sign_off_records_the_actor_who_gave_the_go_ahead() {
+        let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new")]);
+        let cid = open_change(&mut plan, "the change", 100);
+        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &cid);
+
+        sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
+        assert_eq!(plan.changes[0].signed_off.as_ref().unwrap().by.as_deref(), Some("jesseh"));
+
+        // A canvas save re-stamps with no actor: the signature survives.
+        restamp_signoffs(&mut plan, 300);
+        let snap = plan.changes[0].signed_off.as_ref().unwrap();
+        assert_eq!(snap.at, 300);
+        assert_eq!(snap.by.as_deref(), Some("jesseh"), "a re-stamp never erases who signed");
+
+        // Unattributed sign-off: recorded, never refused.
+        let mut plain = model_with_resps(&[("r1", "exists")]);
+        let cid = open_change(&mut plain, "unsigned by anyone", 100);
+        sign_off(&mut plain, &cid, 200).unwrap();
+        assert!(plain.changes[0].signed_off.as_ref().unwrap().by.is_none());
+
+        // Upstream's shape (no `by`) still loads.
+        let legacy: SignOff = serde_json::from_str(r#"{"at":1,"entries":{}}"#).unwrap();
+        assert!(legacy.by.is_none());
+    }
 
     /// A model whose single component `n1` carries the given responsibilities.
     fn model_with_resps(resps: &[(&str, &str)]) -> ScryModel {
