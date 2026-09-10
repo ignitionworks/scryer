@@ -3709,6 +3709,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "toml_edit 0.22.27",
  "tower-http",
  "tree-sitter",
  "tree-sitter-c",

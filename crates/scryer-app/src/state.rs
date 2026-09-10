@@ -25,6 +25,11 @@ pub struct Project {
     /// file, so the project's hooks fall silent the moment it is unregistered
     /// — the same opt-in/opt-out the desktop app has.
     hooks: Option<crate::hooks::HookServer>,
+    /// The project's agent runtime and cancel flag. Per project, so a stop in
+    /// one never reaches another's session.
+    agents: crate::commands::agent_state::AgentState,
+    /// The project's preview sidecar — one `node` process per project.
+    preview: crate::commands::agent_state::PreviewState,
 }
 
 impl Project {
@@ -33,6 +38,14 @@ impl Project {
     /// project's own `.scryer/hook.json` — but a test does.
     pub fn hook_port(&self) -> Option<u16> {
         self.hooks.as_ref().map(|h| h.port)
+    }
+
+    pub fn agents(&self) -> &crate::commands::agent_state::AgentState {
+        &self.agents
+    }
+
+    pub fn preview(&self) -> &crate::commands::agent_state::PreviewState {
+        &self.preview
     }
 }
 
@@ -103,6 +116,8 @@ impl AppState {
             model_ref,
             _watcher: watcher,
             hooks,
+            agents: Default::default(),
+            preview: Default::default(),
         });
         self.projects
             .lock()

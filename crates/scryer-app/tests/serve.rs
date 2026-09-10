@@ -168,8 +168,8 @@ fn serve_answers_commands_and_lists_what_it_serves() {
 }
 
 /// A name the service does not serve is a 404 that lists the ones it does; a
-/// command it knows but does not run yet is a 501; a plan write on a stale
-/// base is a 409 carrying the current revision.
+/// command it knows but will not run is a 501; a plan write on a stale base is
+/// a 409 carrying the current revision.
 #[test]
 fn serve_refuses_with_the_status_that_matches_the_refusal() {
     let dir = project();
@@ -189,8 +189,11 @@ fn serve_refuses_with_the_status_that_matches_the_refusal() {
         "the refusal names the real commands: {body}"
     );
 
-    let (status, body) = serve.post("start_model_build", &args, None);
-    assert_eq!(status, 501, "{body}");
+    let (status, body) = serve.post("open_in_editor", &args, None);
+    assert_eq!(
+        status, 501,
+        "the one command a service will not run: {body}"
+    );
 
     let (status, body) = serve.post("read_planned", &args, None);
     assert_eq!(status, 200, "{body}");
