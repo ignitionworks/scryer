@@ -1,0 +1,46 @@
+[package]
+name = "scryer-app"
+version = "0.4.12"
+edition = "2021"
+description = "Scryer's command surface as plain functions, with an HTTP + SSE router and a headless serve binary"
+authors = ["Ignition Works"]
+
+[[bin]]
+name = "scryer-serve"
+path = "src/bin/scryer_serve.rs"
+
+[dependencies]
+scryer-core = { path = "../scryer-core" }
+scryer-acp = { path = "../scryer-acp" }
+scryer-extract = { path = "../scryer-extract" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = "6"
+glob = "0.3"
+sha2 = "0.10"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "process"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.6", features = ["fs"] }
+futures = "0.3"
+form_urlencoded = "1"
+
+# In-process symbol resolution + syntax highlighting for the source-span
+# commands — the same grammar set the desktop shell compiles in.
+tree-sitter = "0.26"
+tree-sitter-highlight = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-php = "0.24"
+tree-sitter-clojure = { path = "../tree-sitter-clojure" }
+
+[dev-dependencies]
+tempfile = "3"
