@@ -16,7 +16,7 @@ use rmcp::{
 use scryer_core::test_results::TestOutcome;
 use scryer_core::worktree;
 use scryer_extract::test_status::{
-    ingest_report, probe_target, record_probe_result, test_blast_radius, test_statuses,
+    ingest_report_as, probe_target, record_probe_result, test_blast_radius, test_statuses,
     RadiusFile,
 };
 
@@ -85,7 +85,8 @@ impl ScryerServer {
             Ok(l) => l,
             Err(e) => return Ok(e),
         };
-        let summary = match ingest_report(&model_ref, &xml) {
+        let summary = match ingest_report_as(&model_ref, &xml, crate::helpers::env_actor().as_deref())
+        {
             Ok(s) => s,
             Err(e) => {
                 return Ok(CallToolResult::error(vec![Content::text(format!(

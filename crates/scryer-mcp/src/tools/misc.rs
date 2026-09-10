@@ -691,10 +691,11 @@ impl ScryerServer {
                 ))]));
             }
         };
-        let n = match scryer_core::changes::sign_off(
+        let n = match scryer_core::changes::sign_off_as(
             &mut plan,
             &target,
             scryer_core::drift::now_secs(),
+            crate::helpers::env_actor().as_deref(),
         ) {
             Ok(n) => n,
             Err(e) => {

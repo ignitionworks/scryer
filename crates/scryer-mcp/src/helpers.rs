@@ -234,10 +234,20 @@ pub(crate) fn resp_event_row(marker: &str, model: &ScryModel, resp: &Responsibil
     }
 }
 
+/// The ACTOR this MCP process writes as, from `SCRYER_ACTOR`. A host that runs
+/// the agent on someone's behalf sets it; unset means unattributed, which is
+/// every plain `scryer-mcp` invocation. Opaque — the server never interprets it.
+pub(crate) fn env_actor() -> Option<String> {
+    std::env::var("SCRYER_ACTOR")
+        .ok()
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+}
+
 /// Record a committed-model history event, best-effort: a logging failure must
 /// never abort the model operation that produced it (see [`scryer_core::history`]).
 pub(crate) fn record_event(model_ref: &ModelRef, ev: HistoryEvent) {
-    let _ = append_event(model_ref, &ev);
+    let _ = append_event(model_ref, &ev.by_actor(env_actor().as_deref()));
 }
 
 pub(crate) fn resolve_model_ref(req_project: Option<&str>) -> Result<ModelRef, McpError> {

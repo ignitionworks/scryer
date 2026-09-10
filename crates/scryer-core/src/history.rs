@@ -63,7 +63,11 @@ impl EventRow {
 pub struct HistoryEvent {
     /// Unix seconds.
     pub at: u64,
-    /// Who drove it. Agent-only in v0.3 — users edit the plan, not the model.
+    /// Who drove it. Upstream writes only the agent here; a host that names an
+    /// ACTOR on the write puts that opaque string here instead
+    /// ([`HistoryEvent::by_actor`]). Defaulted so an event written without the
+    /// field still loads.
+    #[serde(default = "agent")]
     pub by: String,
     /// Short driver/intent label shown beside the actor, e.g. "fill", "build",
     /// "took code".
@@ -102,6 +106,22 @@ impl HistoryEvent {
         self.change_id = Some(change_id.into());
         self
     }
+
+    /// Name the ACTOR behind this event. `None` leaves the event unattributed —
+    /// it keeps reading as the agent's, which is what every write without a
+    /// named actor is. The string is opaque: the model knows nothing about
+    /// people, sessions or teams, only that something signed the write.
+    pub fn by_actor(mut self, actor: Option<&str>) -> Self {
+        if let Some(a) = actor.map(str::trim).filter(|a| !a.is_empty()) {
+            self.by = a.to_string();
+        }
+        self
+    }
+}
+
+/// Serde default for [`HistoryEvent::by`] — the writer when none is named.
+fn agent() -> String {
+    "agent".to_string()
 }
 
 /// Append one event to the JSONL log, creating `.scryer/` and the file as needed.
@@ -164,6 +184,17 @@ mod tests {
         assert_eq!(log[1].kind, EventKind::Impl);
         assert_eq!(log[1].rows[0].source.as_ref().unwrap().line, Some(40));
 
+        // An event written before the actor field existed still loads: `by`
+        // defaults to the agent rather than the whole line being dropped.
+        fs::write(
+            r.history_path(),
+            r#"{"at":300,"driver":"fill","kind":"born","nodeId":"n2"}"#.to_string() + "\n",
+        )
+        .unwrap();
+        let legacy = read_history(&r);
+        assert_eq!(legacy.len(), 1, "an event without `by` still loads");
+        assert_eq!(legacy[0].by, "agent");
+
         // A garbage line is skipped, surrounding events survive.
         fs::write(
             r.history_path(),
@@ -175,5 +206,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_history(&r).len(), 2);
+    }
+
+    /// An appended event that carries an ACTOR names that actor as the one who
+    /// drove it; one that carries none stays the agent's — unattributed, never
+    /// refused. The actor is opaque: blank and whitespace-only name nobody.
+    #[test]
+    fn an_event_carrying_an_actor_names_it_instead_of_the_agent() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+
+        append_event(
+            &r,
+            &HistoryEvent::new(100, EventKind::Impl, "n1", "build").by_actor(Some("jesseh")),
+        )
+        .unwrap();
+        append_event(&r, &HistoryEvent::new(200, EventKind::Impl, "n1", "build")).unwrap();
+        append_event(
+            &r,
+            &HistoryEvent::new(300, EventKind::Impl, "n1", "build").by_actor(Some("   ")),
+        )
+        .unwrap();
+
+        let log = read_history(&r);
+        assert_eq!(log[0].by, "jesseh", "the named actor drove it");
+        assert_eq!(log[1].by, "agent", "no actor supplied: unattributed");
+        assert_eq!(log[2].by, "agent", "a blank actor names nobody");
     }
 }
