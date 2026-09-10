@@ -12,6 +12,7 @@ import { useRef, useState } from "react";
 import { Braces, ChevronRight, Crosshair, FlaskConical, Loader2, Pencil, Plus, X } from "lucide-react";
 import type { Completeness, TestTally } from "./health";
 import { CompletenessPie } from "./CompletenessPie";
+import { TreeRowMarks } from "./annotations";
 import type { ScryModel, Node, Group, Kind } from "./viewmodel";
 import { childKindFor, concernCounts, normalizeConcernSlug } from "./viewmodel";
 import type { Editor } from "./editor";
@@ -811,6 +812,9 @@ export function ModelTree({
             </span>
           )}
         </span>
+        {/* The annotation slot: whatever marks a host supplies for this node.
+            Renders nothing when none are — see `src/annotations/`. */}
+        <TreeRowMarks nodeId={node.id} />
         {editor && node.kind !== "symbol" && node.kind !== "person" && renaming !== node.id && (
           <button
             type="button"

@@ -57,6 +57,7 @@ import {
   PageTabs,
   NodeHistory,
 } from "./page/PageHeader";
+import { NodePageMarks } from "./annotations";
 import { GroupPageBody } from "./page/GroupPage";
 import { DescriptionSection } from "./page/DescriptionSection";
 import { DetailRail } from "./page/DetailRail";
@@ -411,6 +412,9 @@ function NodePageBody(props: PageProps & { node: Node }) {
               );
             })()}
             {isNodeEmpty(node) && <EmptyFlag />}
+            {/* The annotation slot: whatever marks a host supplies for this
+                node. Renders nothing when none are — see `src/annotations/`. */}
+            <NodePageMarks nodeId={node.id} />
           </>
         }
         editor={editor}

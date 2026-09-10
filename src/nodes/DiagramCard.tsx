@@ -15,6 +15,7 @@ import type { Completeness } from "../health";
 import { CompletenessPie } from "../CompletenessPie";
 import { NodeHandles } from "./NodeHandles";
 import { ShapeBackground, resolveShape, getContentInsets } from "../shapes";
+import { DiagramCardMarks } from "../annotations";
 
 export interface CardData extends Record<string, unknown> {
   node: DiagramNode;
@@ -189,6 +190,10 @@ export function DiagramCard({ id, data }: NodeProps<RFCard>) {
           external={!!isExternal}
         />
         <NodeHandles />
+
+        {/* The annotation slot: whatever marks a host supplies for this node.
+            Renders nothing when none are — see `src/annotations/`. */}
+        <DiagramCardMarks nodeId={node.id} />
 
         {/* Completeness pie, bottom-left. Hidden while the card is still
             generating so it doesn't flash on empty. */}
