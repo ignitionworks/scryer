@@ -21,6 +21,19 @@ pub struct Project {
     /// Kept alive for as long as the project is registered; dropping it stops
     /// the watch.
     _watcher: Option<Box<dyn Watcher + Send + Sync>>,
+    /// The project's session-hook endpoint. Dropping it removes the discovery
+    /// file, so the project's hooks fall silent the moment it is unregistered
+    /// — the same opt-in/opt-out the desktop app has.
+    hooks: Option<crate::hooks::HookServer>,
+}
+
+impl Project {
+    /// The loopback port the session-hook endpoint is listening on, if it came
+    /// up. A host needs it for nothing — hooks discover it through the
+    /// project's own `.scryer/hook.json` — but a test does.
+    pub fn hook_port(&self) -> Option<u16> {
+        self.hooks.as_ref().map(|h| h.port)
+    }
 }
 
 impl Project {
@@ -68,9 +81,28 @@ impl AppState {
         }
         let model_ref = scryer_core::ModelRef::ProjectLocal(canonical.clone());
         let watcher = self.watch(&model_ref);
+        // Registering a project brings its session-hook endpoint up, the way
+        // opening one does in the desktop app. A failure here is not fatal:
+        // the model surface works without hooks, and the reason is worth
+        // saying out loud rather than refusing the project.
+        let hooks = match crate::hooks::start(&canonical, self.sink.clone()) {
+            Ok(server) => {
+                eprintln!(
+                    "[hooks] {} on 127.0.0.1:{}",
+                    canonical.display(),
+                    server.port
+                );
+                Some(server)
+            }
+            Err(e) => {
+                eprintln!("[hooks] {}: endpoint not started: {e}", canonical.display());
+                None
+            }
+        };
         let project = Arc::new(Project {
             model_ref,
             _watcher: watcher,
+            hooks,
         });
         self.projects
             .lock()
