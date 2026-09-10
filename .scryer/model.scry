@@ -23674,13 +23674,33 @@
   },
   "concerns": [
     {
+      "slug": "auth",
+      "description": "Identity, authentication, and access control",
+      "icon": "Shield"
+    },
+    {
       "slug": "context-economy"
     },
     {
       "slug": "drift"
     },
     {
+      "slug": "failure-handling",
+      "description": "Detecting, capturing, and recovering from failures",
+      "icon": "AlertTriangle"
+    },
+    {
       "slug": "oversight"
+    },
+    {
+      "slug": "persistence",
+      "description": "Durable storage and retrieval of data",
+      "icon": "Database"
+    },
+    {
+      "slug": "validation",
+      "description": "Checking inputs against expected shape and rules",
+      "icon": "CheckCircle"
     },
     {
       "slug": "verification"

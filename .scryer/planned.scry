@@ -132,7 +132,7 @@
       "name": "Model Core",
       "parentId": "node-1",
       "technology": "Rust",
-      "description": "Defines the architecture model's data shape and persists it to disk.",
+      "description": "Defines the architecture model's data shape and persists it to disk. Every write may name the actor behind it; upstream's sign-off records when and what, never who.",
       "responsibilities": [
         {
           "id": "resp-25",
@@ -153,6 +153,18 @@
           "id": "resp-696",
           "statement": "retag() also moves work by a bare element id (a responsibility/link alone), by a whole change id (chg-N, moving everything filed under it), and detaches everything under a target back to unfiled when no destination is given — only the node/group-carrier form and the invalid-destination refusal are currently described.",
           "lastTouchedAt": 1786085474
+        },
+        {
+          "id": "resp-ypm3tm",
+          "statement": "**When** a write names an actor, **record** it on the resulting history event, verdict or sign-off",
+          "concern": "oversight",
+          "lastTouchedAt": 1789073899
+        },
+        {
+          "id": "resp-0zqgmj",
+          "statement": "**While** no actor is supplied, **record** the write as unattributed rather than refusing it",
+          "concern": "oversight",
+          "lastTouchedAt": 1789073899
         }
       ],
       "properties": [
@@ -6547,6 +6559,11 @@
           "id": "resp-375",
           "statement": "Bounds concurrent request handling so one slow client cannot stall the rest",
           "lastTouchedAt": 1784883930
+        },
+        {
+          "id": "resp-3hm9a7",
+          "statement": "**When** a touch is recorded, **emit** it as an event carrying its session and the claims and nodes it reaches",
+          "lastTouchedAt": 1789073906
         }
       ]
     },
@@ -10491,6 +10508,12 @@
           "id": "resp-601",
           "statement": "Garbage-collects change tags once their plan entries have folded into committed or been reverted",
           "lastTouchedAt": 1784884312
+        },
+        {
+          "id": "resp-csjk7a",
+          "statement": "**When** a change is signed off by a named actor, **record** the actor beside the snapshot",
+          "concern": "oversight",
+          "lastTouchedAt": 1789073903
         }
       ]
     },
@@ -11235,6 +11258,12 @@
           "id": "resp-640",
           "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, and change closures",
           "lastTouchedAt": 1784884312
+        },
+        {
+          "id": "resp-ap0x79",
+          "statement": "**When** an appended event carries an actor, **name** that actor as the one who drove it instead of the agent",
+          "concern": "oversight",
+          "lastTouchedAt": 1789073901
         }
       ]
     },
@@ -12496,6 +12525,12 @@
           "id": "resp-768",
           "statement": "**When** probe results are read, **report** how many probes ran and how many survived, never collapsing an unprobed claim into a clean one",
           "lastTouchedAt": 1787824320
+        },
+        {
+          "id": "resp-38y6ah",
+          "statement": "**When** a verdict is recorded by a named actor, **store** the actor beside the outcome",
+          "concern": "oversight",
+          "lastTouchedAt": 1789073905
         }
       ]
     },
@@ -13216,6 +13251,158 @@
           "statement": "**When** a language declares its definitions through macros, **resolve** the symbol through the extractor's definition list",
           "lastTouchedAt": 1789073110
         }
+      ]
+    },
+    {
+      "id": "node-yz4jd6",
+      "kind": "container",
+      "name": "Engine Service",
+      "parentId": "node-1",
+      "technology": "Rust (HTTP + SSE)",
+      "description": "The desktop's command surface as plain functions over the core, extraction and agent crates, with an HTTP + SSE router and a headless serve binary.",
+      "responsibilities": [
+        {
+          "id": "resp-j8dkfg",
+          "statement": "**Expose** every desktop command as a plain function over the model, extraction and agent crates",
+          "lastTouchedAt": 1789073828
+        },
+        {
+          "id": "resp-v8t834",
+          "statement": "**Serve** those functions and one live event stream to whatever host mounts or runs the service",
+          "lastTouchedAt": 1789073828
+        },
+        {
+          "id": "resp-vmgx03",
+          "statement": "**When** a project's model files change on disk, **announce** the change to every attached host",
+          "lastTouchedAt": 1789073828
+        },
+        {
+          "id": "resp-9jnw6k",
+          "statement": "**While** a host is attached, **leave** identity, authorisation and audience entirely to it",
+          "concern": "auth",
+          "lastTouchedAt": 1789073828
+        }
+      ],
+      "directives": [
+        "Additive only: never move or edit the desktop shell's command bodies in src-tauri; mirror upstream's behaviour changes across at each rebase."
+      ]
+    },
+    {
+      "id": "node-rqqgcp",
+      "kind": "component",
+      "name": "Command Surface",
+      "parentId": "node-yz4jd6",
+      "description": "The thirty-nine commands the desktop invokes, written once as plain functions with no window or shell behind them.",
+      "responsibilities": [
+        {
+          "id": "resp-9r46dt",
+          "statement": "**When** a host names a command and its arguments, **dispatch** it to the function behind that command and **return** its result",
+          "lastTouchedAt": 1789073874
+        },
+        {
+          "id": "resp-wtzj6y",
+          "statement": "**If** a named command does not exist, **then** refuse the call naming the commands that do",
+          "concern": "validation",
+          "lastTouchedAt": 1789073829
+        },
+        {
+          "id": "resp-1xakm0",
+          "statement": "**When** a plan write names a base revision that is not current, **refuse** it with the current revision",
+          "concern": "failure-handling",
+          "lastTouchedAt": 1789073829
+        }
+      ]
+    },
+    {
+      "id": "node-b6m3p0",
+      "kind": "component",
+      "name": "Event Router",
+      "parentId": "node-yz4jd6",
+      "description": "The network surface: one endpoint that takes a command by name, and one long-lived stream that carries every event a host needs.",
+      "responsibilities": [
+        {
+          "id": "resp-m7q1t5",
+          "statement": "**While** a client holds the event stream, **forward** every model-changed, agent, build and test event for the projects it names",
+          "lastTouchedAt": 1789073829
+        },
+        {
+          "id": "resp-dgxexx",
+          "statement": "**When** the hook endpoint records a touch, **publish** it on the event stream resolved to the claims and nodes it reaches",
+          "lastTouchedAt": 1789073829
+        },
+        {
+          "id": "resp-h36w17",
+          "statement": "**When** a client names no project, **stream** nothing rather than everything",
+          "lastTouchedAt": 1789073829
+        }
+      ]
+    },
+    {
+      "id": "node-d1grkd",
+      "kind": "component",
+      "name": "Serve Binary",
+      "parentId": "node-yz4jd6",
+      "description": "A headless entry point that runs the service by itself, for use with no desktop app installed.",
+      "responsibilities": [
+        {
+          "id": "resp-5ydjqq",
+          "statement": "**When** started against one or more projects, **serve** the command surface and its event stream on the configured address",
+          "lastTouchedAt": 1789073829
+        },
+        {
+          "id": "resp-j5banp",
+          "statement": "**While** serving a project, **take** the same model lock the desktop app takes so the two never write at once",
+          "concern": "persistence",
+          "lastTouchedAt": 1789073829
+        }
+      ]
+    },
+    {
+      "id": "node-6qznb6",
+      "kind": "system",
+      "name": "Host Application",
+      "external": true,
+      "technology": "Any process",
+      "description": "Any application embedding the service - it mounts the router inside its own process or talks to the serve binary, and owns identity and audience.",
+      "responsibilities": [
+        {
+          "id": "resp-b1tv86",
+          "statement": "Carries its own identity and authorisation for the people it serves",
+          "lastTouchedAt": 1789073831
+        }
+      ]
+    },
+    {
+      "id": "node-3yfzg3",
+      "kind": "component",
+      "name": "Annotations",
+      "parentId": "node-2",
+      "description": "A slot through which a host supplies marks per node id - badges and highlights carrying a label, an image and a tone. The desktop supplies none.",
+      "responsibilities": [
+        {
+          "id": "resp-9y7ckz",
+          "statement": "**When** a host supplies marks for a node, **badge** its row in the model tree",
+          "lastTouchedAt": 1789073833
+        },
+        {
+          "id": "resp-x2dtcs",
+          "statement": "**When** a host supplies marks for a node, **show** them on its node page",
+          "lastTouchedAt": 1789073833
+        },
+        {
+          "id": "resp-f8x39g",
+          "statement": "**When** a host supplies marks for a node, **draw** them on its diagram card",
+          "lastTouchedAt": 1789073833
+        },
+        {
+          "id": "resp-c88gf7",
+          "statement": "**While** no host supplies marks, **render** nothing",
+          "lastTouchedAt": 1789073833
+        }
+      ],
+      "directives": [
+        "Know nothing about who or why a mark exists; render what the host supplies.",
+        "Keep the annotation slot in its own files; never spread render hooks through upstream's components."
       ]
     }
   ],
@@ -16885,6 +17072,75 @@
       "src": "node-389",
       "dst": "node-680",
       "label": "watches report dirs"
+    },
+    {
+      "id": "link-node-yz4jd6-node-4",
+      "src": "node-yz4jd6",
+      "dst": "node-4",
+      "label": "reads and writes the model"
+    },
+    {
+      "id": "link-node-yz4jd6-node-5",
+      "src": "node-yz4jd6",
+      "dst": "node-5",
+      "label": "resolves anchors",
+      "method": "in-process"
+    },
+    {
+      "id": "link-node-yz4jd6-node-3",
+      "src": "node-yz4jd6",
+      "dst": "node-3",
+      "label": "drives agent sessions"
+    },
+    {
+      "id": "link-node-yz4jd6-node-664",
+      "src": "node-yz4jd6",
+      "dst": "node-664",
+      "label": "proxies previews",
+      "method": "HTTP"
+    },
+    {
+      "id": "link-node-6qznb6-node-1",
+      "src": "node-6qznb6",
+      "dst": "node-1",
+      "label": "drives the model"
+    },
+    {
+      "id": "link-node-6qznb6-node-yz4jd6",
+      "src": "node-6qznb6",
+      "dst": "node-yz4jd6",
+      "label": "posts commands, reads events",
+      "method": "HTTP + SSE"
+    },
+    {
+      "id": "link-node-b6m3p0-node-rqqgcp",
+      "src": "node-b6m3p0",
+      "dst": "node-rqqgcp",
+      "label": "dispatches commands"
+    },
+    {
+      "id": "link-node-d1grkd-node-b6m3p0",
+      "src": "node-d1grkd",
+      "dst": "node-b6m3p0",
+      "label": "serves the router"
+    },
+    {
+      "id": "link-node-227-node-3yfzg3",
+      "src": "node-227",
+      "dst": "node-3yfzg3",
+      "label": "reads marks for tree rows"
+    },
+    {
+      "id": "link-node-245-node-3yfzg3",
+      "src": "node-245",
+      "dst": "node-3yfzg3",
+      "label": "reads marks for the page"
+    },
+    {
+      "id": "link-node-230-node-3yfzg3",
+      "src": "node-230",
+      "dst": "node-3yfzg3",
+      "label": "reads marks for cards"
     }
   ],
   "groups": [
@@ -16951,13 +17207,33 @@
   },
   "concerns": [
     {
+      "slug": "auth",
+      "description": "Identity, authentication, and access control",
+      "icon": "Shield"
+    },
+    {
       "slug": "context-economy"
     },
     {
       "slug": "drift"
     },
     {
+      "slug": "failure-handling",
+      "description": "Detecting, capturing, and recovering from failures",
+      "icon": "AlertTriangle"
+    },
+    {
       "slug": "oversight"
+    },
+    {
+      "slug": "persistence",
+      "description": "Durable storage and retrieval of data",
+      "icon": "Database"
+    },
+    {
+      "slug": "validation",
+      "description": "Checking inputs against expected shape and rules",
+      "icon": "CheckCircle"
     },
     {
       "slug": "verification"
@@ -17039,10 +17315,56 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-wgbwjk",
+      "rationale": "260910-engine-api: expose the desktop's command surface as an additive engine service, with an actor on writes, touches as events, and an annotation slot the host fills - each generic, none team-aware",
+      "createdAt": 1789073828
     }
   ],
   "changeMap": {
+    "link:link-node-227-node-3yfzg3": "chg-wgbwjk",
+    "link:link-node-230-node-3yfzg3": "chg-wgbwjk",
+    "link:link-node-245-node-3yfzg3": "chg-wgbwjk",
+    "link:link-node-6qznb6-node-1": "chg-wgbwjk",
+    "link:link-node-6qznb6-node-yz4jd6": "chg-wgbwjk",
+    "link:link-node-b6m3p0-node-rqqgcp": "chg-wgbwjk",
+    "link:link-node-d1grkd-node-b6m3p0": "chg-wgbwjk",
+    "link:link-node-yz4jd6-node-3": "chg-wgbwjk",
+    "link:link-node-yz4jd6-node-4": "chg-wgbwjk",
+    "link:link-node-yz4jd6-node-5": "chg-wgbwjk",
+    "link:link-node-yz4jd6-node-664": "chg-wgbwjk",
+    "node:node-3yfzg3": "chg-wgbwjk",
+    "node:node-4": "chg-wgbwjk",
+    "node:node-6qznb6": "chg-wgbwjk",
+    "node:node-b6m3p0": "chg-wgbwjk",
+    "node:node-d1grkd": "chg-wgbwjk",
+    "node:node-rqqgcp": "chg-wgbwjk",
+    "node:node-yz4jd6": "chg-wgbwjk",
+    "resp:resp-0zqgmj": "chg-wgbwjk",
+    "resp:resp-1xakm0": "chg-wgbwjk",
+    "resp:resp-38y6ah": "chg-wgbwjk",
+    "resp:resp-3hm9a7": "chg-wgbwjk",
+    "resp:resp-5ydjqq": "chg-wgbwjk",
     "resp:resp-683": "chg-qxjsaq",
-    "resp:resp-kc1r12": "chg-j88eqf"
+    "resp:resp-9jnw6k": "chg-wgbwjk",
+    "resp:resp-9r46dt": "chg-wgbwjk",
+    "resp:resp-9y7ckz": "chg-wgbwjk",
+    "resp:resp-ap0x79": "chg-wgbwjk",
+    "resp:resp-b1tv86": "chg-wgbwjk",
+    "resp:resp-c88gf7": "chg-wgbwjk",
+    "resp:resp-csjk7a": "chg-wgbwjk",
+    "resp:resp-dgxexx": "chg-wgbwjk",
+    "resp:resp-f8x39g": "chg-wgbwjk",
+    "resp:resp-h36w17": "chg-wgbwjk",
+    "resp:resp-j5banp": "chg-wgbwjk",
+    "resp:resp-j8dkfg": "chg-wgbwjk",
+    "resp:resp-kc1r12": "chg-j88eqf",
+    "resp:resp-m7q1t5": "chg-wgbwjk",
+    "resp:resp-v8t834": "chg-wgbwjk",
+    "resp:resp-vmgx03": "chg-wgbwjk",
+    "resp:resp-wtzj6y": "chg-wgbwjk",
+    "resp:resp-x2dtcs": "chg-wgbwjk",
+    "resp:resp-ypm3tm": "chg-wgbwjk"
   }
 }
