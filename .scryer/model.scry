@@ -13096,6 +13096,112 @@
           "lastTouchedAt": 1788521688
         }
       ]
+    },
+    {
+      "id": "node-1xmmpb",
+      "kind": "container",
+      "name": "Clojure Grammar",
+      "parentId": "node-1",
+      "technology": "tree-sitter grammar (C)",
+      "description": "Upstream's generated tree-sitter Clojure parser, vendored into the workspace because the published crate collides with ours on tree-sitter's `links` native library.",
+      "responsibilities": [
+        {
+          "id": "resp-yhdnmg",
+          "statement": "**When** Clojure source is parsed, **provide** the compiled grammar it is parsed with",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-1efzfr",
+      "kind": "symbol",
+      "name": "resolve_clj_ns",
+      "parentId": "node-448",
+      "responsibilities": [
+        {
+          "id": "resp-x31891",
+          "statement": "**When** a namespace is required, **resolve** it to the file that declares it under a declared source root",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-44qyjm",
+      "kind": "symbol",
+      "name": "resolve_via_extractor",
+      "parentId": "node-405",
+      "responsibilities": [
+        {
+          "id": "resp-8n3sxq",
+          "statement": "**When** a language declares its definitions through macros, **resolve** the symbol through the extractor's definition list",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-9r9vds",
+      "kind": "symbol",
+      "name": "collect_clojure",
+      "parentId": "node-439",
+      "responsibilities": [
+        {
+          "id": "resp-6tjtn4",
+          "statement": "**When** a list's head names a defining form, **record** the following symbol as a definition, ignoring quoted, discarded and commented code",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-w99evg",
+      "kind": "symbol",
+      "name": "edn_string_vec",
+      "parentId": "node-472",
+      "responsibilities": [
+        {
+          "id": "resp-q9rhp4",
+          "statement": "**When** a Clojure build descriptor is read, **extract** the source roots it declares",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-wr982x",
+      "kind": "symbol",
+      "name": "collect_clj_idents",
+      "parentId": "node-439",
+      "responsibilities": [
+        {
+          "id": "resp-k3sjnc",
+          "statement": "**When** a symbol carries a namespace qualifier, **withhold** its bare name from same-namespace matching",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-xcj8a0",
+      "kind": "symbol",
+      "name": "collect_clj_imports",
+      "parentId": "node-439",
+      "responsibilities": [
+        {
+          "id": "resp-vk8n9a",
+          "statement": "**When** a namespace declaration lists requires, **record** each required namespace with its alias and referred names",
+          "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-xwabz2",
+      "kind": "symbol",
+      "name": "project_clj_header",
+      "parentId": "node-472",
+      "responsibilities": [
+        {
+          "id": "resp-rfybmq",
+          "statement": "**When** a Leiningen project is read, **extract** its declared name and source paths",
+          "lastTouchedAt": 1789073173
+        }
+      ]
     }
   ],
   "links": [
@@ -16764,6 +16870,18 @@
       "src": "node-669",
       "dst": "node-435",
       "label": "lists project files"
+    },
+    {
+      "id": "link-node-5-node-1xmmpb",
+      "src": "node-5",
+      "dst": "node-1xmmpb",
+      "label": "parses Clojure sources with"
+    },
+    {
+      "id": "link-node-9-node-1xmmpb",
+      "src": "node-9",
+      "dst": "node-1xmmpb",
+      "label": "highlights Clojure sources with"
     }
   ],
   "groups": [
@@ -16923,8 +17041,8 @@
       {
         "pattern": "crates/scryer-mcp/src/types.rs",
         "symbol": "ProposedLink",
-        "line": 850,
-        "endLine": 855
+        "line": 649,
+        "endLine": 654
       }
     ],
     "node-143": [
@@ -16939,8 +17057,8 @@
       {
         "pattern": "crates/scryer-mcp/src/types.rs",
         "symbol": "CommitContainerModelRequest",
-        "line": 872,
-        "endLine": 880
+        "line": 667,
+        "endLine": 675
       }
     ],
     "node-145": [
@@ -17027,16 +17145,16 @@
       {
         "pattern": "demo/engine/Workspace.tsx",
         "symbol": "WorkspaceState",
-        "line": 74,
-        "endLine": 93
+        "line": 77,
+        "endLine": 96
       }
     ],
     "node-160": [
       {
         "pattern": "demo/engine/Workspace.tsx",
         "symbol": "WorkspaceActions",
-        "line": 97,
-        "endLine": 106
+        "line": 100,
+        "endLine": 109
       }
     ],
     "node-165": [
@@ -17139,8 +17257,8 @@
       {
         "pattern": "crates/scryer-mcp/src/cli.rs",
         "symbol": "CheckReport",
-        "line": 156,
-        "endLine": 162
+        "line": 158,
+        "endLine": 164
       }
     ],
     "node-232": [
@@ -17163,8 +17281,8 @@
       {
         "pattern": "crates/scryer-mcp/src/cli.rs",
         "symbol": "StatuslineInstall",
-        "line": 323,
-        "endLine": 329
+        "line": 396,
+        "endLine": 402
       }
     ],
     "node-271": [
@@ -17187,8 +17305,8 @@
       {
         "pattern": "src/viewmodel.ts",
         "symbol": "ScryModel",
-        "line": 181,
-        "endLine": 208
+        "line": 191,
+        "endLine": 218
       }
     ],
     "node-283": [
@@ -17211,16 +17329,16 @@
       {
         "pattern": "src/viewmodel.ts",
         "symbol": "SchemaProperty",
-        "line": 69,
-        "endLine": 81
+        "line": 79,
+        "endLine": 91
       }
     ],
     "node-286": [
       {
         "pattern": "src/viewmodel.ts",
         "symbol": "Group",
-        "line": 155,
-        "endLine": 165
+        "line": 165,
+        "endLine": 175
       }
     ],
     "node-297": [
@@ -17299,24 +17417,24 @@
       {
         "pattern": "src-tauri/src/hooks.rs",
         "symbol": "Touch",
-        "line": 74,
-        "endLine": 79
+        "line": 97,
+        "endLine": 102
       }
     ],
     "node-35": [
       {
         "pattern": "crates/scryer-mcp/src/hook_client.rs",
         "symbol": "Endpoint",
-        "line": 133,
-        "endLine": 136
+        "line": 134,
+        "endLine": 137
       }
     ],
     "node-350": [
       {
         "pattern": "src-tauri/src/hooks.rs",
         "symbol": "HookServer",
-        "line": 84,
-        "endLine": 88
+        "line": 107,
+        "endLine": 111
       }
     ],
     "node-374": [
@@ -17395,8 +17513,8 @@
       {
         "pattern": "crates/scryer-extract/src/lang.rs",
         "symbol": "Def",
-        "line": 89,
-        "endLine": 101
+        "line": 93,
+        "endLine": 105
       }
     ],
     "node-443": [
@@ -17411,16 +17529,16 @@
       {
         "pattern": "crates/scryer-extract/src/lang.rs",
         "symbol": "PathRef",
-        "line": 120,
-        "endLine": 125
+        "line": 127,
+        "endLine": 132
       }
     ],
     "node-445": [
       {
         "pattern": "crates/scryer-extract/src/lang.rs",
         "symbol": "FileParse",
-        "line": 169,
-        "endLine": 182
+        "line": 182,
+        "endLine": 195
       }
     ],
     "node-449": [
@@ -17507,8 +17625,8 @@
       {
         "pattern": "crates/scryer-extract/src/anchors.rs",
         "symbol": "UntrackedAnchor",
-        "line": 716,
-        "endLine": 721
+        "line": 758,
+        "endLine": 763
       }
     ],
     "node-473": [
@@ -17619,8 +17737,8 @@
       {
         "pattern": "crates/scryer-core/src/model.rs",
         "symbol": "SchemaProperty",
-        "line": 90,
-        "endLine": 116
+        "line": 111,
+        "endLine": 137
       }
     ],
     "node-527": [
@@ -17635,16 +17753,16 @@
       {
         "pattern": "crates/scryer-core/src/model.rs",
         "symbol": "Link",
-        "line": 289,
-        "endLine": 297
+        "line": 313,
+        "endLine": 321
       }
     ],
     "node-530": [
       {
         "pattern": "crates/scryer-core/src/model.rs",
         "symbol": "Group",
-        "line": 301,
-        "endLine": 317
+        "line": 325,
+        "endLine": 341
       }
     ],
     "node-531": [
@@ -17899,8 +18017,8 @@
       {
         "pattern": "crates/scryer-mcp/src/helpers.rs",
         "symbol": "BaselineCounts",
-        "line": 588,
-        "endLine": 592
+        "line": 644,
+        "endLine": 648
       }
     ],
     "node-72": [
@@ -20619,8 +20737,8 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "retag",
-        "line": 180,
-        "endLine": 227
+        "line": 450,
+        "endLine": 497
       }
     ],
     "resp-697": [
@@ -20643,6 +20761,12 @@
       {
         "pattern": "src-tauri/src/mcp_setup.rs",
         "symbol": "check_copilot_mcp"
+      }
+    ],
+    "resp-6tjtn4": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "collect_clojure"
       }
     ],
     "resp-7": [
@@ -21304,6 +21428,12 @@
         "symbol": "resolve_model_ref"
       }
     ],
+    "resp-8n3sxq": [
+      {
+        "pattern": "src-tauri/src/symbols.rs",
+        "symbol": "resolve_via_extractor"
+      }
+    ],
     "resp-9": [
       {
         "pattern": "crates/xtask/src/main.rs",
@@ -21564,6 +21694,12 @@
         "symbol": "orient"
       }
     ],
+    "resp-k3sjnc": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "collect_clj_idents"
+      }
+    ],
     "resp-kema2k": [
       {
         "pattern": "crates/scryer-mcp/src/tools/read.rs",
@@ -21582,6 +21718,12 @@
         "symbol": "classify_against_signoff"
       }
     ],
+    "resp-q9rhp4": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "edn_string_vec"
+      }
+    ],
     "resp-qe543p": [
       {
         "pattern": "crates/scryer-mcp/src/tools/misc.rs",
@@ -21592,6 +21734,12 @@
       {
         "pattern": "crates/scryer-core/src/rules.rs",
         "symbol": "citations"
+      }
+    ],
+    "resp-rfybmq": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "project_clj_header"
       }
     ],
     "resp-s34tcm": [
@@ -21630,10 +21778,27 @@
         "symbol": "get_rules"
       }
     ],
+    "resp-vk8n9a": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "collect_clj_imports"
+      }
+    ],
+    "resp-x31891": [
+      {
+        "pattern": "crates/scryer-extract/src/context.rs",
+        "symbol": "resolve_clj_ns"
+      }
+    ],
     "resp-y40qy1": [
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
         "symbol": "ScryerServer"
+      }
+    ],
+    "resp-yhdnmg": [
+      {
+        "pattern": "crates/tree-sitter-clojure/**"
       }
     ],
     "resp-z9kn5w": [
@@ -22610,6 +22775,12 @@
         "symbol": "set_node_remints_a_node_id_that_is_taken_outside_the_subtree"
       }
     ],
+    "resp-6tjtn4": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "clojure_def_forms_collected"
+      }
+    ],
     "resp-7": [
       {
         "pattern": "crates/xtask/src/main.rs",
@@ -23104,6 +23275,12 @@
         "symbol": "the_status_header_mentions_tests_only_when_red_or_stale"
       }
     ],
+    "resp-8n3sxq": [
+      {
+        "pattern": "src-tauri/src/symbols.rs",
+        "symbol": "clojure_defn"
+      }
+    ],
     "resp-900": [
       {
         "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
@@ -23346,6 +23523,12 @@
         "symbol": "orient_bundles_scope_pending_rules_and_phase"
       }
     ],
+    "resp-k3sjnc": [
+      {
+        "pattern": "crates/scryer-extract/src/context.rs",
+        "symbol": "clj_external_alias_does_not_misresolve_to_a_local_def"
+      }
+    ],
     "resp-kema2k": [
       {
         "pattern": "crates/scryer-mcp/src/tools/read.rs",
@@ -23364,6 +23547,12 @@
         "symbol": "sign_off_classifies_later_edits_against_the_snapshot"
       }
     ],
+    "resp-q9rhp4": [
+      {
+        "pattern": "crates/scryer-extract/src/manifest.rs",
+        "symbol": "clojure_source_roots_read_from_declared_manifests"
+      }
+    ],
     "resp-qe543p": [
       {
         "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
@@ -23374,6 +23563,12 @@
       {
         "pattern": "crates/scryer-core/src/rules.rs",
         "symbol": "every_body_citation_resolves"
+      }
+    ],
+    "resp-rfybmq": [
+      {
+        "pattern": "crates/scryer-extract/src/manifest.rs",
+        "symbol": "clojure_source_roots_read_from_declared_manifests"
       }
     ],
     "resp-s34tcm": [
@@ -23406,10 +23601,28 @@
         "symbol": "get_rules_by_id_returns_the_named_rules_and_flags_unknown_slugs"
       }
     ],
+    "resp-vk8n9a": [
+      {
+        "pattern": "crates/scryer-extract/src/lang.rs",
+        "symbol": "clojure_ns_requires_become_imports"
+      }
+    ],
+    "resp-x31891": [
+      {
+        "pattern": "crates/scryer-extract/src/context.rs",
+        "symbol": "clj_namespace_munging_resolves_to_the_file"
+      }
+    ],
     "resp-y40qy1": [
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
         "symbol": "tool_schemas_stay_within_budget"
+      }
+    ],
+    "resp-yhdnmg": [
+      {
+        "pattern": "crates/tree-sitter-clojure/src/lib.rs",
+        "symbol": "grammar_loads_and_parses"
       }
     ],
     "resp-z9kn5w": [
@@ -23420,6 +23633,11 @@
     ]
   },
   "boundaries": {
+    "node-1xmmpb": [
+      {
+        "pattern": "crates/tree-sitter-clojure/**/*"
+      }
+    ],
     "node-2": [
       {
         "pattern": "src/**/*"

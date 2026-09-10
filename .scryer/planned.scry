@@ -13111,6 +13111,112 @@
           "lastTouchedAt": 1788521675
         }
       ]
+    },
+    {
+      "id": "node-1xmmpb",
+      "kind": "container",
+      "name": "Clojure Grammar",
+      "parentId": "node-1",
+      "technology": "tree-sitter grammar (C)",
+      "description": "Upstream's generated tree-sitter Clojure parser, vendored into the workspace because the published crate collides with ours on tree-sitter's `links` native library.",
+      "responsibilities": [
+        {
+          "id": "resp-yhdnmg",
+          "statement": "**When** Clojure source is parsed, **provide** the compiled grammar it is parsed with",
+          "lastTouchedAt": 1789073076
+        }
+      ]
+    },
+    {
+      "id": "node-9r9vds",
+      "kind": "symbol",
+      "name": "collect_clojure",
+      "parentId": "node-439",
+      "responsibilities": [
+        {
+          "id": "resp-6tjtn4",
+          "statement": "**When** a list's head names a defining form, **record** the following symbol as a definition, ignoring quoted, discarded and commented code",
+          "lastTouchedAt": 1789073110
+        }
+      ]
+    },
+    {
+      "id": "node-wr982x",
+      "kind": "symbol",
+      "name": "collect_clj_idents",
+      "parentId": "node-439",
+      "responsibilities": [
+        {
+          "id": "resp-k3sjnc",
+          "statement": "**When** a symbol carries a namespace qualifier, **withhold** its bare name from same-namespace matching",
+          "lastTouchedAt": 1789073110
+        }
+      ]
+    },
+    {
+      "id": "node-xcj8a0",
+      "kind": "symbol",
+      "name": "collect_clj_imports",
+      "parentId": "node-439",
+      "responsibilities": [
+        {
+          "id": "resp-vk8n9a",
+          "statement": "**When** a namespace declaration lists requires, **record** each required namespace with its alias and referred names",
+          "lastTouchedAt": 1789073110
+        }
+      ]
+    },
+    {
+      "id": "node-1efzfr",
+      "kind": "symbol",
+      "name": "resolve_clj_ns",
+      "parentId": "node-448",
+      "responsibilities": [
+        {
+          "id": "resp-x31891",
+          "statement": "**When** a namespace is required, **resolve** it to the file that declares it under a declared source root",
+          "lastTouchedAt": 1789073110
+        }
+      ]
+    },
+    {
+      "id": "node-w99evg",
+      "kind": "symbol",
+      "name": "edn_string_vec",
+      "parentId": "node-472",
+      "responsibilities": [
+        {
+          "id": "resp-q9rhp4",
+          "statement": "**When** a Clojure build descriptor is read, **extract** the source roots it declares",
+          "lastTouchedAt": 1789073110
+        }
+      ]
+    },
+    {
+      "id": "node-xwabz2",
+      "kind": "symbol",
+      "name": "project_clj_header",
+      "parentId": "node-472",
+      "responsibilities": [
+        {
+          "id": "resp-rfybmq",
+          "statement": "**When** a Leiningen project is read, **extract** its declared name and source paths",
+          "lastTouchedAt": 1789073110
+        }
+      ]
+    },
+    {
+      "id": "node-44qyjm",
+      "kind": "symbol",
+      "name": "resolve_via_extractor",
+      "parentId": "node-405",
+      "responsibilities": [
+        {
+          "id": "resp-8n3sxq",
+          "statement": "**When** a language declares its definitions through macros, **resolve** the symbol through the extractor's definition list",
+          "lastTouchedAt": 1789073110
+        }
+      ]
     }
   ],
   "links": [
@@ -16779,6 +16885,18 @@
       "src": "node-389",
       "dst": "node-680",
       "label": "watches report dirs"
+    },
+    {
+      "id": "link-node-5-node-1xmmpb",
+      "src": "node-5",
+      "dst": "node-1xmmpb",
+      "label": "parses Clojure sources with"
+    },
+    {
+      "id": "link-node-9-node-1xmmpb",
+      "src": "node-9",
+      "dst": "node-1xmmpb",
+      "label": "highlights Clojure sources with"
     }
   ],
   "groups": [
