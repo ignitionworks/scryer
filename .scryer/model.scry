@@ -50,43 +50,6 @@
       ]
     },
     {
-      "id": "node-4",
-      "kind": "container",
-      "name": "Model Core",
-      "parentId": "node-1",
-      "technology": "Rust",
-      "description": "Defines the architecture model's data shape and persists it to disk.",
-      "responsibilities": [
-        {
-          "id": "resp-25",
-          "statement": "**Define** the model's node, link, responsibility, and directive schema.",
-          "lastTouchedAt": 1784884343
-        },
-        {
-          "id": "resp-26",
-          "statement": "**Persist and load** the committed and planned model files for a project.",
-          "lastTouchedAt": 1784884343
-        },
-        {
-          "id": "resp-27",
-          "statement": "**Validate** the model's structural integrity and source coverage.",
-          "lastTouchedAt": 1784884343
-        },
-        {
-          "id": "resp-696",
-          "statement": "retag() also moves work by a bare element id (a responsibility/link alone), by a whole change id (chg-N, moving everything filed under it), and detaches everything under a target back to unfiled when no destination is given — only the node/group-carrier form and the invalid-destination refusal are currently described.",
-          "lastTouchedAt": 1786085474
-        }
-      ],
-      "properties": [
-        {
-          "label": "copilot",
-          "description": "Per-agent model/effort settings for the Copilot CLI",
-          "lastTouchedAt": 1786085524
-        }
-      ]
-    },
-    {
       "id": "node-5",
       "kind": "container",
       "name": "Model Extraction",
@@ -9817,6 +9780,12 @@
           "id": "resp-601",
           "statement": "Garbage-collects change tags once their plan entries have folded into committed or been reverted",
           "lastTouchedAt": 1784884312
+        },
+        {
+          "id": "resp-csjk7a",
+          "statement": "**When** a change is signed off by a named actor, **record** the actor beside the snapshot",
+          "concern": "oversight",
+          "lastTouchedAt": 1789075627
         }
       ]
     },
@@ -10561,6 +10530,12 @@
           "id": "resp-640",
           "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, and change closures",
           "lastTouchedAt": 1784884312
+        },
+        {
+          "id": "resp-ap0x79",
+          "statement": "**When** an appended event carries an actor, **name** that actor as the one who drove it instead of the agent",
+          "concern": "oversight",
+          "lastTouchedAt": 1789075625
         }
       ]
     },
@@ -11836,6 +11811,12 @@
           "id": "resp-767",
           "statement": "**When** a probe outcome is recorded, **fingerprint** it against the same implementation and test anchors a verdict uses, so an edit to either reads it as stale",
           "lastTouchedAt": 1787825268
+        },
+        {
+          "id": "resp-38y6ah",
+          "statement": "**When** a verdict is recorded by a named actor, **store** the actor beside the outcome",
+          "concern": "oversight",
+          "lastTouchedAt": 1789075628
         }
       ]
     },
@@ -13200,6 +13181,154 @@
           "id": "resp-rfybmq",
           "statement": "**When** a Leiningen project is read, **extract** its declared name and source paths",
           "lastTouchedAt": 1789073173
+        }
+      ]
+    },
+    {
+      "id": "node-yz4jd6",
+      "kind": "container",
+      "name": "Engine Service",
+      "parentId": "node-1",
+      "technology": "Rust (HTTP + SSE)",
+      "description": "The desktop's command surface as plain functions over the core, extraction and agent crates, with an HTTP + SSE router and a headless serve binary.",
+      "responsibilities": [
+        {
+          "id": "resp-j8dkfg",
+          "statement": "**Expose** every desktop command as a plain function over the model, extraction and agent crates",
+          "lastTouchedAt": 1789075610
+        },
+        {
+          "id": "resp-v8t834",
+          "statement": "**Serve** those functions and one live event stream to whatever host mounts or runs the service",
+          "lastTouchedAt": 1789075610
+        },
+        {
+          "id": "resp-vmgx03",
+          "statement": "**When** a project's model files change on disk, **announce** the change to every attached host",
+          "lastTouchedAt": 1789075610
+        },
+        {
+          "id": "resp-9jnw6k",
+          "statement": "**While** a host is attached, **leave** identity, authorisation and audience entirely to it",
+          "concern": "auth",
+          "lastTouchedAt": 1789075610
+        }
+      ],
+      "directives": [
+        "Additive only: never move or edit the desktop shell's command bodies in src-tauri; mirror upstream's behaviour changes across at each rebase."
+      ]
+    },
+    {
+      "id": "node-rqqgcp",
+      "kind": "component",
+      "name": "Command Surface",
+      "parentId": "node-yz4jd6",
+      "description": "The thirty-nine commands the desktop invokes, written once as plain functions with no window or shell behind them.",
+      "responsibilities": [
+        {
+          "id": "resp-9r46dt",
+          "statement": "**When** a host names a command and its arguments, **dispatch** it to the function behind that command and **return** its result",
+          "lastTouchedAt": 1789075612
+        },
+        {
+          "id": "resp-wtzj6y",
+          "statement": "**If** a named command does not exist, **then** refuse the call naming the commands that do",
+          "concern": "validation",
+          "lastTouchedAt": 1789075612
+        },
+        {
+          "id": "resp-1xakm0",
+          "statement": "**When** a plan write names a base revision that is not current, **refuse** it with the current revision",
+          "concern": "failure-handling",
+          "lastTouchedAt": 1789075612
+        }
+      ]
+    },
+    {
+      "id": "node-b6m3p0",
+      "kind": "component",
+      "name": "Event Router",
+      "parentId": "node-yz4jd6",
+      "description": "The network surface: one endpoint that takes a command by name, and one long-lived stream that carries every event a host needs.",
+      "responsibilities": [
+        {
+          "id": "resp-m7q1t5",
+          "statement": "**While** a client holds the event stream, **forward** every model-changed, agent, build and test event for the projects it names",
+          "lastTouchedAt": 1789075613
+        },
+        {
+          "id": "resp-h36w17",
+          "statement": "**When** a client names no project, **stream** nothing rather than everything",
+          "lastTouchedAt": 1789075613
+        }
+      ]
+    },
+    {
+      "id": "node-d1grkd",
+      "kind": "component",
+      "name": "Serve Binary",
+      "parentId": "node-yz4jd6",
+      "description": "A headless entry point that runs the service by itself, for use with no desktop app installed.",
+      "responsibilities": [
+        {
+          "id": "resp-5ydjqq",
+          "statement": "**When** started against one or more projects, **serve** the command surface and its event stream on the configured address",
+          "lastTouchedAt": 1789075615
+        },
+        {
+          "id": "resp-j5banp",
+          "statement": "**While** serving a project, **take** the same model lock the desktop app takes so the two never write at once",
+          "concern": "persistence",
+          "lastTouchedAt": 1789075741
+        }
+      ]
+    },
+    {
+      "id": "node-4",
+      "kind": "container",
+      "name": "Model Core",
+      "parentId": "node-1",
+      "technology": "Rust",
+      "description": "Defines the architecture model's data shape and persists it to disk. Every write may name the actor behind it; upstream's sign-off records when and what, never who.",
+      "responsibilities": [
+        {
+          "id": "resp-25",
+          "statement": "**Define** the model's node, link, responsibility, and directive schema.",
+          "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-26",
+          "statement": "**Persist and load** the committed and planned model files for a project.",
+          "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-27",
+          "statement": "**Validate** the model's structural integrity and source coverage.",
+          "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-696",
+          "statement": "retag() also moves work by a bare element id (a responsibility/link alone), by a whole change id (chg-N, moving everything filed under it), and detaches everything under a target back to unfiled when no destination is given — only the node/group-carrier form and the invalid-destination refusal are currently described.",
+          "lastTouchedAt": 1786085474
+        },
+        {
+          "id": "resp-ypm3tm",
+          "statement": "**When** a write names an actor, **record** it on the resulting history event, verdict or sign-off",
+          "concern": "oversight",
+          "lastTouchedAt": 1789075624
+        },
+        {
+          "id": "resp-0zqgmj",
+          "statement": "**While** no actor is supplied, **record** the write as unattributed rather than refusing it",
+          "concern": "oversight",
+          "lastTouchedAt": 1789075624
+        }
+      ],
+      "properties": [
+        {
+          "label": "copilot",
+          "description": "Per-agent model/effort settings for the Copilot CLI",
+          "lastTouchedAt": 1786085524
         }
       ]
     }
@@ -16870,6 +16999,44 @@
       "src": "node-669",
       "dst": "node-435",
       "label": "lists project files"
+    },
+    {
+      "id": "link-node-b6m3p0-node-rqqgcp",
+      "src": "node-b6m3p0",
+      "dst": "node-rqqgcp",
+      "label": "dispatches commands"
+    },
+    {
+      "id": "link-node-d1grkd-node-b6m3p0",
+      "src": "node-d1grkd",
+      "dst": "node-b6m3p0",
+      "label": "serves the router"
+    },
+    {
+      "id": "link-node-yz4jd6-node-4",
+      "src": "node-yz4jd6",
+      "dst": "node-4",
+      "label": "reads and writes the model"
+    },
+    {
+      "id": "link-node-yz4jd6-node-5",
+      "src": "node-yz4jd6",
+      "dst": "node-5",
+      "label": "resolves anchors",
+      "method": "in-process"
+    },
+    {
+      "id": "link-node-yz4jd6-node-3",
+      "src": "node-yz4jd6",
+      "dst": "node-3",
+      "label": "drives agent sessions"
+    },
+    {
+      "id": "link-node-yz4jd6-node-664",
+      "src": "node-yz4jd6",
+      "dst": "node-664",
+      "label": "proxies previews",
+      "method": "HTTP"
     }
   ],
   "groups": [
@@ -18031,6 +18198,12 @@
         "symbol": "orient"
       }
     ],
+    "resp-0zqgmj": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "by_actor"
+      }
+    ],
     "resp-100": [
       {
         "pattern": "crates/scryer-mcp/src/tools/generation.rs",
@@ -18465,6 +18638,12 @@
       {
         "pattern": "src/special/InboxPage.tsx",
         "symbol": "InboxPage"
+      }
+    ],
+    "resp-1xakm0": [
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "write_planned"
       }
     ],
     "resp-202": [
@@ -19273,6 +19452,12 @@
       {
         "pattern": "src-tauri/src/lib.rs",
         "symbol": "ensure_full_path"
+      }
+    ],
+    "resp-38y6ah": [
+      {
+        "pattern": "crates/scryer-extract/src/test_status.rs",
+        "symbol": "record_test_results_as"
       }
     ],
     "resp-390": [
@@ -20239,6 +20424,12 @@
       {
         "pattern": "crates/scryer-core/src/model.rs",
         "symbol": "ScryModel"
+      }
+    ],
+    "resp-5ydjqq": [
+      {
+        "pattern": "crates/scryer-app/src/bin/scryer_serve.rs",
+        "symbol": "main"
       }
     ],
     "resp-6": [
@@ -21634,16 +21825,40 @@
         "symbol": "get"
       }
     ],
+    "resp-9jnw6k": [
+      {
+        "pattern": "crates/scryer-app/src/router/http.rs",
+        "symbol": "read"
+      }
+    ],
+    "resp-9r46dt": [
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "dispatch"
+      }
+    ],
     "resp-a44pxh": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "sign_off"
       }
     ],
+    "resp-ap0x79": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "by_actor"
+      }
+    ],
     "resp-by5pbn": [
       {
         "pattern": "src-tauri/src/project.rs",
         "symbol": "read_fold_refusals"
+      }
+    ],
+    "resp-csjk7a": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "sign_off_as"
       }
     ],
     "resp-dpr8pk": [
@@ -21664,6 +21879,12 @@
         "symbol": "ScryerServer"
       }
     ],
+    "resp-h36w17": [
+      {
+        "pattern": "crates/scryer-app/src/router/http.rs",
+        "symbol": "wanted_projects"
+      }
+    ],
     "resp-h9rkbc": [
       {
         "pattern": "crates/scryer-extract/src/test_status.rs",
@@ -21674,6 +21895,18 @@
       {
         "pattern": "src/inbox.ts",
         "symbol": "buildInboxCards"
+      }
+    ],
+    "resp-j5banp": [
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "write_planned"
+      }
+    ],
+    "resp-j8dkfg": [
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "COMMANDS"
       }
     ],
     "resp-jqk8cq": [
@@ -21692,6 +21925,12 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/read.rs",
         "symbol": "get_health"
+      }
+    ],
+    "resp-m7q1t5": [
+      {
+        "pattern": "crates/scryer-app/src/router/http.rs",
+        "symbol": "stream"
       }
     ],
     "resp-n0xw7w": [
@@ -21766,10 +22005,27 @@
         "symbol": "get_rules"
       }
     ],
+    "resp-v8t834": [
+      {
+        "pattern": "crates/scryer-app/src/lib.rs"
+      }
+    ],
     "resp-vk8n9a": [
       {
         "pattern": "crates/scryer-extract/src/lang.rs",
         "symbol": "collect_clj_imports"
+      }
+    ],
+    "resp-vmgx03": [
+      {
+        "pattern": "crates/scryer-app/src/state.rs",
+        "symbol": "watch"
+      }
+    ],
+    "resp-wtzj6y": [
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "dispatch"
       }
     ],
     "resp-x31891": [
@@ -21789,6 +22045,12 @@
         "pattern": "crates/tree-sitter-clojure/**"
       }
     ],
+    "resp-ypm3tm": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "by_actor"
+      }
+    ],
     "resp-z9kn5w": [
       {
         "pattern": "crates/scryer-mcp/src/tools/misc.rs",
@@ -21797,6 +22059,12 @@
     ]
   },
   "testMap": {
+    "resp-0zqgmj": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "an_event_carrying_an_actor_names_it_instead_of_the_agent"
+      }
+    ],
     "resp-1": [
       {
         "pattern": "crates/xtask/tests/cli.rs",
@@ -21827,6 +22095,12 @@
       {
         "pattern": "tests/inbox.test.ts",
         "symbol": "opens the focused card on Enter and runs a/r/e only when the card carries that action"
+      }
+    ],
+    "resp-1xakm0": [
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "a_plan_write_on_a_stale_base_revision_is_refused_with_the_current_one"
       }
     ],
     "resp-2e7ps6": [
@@ -21971,6 +22245,12 @@
       {
         "pattern": "src-tauri/src/hooks.rs",
         "symbol": "prune_drops_only_stale_touches"
+      }
+    ],
+    "resp-38y6ah": [
+      {
+        "pattern": "crates/scryer-extract/src/test_status.rs",
+        "symbol": "a_verdict_recorded_by_a_named_actor_stores_the_actor"
       }
     ],
     "resp-390": [
@@ -22661,6 +22941,12 @@
       {
         "pattern": "crates/scryer-core/src/storage.rs",
         "symbol": "an_unchanged_model_round_trips_byte_identical"
+      }
+    ],
+    "resp-5ydjqq": [
+      {
+        "pattern": "crates/scryer-app/tests/serve.rs",
+        "symbol": "serve_answers_commands_and_lists_what_it_serves"
       }
     ],
     "resp-6": [
@@ -23443,6 +23729,18 @@
         "symbol": "slugs_are_unique_and_get_resolves_every_one"
       }
     ],
+    "resp-9jnw6k": [
+      {
+        "pattern": "crates/scryer-app/src/router/http.rs",
+        "symbol": "an_actor_header_is_believed_from_loopback_and_dropped_from_anywhere_else"
+      }
+    ],
+    "resp-9r46dt": [
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "a_named_command_reaches_its_function_and_returns_its_result"
+      }
+    ],
     "resp-a44pxh": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -23453,10 +23751,22 @@
         "symbol": "restamp_signoffs_refreshes_signed_changes_only"
       }
     ],
+    "resp-ap0x79": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "an_event_carrying_an_actor_names_it_instead_of_the_agent"
+      }
+    ],
     "resp-by5pbn": [
       {
         "pattern": "src-tauri/src/project.rs",
         "symbol": "canvas_sign_off_and_saves_keep_the_developer_as_the_author_of_intent"
+      }
+    ],
+    "resp-csjk7a": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "sign_off_records_the_actor_who_gave_the_go_ahead"
       }
     ],
     "resp-dpr8pk": [
@@ -23489,6 +23799,12 @@
         "symbol": "every_description_ends_with_a_rules_line_that_resolves"
       }
     ],
+    "resp-h36w17": [
+      {
+        "pattern": "crates/scryer-app/src/router/http.rs",
+        "symbol": "a_client_naming_no_project_is_streamed_nothing"
+      }
+    ],
     "resp-h9rkbc": [
       {
         "pattern": "crates/scryer-extract/src/test_status.rs",
@@ -23503,6 +23819,18 @@
       {
         "pattern": "tests/inbox.test.ts",
         "symbol": "clears a refused fold's card when the refusals ledger no longer holds it"
+      }
+    ],
+    "resp-j5banp": [
+      {
+        "pattern": "crates/scryer-app/tests/serve.rs",
+        "symbol": "a_write_waits_for_whoever_else_holds_the_model_lock"
+      }
+    ],
+    "resp-j8dkfg": [
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "the_surface_names_all_thirty_nine_desktop_commands"
       }
     ],
     "resp-jqk8cq": [
@@ -23521,6 +23849,12 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/read.rs",
         "symbol": "get_health_aggregates_anchors_per_scope"
+      }
+    ],
+    "resp-m7q1t5": [
+      {
+        "pattern": "crates/scryer-app/src/router/http.rs",
+        "symbol": "the_stream_forwards_every_event_for_the_projects_a_client_names"
       }
     ],
     "resp-n0xw7w": [
@@ -23595,6 +23929,18 @@
         "symbol": "clojure_ns_requires_become_imports"
       }
     ],
+    "resp-vmgx03": [
+      {
+        "pattern": "crates/scryer-app/src/state.rs",
+        "symbol": "a_model_file_changing_on_disk_is_announced_to_the_host"
+      }
+    ],
+    "resp-wtzj6y": [
+      {
+        "pattern": "crates/scryer-app/src/commands/mod.rs",
+        "symbol": "an_unknown_command_is_refused_naming_the_ones_that_exist"
+      }
+    ],
     "resp-x31891": [
       {
         "pattern": "crates/scryer-extract/src/context.rs",
@@ -23611,6 +23957,12 @@
       {
         "pattern": "crates/tree-sitter-clojure/src/lib.rs",
         "symbol": "grammar_loads_and_parses"
+      }
+    ],
+    "resp-ypm3tm": [
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "a_write_naming_an_actor_records_it_and_one_without_stays_unattributed"
       }
     ],
     "resp-z9kn5w": [
@@ -23669,6 +24021,26 @@
     "node-9": [
       {
         "pattern": "src-tauri/**/*"
+      }
+    ],
+    "node-b6m3p0": [
+      {
+        "pattern": "crates/scryer-app/src/router/**"
+      }
+    ],
+    "node-d1grkd": [
+      {
+        "pattern": "crates/scryer-app/src/bin/**"
+      }
+    ],
+    "node-rqqgcp": [
+      {
+        "pattern": "crates/scryer-app/src/commands/**"
+      }
+    ],
+    "node-yz4jd6": [
+      {
+        "pattern": "crates/scryer-app/**"
       }
     ]
   },

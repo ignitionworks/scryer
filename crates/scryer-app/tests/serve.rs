@@ -60,26 +60,12 @@ impl Serve {
     }
 
     fn connect(&self) -> TcpStream {
-        let s = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
-        s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-        s
+        connect(self.port)
     }
 
     /// `POST /api/cmd/{name}`; returns `(status, body)`.
     fn post(&self, name: &str, body: &str, actor: Option<&str>) -> (u16, String) {
-        let mut s = self.connect();
-        let actor_line = actor
-            .map(|a| format!("X-Actor: {a}\r\n"))
-            .unwrap_or_default();
-        let request = format!(
-            "POST /api/cmd/{name} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
-             Content-Length: {}\r\n{actor_line}Connection: close\r\n\r\n{body}",
-            body.len()
-        );
-        s.write_all(request.as_bytes()).unwrap();
-        let mut raw = String::new();
-        s.read_to_string(&mut raw).unwrap();
-        split_response(&raw)
+        post(self.port, name, body, actor)
     }
 
     fn get(&self, path: &str) -> (u16, String) {
@@ -95,6 +81,30 @@ impl Serve {
     }
 }
 
+fn connect(port: u16) -> TcpStream {
+    let s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    s
+}
+
+/// `POST /api/cmd/{name}` against a port, so a test can call the service from
+/// a thread of its own without borrowing the [`Serve`] that owns the process.
+fn post(port: u16, name: &str, body: &str, actor: Option<&str>) -> (u16, String) {
+    let mut s = connect(port);
+    let actor_line = actor
+        .map(|a| format!("X-Actor: {a}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "POST /api/cmd/{name} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\n{actor_line}Connection: close\r\n\r\n{body}",
+        body.len()
+    );
+    s.write_all(request.as_bytes()).unwrap();
+    let mut raw = String::new();
+    s.read_to_string(&mut raw).unwrap();
+    split_response(&raw)
+}
+
 fn split_response(raw: &str) -> (u16, String) {
     let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw, ""));
     let status = head
@@ -103,15 +113,10 @@ fn split_response(raw: &str) -> (u16, String) {
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|c| c.parse().ok())
         .unwrap_or(0);
-    // The router answers with a content length, so the body is the whole tail;
-    // a chunked answer would carry its size line, which the JSON parse below
-    // would reject loudly rather than silently.
-    let body = body
-        .strip_prefix(|_: char| false)
-        .unwrap_or(body)
-        .trim_start_matches(|c: char| c.is_ascii_hexdigit() || c == '\r' || c == '\n')
-        .to_string();
-    (status, body)
+    // Every route answers with a content length, so the body is the whole
+    // tail; a chunked answer would break the JSON parse loudly rather than
+    // being silently mis-read.
+    (status, body.to_string())
 }
 
 fn project() -> tempfile::TempDir {
@@ -251,4 +256,72 @@ fn serve_streams_a_model_change_to_a_host_holding_the_stream() {
         }
     }
     assert!(saw, "the model change reached the host's stream");
+}
+
+/// While it serves a project, the service takes the SAME model lock the
+/// desktop app and the agent's MCP process take — so a write cannot land
+/// while another writer holds it, and the two never clobber each other.
+///
+/// The lock is an advisory OS file lock, so holding it from this test process
+/// is exactly what a desktop app or an agent session holding it looks like.
+#[test]
+fn a_write_waits_for_whoever_else_holds_the_model_lock() {
+    let dir = project();
+    let serve = Serve::start(dir.path());
+    let path = dir
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let r = scryer_core::ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+    let (status, body) = serve.post(
+        "read_planned",
+        &serde_json::json!({ "cwd": path }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    let read: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let mut plan: scryer_core::ScryModel =
+        serde_json::from_str(read["data"].as_str().unwrap()).unwrap();
+    plan.nodes[0].description = Some("written under the lock".into());
+    let args = serde_json::json!({
+        "cwd": path,
+        "data": serde_json::to_string(&plan).unwrap(),
+        "baseRevision": read["revision"],
+    })
+    .to_string();
+
+    // Somebody else — the desktop, or an agent's MCP process — is mid-write.
+    let held = scryer_core::lock_model(&r).unwrap();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let port = serve.port;
+    let writer = std::thread::spawn(move || {
+        let out = post(port, "write_planned", &args, None);
+        let _ = tx.send(());
+        out
+    });
+
+    // The write does not land while the lock is held.
+    assert!(
+        rx.recv_timeout(Duration::from_millis(700)).is_err(),
+        "the write went through while another writer held the lock"
+    );
+    let still = scryer_core::read_planned_at(&r).unwrap();
+    assert_ne!(
+        still.nodes[0].description.as_deref(),
+        Some("written under the lock")
+    );
+
+    // The other writer finishes; ours goes through.
+    drop(held);
+    let (status, body) = writer.join().unwrap();
+    assert_eq!(status, 200, "{body}");
+    let landed = scryer_core::read_planned_at(&r).unwrap();
+    assert_eq!(
+        landed.nodes[0].description.as_deref(),
+        Some("written under the lock")
+    );
 }
