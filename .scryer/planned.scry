@@ -13426,7 +13426,7 @@
       "kind": "component",
       "name": "Host Bridge",
       "parentId": "node-2",
-      "description": "The API a mounting host drives the UI through: a navigation command, a selection event and a theme hook. Inert when no host is attached, so the desktop app is unchanged.",
+      "description": "The API a mounting host drives the UI through: navigate, open a project, a selection event, a theme hook and a service-shaped transport adapter. Inert when no host is attached.",
       "responsibilities": [
         {
           "id": "resp-qzkjwm",
@@ -13452,6 +13452,21 @@
           "id": "resp-9ev5dh",
           "statement": "**While** no host is attached, **behave** exactly as the desktop app does.",
           "lastTouchedAt": 1789175512
+        },
+        {
+          "id": "resp-7pgwkq",
+          "statement": "**When** a host names a project path, **open** it exactly as the picker would, bumping the recent list, and **say** when there is no model to open or the project is legacy.",
+          "lastTouchedAt": 1789181739
+        },
+        {
+          "id": "resp-4cjjcp",
+          "statement": "**While** mounted in a host's pane, **lay out** to the space the pane gives rather than the window, the aside and the project path keyed to the page container.",
+          "lastTouchedAt": 1789181739
+        },
+        {
+          "id": "resp-svcshp",
+          "statement": "**When** a host supplies the engine service's transport, **speak** the shapes the service answers with for read_planned and write_planned, remembering the revision per project, so the app is unchanged; sending the base revision stays off unless the host turns it on.",
+          "lastTouchedAt": 1789181739
         }
       ]
     }
@@ -17403,14 +17418,46 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-xwxy35",
+      "rationale": "The mounted UI behaves as a guest: a host can open a project directly, the layout follows the pane it is given rather than the window, and the bridge speaks the engine service's command shapes so the app is unchanged",
+      "createdAt": 1789181724,
+      "signedOff": {
+        "at": 1789181763,
+        "entries": {
+          "node:node-5b6qhs": {
+            "hash": "482da77ef56a8b78"
+          },
+          "resp:resp-4cjjcp": {
+            "hash": "41383a41f5e060da",
+            "statement": "**While** mounted in a host's pane, **lay out** to the space the pane gives rather than the window, the aside and the project path keyed to the page container.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-7pgwkq": {
+            "hash": "373e8bdbcc46d869",
+            "statement": "**When** a host names a project path, **open** it exactly as the picker would, bumping the recent list, and **say** when there is no model to open or the project is legacy.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-svcshp": {
+            "hash": "874ba7ff2ba48071",
+            "statement": "**When** a host supplies the engine service's transport, **speak** the shapes the service answers with for read_planned and write_planned, remembering the revision per project, so the app is unchanged; sending the base revision stays off unless the host turns it on.",
+            "host": "node-5b6qhs"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
+    "node:node-5b6qhs": "chg-xwxy35",
     "node:node-rqqgcp": "chg-dakn8p",
+    "resp:resp-4cjjcp": "chg-xwxy35",
     "resp:resp-683": "chg-qxjsaq",
+    "resp:resp-7pgwkq": "chg-xwxy35",
     "resp:resp-9yasmq": "chg-scf822",
     "resp:resp-bs0y4b": "chg-dakn8p",
     "resp:resp-exprfs": "chg-dakn8p",
-    "resp:resp-kc1r12": "chg-j88eqf"
+    "resp:resp-kc1r12": "chg-j88eqf",
+    "resp:resp-svcshp": "chg-xwxy35"
   }
 }
