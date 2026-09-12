@@ -13305,6 +13305,11 @@
           "statement": "**When** a plan write names a base revision that is not current, **refuse** it with the current revision",
           "concern": "failure-handling",
           "lastTouchedAt": 1789073829
+        },
+        {
+          "id": "resp-bs0y4b",
+          "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained file the export script builds, from the committed model or the plan as asked, and **return** it",
+          "lastTouchedAt": 1789178768
         }
       ]
     },
