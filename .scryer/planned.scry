@@ -13307,6 +13307,12 @@
           "lastTouchedAt": 1789073829
         },
         {
+          "id": "resp-tt9ags",
+          "statement": "**When** a plan is written, **keep** the change registry on disk authoritative, taking only the edit tagging from the client, so a stale copy never drops an open change or a sign-off",
+          "concern": "persistence",
+          "lastTouchedAt": 1789180515
+        },
+        {
           "id": "resp-bs0y4b",
           "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained file the export script builds, from the committed model or the plan as asked, and **return** it",
           "lastTouchedAt": 1789178768

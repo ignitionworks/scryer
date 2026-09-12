@@ -13246,6 +13246,12 @@
           "id": "resp-bs0y4b",
           "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained file the export script builds, from the committed model or the plan as asked, and **return** it",
           "lastTouchedAt": 1789179403
+        },
+        {
+          "id": "resp-tt9ags",
+          "statement": "**When** a plan is written, **keep** the change registry on disk authoritative, taking only the edit tagging from the client, so a stale copy never drops an open change or a sign-off",
+          "concern": "persistence",
+          "lastTouchedAt": 1789181113
         }
       ]
     },
@@ -22172,6 +22178,12 @@
         "symbol": "sign_off_change"
       }
     ],
+    "resp-tt9ags": [
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "write_planned"
+      }
+    ],
     "resp-v21z9m": [
       {
         "pattern": "src/special/InboxPage.tsx",
@@ -24174,6 +24186,12 @@
       {
         "pattern": "src-tauri/src/project.rs",
         "symbol": "canvas_sign_off_and_saves_keep_the_developer_as_the_author_of_intent"
+      }
+    ],
+    "resp-tt9ags": [
+      {
+        "pattern": "crates/scryer-app/tests/serve.rs",
+        "symbol": "resp_tt9ags_a_plan_write_keeps_the_registry_on_disk_authoritative"
       }
     ],
     "resp-v3p14p": [
