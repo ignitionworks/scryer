@@ -12,6 +12,8 @@
  * assertion rather than a hope.
  */
 
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostBridge } from "../src/host/bridge";
 import { isStaleRevision, serviceInvoke, type HostInvoke } from "../src/host/commands";
@@ -752,5 +754,60 @@ describe("resp-zxz2y8 — while a host theme is applied", () => {
     clearHostTheme();
     expect(dom.writes).toBe(0);
     expect(dom.read("scryer:theme")).toBe(mine);
+  });
+});
+
+describe("resp-4cjjcp — laying out to the pane, not the window", () => {
+  const src = fileURLToPath(new URL("../src/", import.meta.url));
+  const read = (rel: string) => readFileSync(src + rel, "utf8");
+  const sources = (dir = src): string[] =>
+    readdirSync(dir).flatMap((entry) => {
+      const full = dir + entry;
+      if (statSync(full).isDirectory()) return sources(full + "/");
+      return /\.tsx?$/.test(entry) ? [full] : [];
+    });
+
+  it("resp-4cjjcp: lays out to the space it is given, never to the window", () => {
+    // `h-screen`/`w-screen` are the window's height and width. In a host's
+    // pane they are a promise about a box the app does not have, so the roots
+    // fill their PARENT and the host sizes the mount point.
+    const offenders = sources().filter((f) => /\b[hw]-screen\b/.test(readFileSync(f, "utf8")));
+    expect(offenders).toEqual([]);
+
+    // Which needs a height chain above them — in the desktop app, the document.
+    const css = read("index.css");
+    expect(css).toMatch(/html,\s*body,\s*#root\s*\{[^}]*height:\s*100%/);
+  });
+
+  it("resp-4cjjcp: keys every responsive decision to a container, not the viewport", () => {
+    // Tailwind's `sm:`/`lg:` are viewport media queries: in a pane they ask
+    // about a window nobody is looking at, so the aside would open at a width
+    // the pane does not have. There should be none left anywhere.
+    const viewportKeyed = sources().filter((f) =>
+      /className=[^>]*?\b(?:sm|md|lg|xl|2xl):[a-z[]/.test(readFileSync(f, "utf8")),
+    );
+    expect(viewportKeyed).toEqual([]);
+  });
+
+  it("resp-4cjjcp: the aside and the project path answer to their own container", () => {
+    // The rail: 300px beside a readable article, so it waits for a page
+    // container wide enough to hold both.
+    const rail = read("page/DetailRail.tsx");
+    expect(rail).toContain('className="ml-auto hidden w-[300px] shrink-0 @min-[60rem]:block"');
+    expect(read("NodePage.tsx")).toContain("@container ${PAGE_COL} flex gap-8");
+
+    // The path: the same width the viewport `sm:` breakpoint used, now asked
+    // of the bar itself.
+    const top = read("TopBar.tsx");
+    expect(top).toContain("@min-[40rem]:block");
+    expect(top).toContain("@container flex h-9 shrink-0 items-center");
+  });
+
+  it("resp-4cjjcp: keeps the bar's overlay out of the bar's containment", () => {
+    // A size container is a containment context, so it becomes the containing
+    // block for a `position: fixed` descendant. The context menu is positioned
+    // in VIEWPORT coordinates, so nested inside the bar it would open at the
+    // wrong end of the screen — it is a sibling of the bar, not a child.
+    expect(read("TopBar.tsx")).toContain("</div>\n      {menu && (");
   });
 });

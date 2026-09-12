@@ -349,7 +349,7 @@ export function DetailRail({
     own.length > 0 || (!!committed && prevOwn.join("\n") !== own.join("\n"));
   if (!editor && !hasDirectives && !notes) return null;
   return (
-    <aside className="ml-auto hidden w-[300px] shrink-0 lg:block">
+    <aside className="ml-auto hidden w-[300px] shrink-0 @min-[60rem]:block">
       <div className="sticky top-0 flex flex-col gap-8">
         <DirectivesSection
           node={node}

@@ -26,7 +26,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         // The window is frameless; a crash unmounts TopBar and with it the only
         // way to move or close the window, so this screen carries its own strip.
-        <div className="flex h-screen w-screen flex-col bg-[var(--surface)]">
+        <div className="flex h-full w-full flex-col bg-[var(--surface)]">
           <div
             data-tauri-drag-region
             className="flex h-9 shrink-0 items-center justify-end px-2 select-none"
