@@ -691,11 +691,17 @@ impl ScryerServer {
                 ))]));
             }
         };
-        let n = match scryer_core::changes::sign_off_as(
+        // The host's two facts: WHO signed (the actor) and, when the actor is
+        // signing as someone's proxy, WHO FOR. Both are recorded; neither is
+        // the agent's to invent, so both come from the environment.
+        let actor = crate::helpers::env_actor();
+        let on_behalf_of = crate::helpers::env_on_behalf_of();
+        let n = match scryer_core::changes::sign_off_for(
             &mut plan,
             &target,
             scryer_core::drift::now_secs(),
-            crate::helpers::env_actor().as_deref(),
+            actor.as_deref(),
+            on_behalf_of.as_deref(),
         ) {
             Ok(n) => n,
             Err(e) => {
@@ -711,9 +717,14 @@ impl ScryerServer {
         drop(_lock);
         // The session keeps working on the change it just signed off.
         self.set_session_change(Some((model_ref.project_path().to_path_buf(), target.clone())));
+        let signature = match (actor.as_deref(), on_behalf_of.as_deref()) {
+            (Some(a), Some(p)) => format!(" Signed by {a} on behalf of {p}, and recorded as such."),
+            (Some(a), None) => format!(" Signed by {a}."),
+            _ => String::new(),
+        };
         return Ok(CallToolResult::success(vec![Content::text(format!(
-            "Signed off {target} — {n} entr{} snapshotted as the developer's intent. From \
-             here, a claim you reword or add under it is an amendment/addition: it lands \
+            "Signed off {target} — {n} entr{} snapshotted as the developer's intent.{signature} \
+             From here, a claim you reword or add under it is an amendment/addition: it lands \
              as vagrant for the developer's verdict at mark_implemented and does not fold. \
              If implementing shows a planned claim is wrong, reword it and fold the rest — \
              the reword waits.",

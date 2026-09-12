@@ -111,6 +111,15 @@ pub struct SignOff {
     /// existed, so upstream's models still load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
+    /// The PERSON the signature was given for, when [`SignOff::by`] signed as
+    /// their proxy — a host whose agent signs for a developer records the
+    /// agent in `by` and the developer here. Two names, never one: the proxy
+    /// counts as its own signer (`by` is the identity any countersignature
+    /// test compares) yet the signature is never read as the person's own.
+    /// Absent on a direct sign-off, and on every file written before the field
+    /// existed, so upstream's models still load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_behalf_of: Option<String>,
     /// Element key ([`element_key`]) → the entry's signed content.
     #[serde(default)]
     pub entries: BTreeMap<String, SignedEntry>,
@@ -290,6 +299,25 @@ pub fn sign_off_as(
     now: u64,
     actor: Option<&str>,
 ) -> Result<usize, String> {
+    sign_off_for(model, change_id, now, actor, None)
+}
+
+/// [`sign_off_as`], naming the PERSON the signature is FOR when `actor` gave
+/// it as their proxy. `actor` is the signer, `on_behalf_of` the person; a
+/// direct sign-off passes `None` and leaves [`SignOff::on_behalf_of`] unset.
+///
+/// The pair is atomic. A named `actor` takes the `on_behalf_of` handed in with
+/// it — whoever signs last owns both halves of the attribution. `actor: None`
+/// is the canvas's unattributed re-stamp ([`restamp_signoffs`]) and carries
+/// BOTH forward: erasing either half would turn a recorded proxy signature
+/// into someone's own, or into nobody's.
+pub fn sign_off_for(
+    model: &mut ScryModel,
+    change_id: &str,
+    now: u64,
+    actor: Option<&str>,
+    on_behalf_of: Option<&str>,
+) -> Result<usize, String> {
     let keys: Vec<String> = model
         .change_map
         .iter()
@@ -304,13 +332,19 @@ pub fn sign_off_as(
         .iter_mut()
         .find(|c| c.id == change_id)
         .ok_or_else(|| format!("no open change '{change_id}'"))?;
-    let previously = meta.signed_off.as_ref().and_then(|s| s.by.clone());
-    let by = actor
-        .map(str::trim)
-        .filter(|a| !a.is_empty())
-        .map(str::to_string)
-        .or(previously);
-    meta.signed_off = Some(SignOff { at: now, by, entries });
+    let named = |s: Option<&str>| s.map(str::trim).filter(|a| !a.is_empty()).map(str::to_string);
+    let (by, on_behalf_of) = match named(actor) {
+        // A named signer owns the whole attribution, proxy or not.
+        Some(by) => (Some(by), named(on_behalf_of)),
+        // Unattributed re-stamp: keep whoever signed, and who for. With
+        // nobody signed before either, there is no proxy to record — "on
+        // behalf of" says nothing without the actor it qualifies.
+        None => match meta.signed_off.as_ref() {
+            Some(prev) => (prev.by.clone(), prev.on_behalf_of.clone()),
+            None => (None, None),
+        },
+    };
+    meta.signed_off = Some(SignOff { at: now, by, on_behalf_of, entries });
     Ok(n)
 }
 
@@ -774,6 +808,49 @@ mod tests {
         let legacy: ScryModel =
             serde_json::from_str(r#"{"version":"1","nodes":[],"links":[]}"#).unwrap();
         assert!(!requires_countersigned_folds(&legacy));
+    }
+
+    /// resp-k4yw29 — a sign-off one actor makes FOR another person records
+    /// both names: the signer in `by` (so it counts as a different signer) and
+    /// the person in `onBehalfOf` (so it is never read as their own). A direct
+    /// sign-off leaves `onBehalfOf` unset, and a canvas re-stamp erases
+    /// neither half.
+    #[test]
+    fn resp_k4yw29_a_proxy_sign_off_records_the_signer_and_the_person_it_is_for() {
+        let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new")]);
+        let cid = open_change(&mut plan, "the change", 100);
+        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &cid);
+
+        // The host's agent signs for the developer.
+        sign_off_for(&mut plan, &cid, 200, Some("claude-session-7"), Some("jesseh")).unwrap();
+        let snap = plan.changes[0].signed_off.clone().unwrap();
+        assert_eq!(snap.by.as_deref(), Some("claude-session-7"), "the SIGNER is the actor");
+        assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"), "the person it is for");
+        assert_eq!(snap.entries.len(), 1, "it is still a real snapshot");
+
+        // A canvas save re-stamps unattributed: both halves survive.
+        restamp_signoffs(&mut plan, 300);
+        let snap = plan.changes[0].signed_off.as_ref().unwrap();
+        assert_eq!(snap.at, 300);
+        assert_eq!(snap.by.as_deref(), Some("claude-session-7"));
+        assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"), "a re-stamp is not a disavowal");
+
+        // A named signer owns the whole attribution: signing directly over a
+        // proxy signature clears the person, it does not inherit them.
+        sign_off_for(&mut plan, &cid, 400, Some("jesseh"), None).unwrap();
+        let snap = plan.changes[0].signed_off.as_ref().unwrap();
+        assert_eq!(snap.by.as_deref(), Some("jesseh"));
+        assert!(snap.on_behalf_of.is_none(), "a direct sign-off is nobody's proxy");
+
+        // The plain call is a direct sign-off.
+        let mut direct = model_with_resps(&[("r1", "exists")]);
+        let cid = open_change(&mut direct, "direct", 100);
+        sign_off_as(&mut direct, &cid, 200, Some("jesseh")).unwrap();
+        assert!(direct.changes[0].signed_off.as_ref().unwrap().on_behalf_of.is_none());
+
+        // Upstream's shape (no `onBehalfOf`) still loads.
+        let legacy: SignOff = serde_json::from_str(r#"{"at":1,"by":"jesseh"}"#).unwrap();
+        assert!(legacy.on_behalf_of.is_none());
     }
 
     /// A model whose single component `n1` carries the given responsibilities.

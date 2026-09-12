@@ -244,6 +244,19 @@ pub(crate) fn env_actor() -> Option<String> {
         .filter(|a| !a.is_empty())
 }
 
+/// The PERSON this MCP process signs FOR, from `SCRYER_ON_BEHALF_OF` — set by
+/// a host whose agent approves a change on a developer's behalf, beside the
+/// `SCRYER_ACTOR` that names the agent itself. Env-scoped like the actor, and
+/// for the same reason: who an agent is, and who it speaks for, are the host's
+/// facts to assert, never the agent's to claim in a tool call. Unset is a
+/// direct sign-off, which is every plain `scryer-mcp` invocation.
+pub(crate) fn env_on_behalf_of() -> Option<String> {
+    std::env::var("SCRYER_ON_BEHALF_OF")
+        .ok()
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+}
+
 /// Record a committed-model history event, best-effort: a logging failure must
 /// never abort the model operation that produced it (see [`scryer_core::history`]).
 pub(crate) fn record_event(model_ref: &ModelRef, ev: HistoryEvent) {
