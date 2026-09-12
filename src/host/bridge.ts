@@ -16,18 +16,30 @@
 import { resolveNav } from "./navigation";
 import { applyHostTheme, clearHostTheme } from "./theme";
 import { sameSelection } from "./selection";
-import type { HostBridge, HostSelection, NavDriver, NavResult, NavTarget } from "./types";
+import type {
+  HostBridge,
+  HostSelection,
+  NavDriver,
+  NavResult,
+  NavTarget,
+  OpenDriver,
+  OpenResult,
+} from "./types";
 
 /** The bridge plus the workspace-facing half a host never sees. */
 export interface WiredHostBridge extends HostBridge {
   /** The workspace offers its callbacks. Returns the detach. */
   attach: (driver: NavDriver) => () => void;
+  /** The app shell offers the one thing that works before a workspace exists.
+   *  Separate lifetime: the shell outlives every project opened in it. */
+  attachOpener: (driver: OpenDriver) => () => void;
   /** The workspace reports where the user is. Emitted only on a real change. */
   publish: (selection: HostSelection) => void;
 }
 
 export function createHostBridge(): WiredHostBridge {
   let driver: NavDriver | null = null;
+  let opener: OpenDriver | null = null;
   let selection: HostSelection | null = null;
   const listeners = new Set<(selection: HostSelection) => void>();
 
@@ -42,6 +54,11 @@ export function createHostBridge(): WiredHostBridge {
   };
 
   const bridge: WiredHostBridge = {
+    async openProject(path: string): Promise<OpenResult> {
+      if (!opener) return { ok: false, status: "unattached" };
+      return opener.open(path);
+    },
+
     navigateTo(target: NavTarget): NavResult {
       if (!driver) return { ok: false, reason: "no workspace attached" };
       const action = resolveNav(driver.model, target);
@@ -86,6 +103,13 @@ export function createHostBridge(): WiredHostBridge {
       driver = next;
       return () => {
         if (driver === next) driver = null;
+      };
+    },
+
+    attachOpener(next: OpenDriver) {
+      opener = next;
+      return () => {
+        if (opener === next) opener = null;
       };
     },
 

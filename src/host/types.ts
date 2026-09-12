@@ -28,6 +28,22 @@ export type NavTarget =
   | { kind: "change"; id: string }
   | { kind: "view"; id: NavView };
 
+/** How an open turned out. The states mirror the app's own `ProjectStatus`,
+ *  because a host asking for a project wants to render what the picker would
+ *  have shown — "no model here yet", "that model is too old" — rather than
+ *  watch a spinner that never resolves. */
+export type OpenResult =
+  | { ok: true; status: "ready" }
+  | {
+      ok: false;
+      /** `needs-model` — a directory with no `.scryer` model in it yet.
+       *  `legacy` — a model from a scryer too old to load.
+       *  `error` — the path could not be read at all; `message` says why.
+       *  `unattached` — no app is mounted to open anything. */
+      status: "needs-model" | "legacy" | "error" | "unattached";
+      message?: string;
+    };
+
 /** What `navigateTo` answers. A target naming something the model doesn't hold
  *  is reported, never guessed at and never silently dropped. */
 export type NavResult = { ok: true } | { ok: false; reason: string };
@@ -86,6 +102,13 @@ export interface ResolvedHostTheme {
   ignored: string[];
 }
 
+/** The app shell's side of the bridge: opening a project, which happens BEFORE
+ *  a workspace exists — the picker is what is mounted until one does, so this
+ *  is attached a level above [`NavDriver`] and lives for the app's whole run. */
+export interface OpenDriver {
+  open: (path: string) => Promise<OpenResult>;
+}
+
 /** The workspace's side of the bridge: the callbacks a host's navigation is
  *  performed through. Filled in by the mounted workspace, absent before a
  *  project is open. */
@@ -103,6 +126,10 @@ export interface NavDriver {
 /** The object a host holds. Stable for the app's whole lifetime: a host can
  *  keep the reference, subscribe once, and call it whenever. */
 export interface HostBridge {
+  /** Open a project, exactly as choosing it on the welcome page would —
+   *  the recent list included, since a host opening a project is the user
+   *  opening a project. Answers with what the picker would have shown. */
+  openProject: (path: string) => Promise<OpenResult>;
   /** Go somewhere, exactly as if the user had clicked their way there. */
   navigateTo: (target: NavTarget) => NavResult;
   /** Follow the selection. The current selection is delivered immediately, so

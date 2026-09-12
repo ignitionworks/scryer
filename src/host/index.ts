@@ -18,7 +18,7 @@ export {
   isHostThemed,
   resolveHostTheme,
 } from "./theme";
-export { useHostBridgeWiring } from "./wiring";
+export { useHostBridgeWiring, useHostOpener } from "./wiring";
 export type {
   HostBridge,
   HostBridgeRef,
@@ -30,5 +30,7 @@ export type {
   NavResult,
   NavTarget,
   NavView,
+  OpenDriver,
+  OpenResult,
   ResolvedHostTheme,
 } from "./types";
