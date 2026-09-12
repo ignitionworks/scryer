@@ -1,5 +1,15 @@
-//! The fold's two gates — what `mark_implemented` refuses to commit, and why.
+//! The fold's gates — what `mark_implemented` refuses to commit, and why.
 //!
+//! 0. **Countersignature** (opt-in, off by default): while the project sets
+//!    `policy.requireCountersignedFolds`, a change no team member OTHER THAN
+//!    its author has signed off does not fold at all. The two gates below are
+//!    relative to a signature — they ask whether the plan drifted since
+//!    approval, never whether it was approved — so a team that wants the
+//!    second question asked turns this one on. Unlike the others it refuses
+//!    the WHOLE call: there is nothing claim-by-claim about "nobody approved
+//!    this", and a partial fold would leave the change half-landed on an
+//!    approval that does not exist. A project that has not opted in never
+//!    reaches it.
 //! 1. **Sign-off** (forward vagrancy): a claim the agent reworded, moved, or
 //!    added AFTER the developer signed off its change is a proposal, not
 //!    intent. It is flagged `vagrant` with a `vagrant_origin` and the approved
@@ -11,12 +21,13 @@
 //!    plan and the response names the missing fact and the test files to run.
 //!    `force` bypasses this gate visibly (an `unverified` history event).
 //!
-//! Both gates return a WITHHOLD set the fold engine honours
+//! Gates 1 and 2 return a WITHHOLD set the fold engine honours
 //! (`commit_element_withholding`), so the rest of the fold proceeds — leaving
 //! a claim pending is a legitimate, honest exit, never a loop.
 
 use scryer_core::changes::{self, Classification};
 use scryer_core::diff::{self, ElementKind as EK};
+use scryer_core::history::{EventKind, HistoryEvent};
 use scryer_core::refusals::Refusal;
 use scryer_core::{ears, Kind, ModelRef, Responsibility, ScryModel};
 use scryer_extract::test_status::{claim_evidence, Evidence};
@@ -115,27 +126,136 @@ fn code_backed_host(model: &ScryModel, host_id: &str) -> bool {
     }
 }
 
-/// Run both gates over `candidates` (the claims this fold is about to commit).
+/// The change's AUTHOR, for the countersignature test.
+///
+/// [`changes::ChangeMeta`] records no opener — `open_change` mints an id and
+/// keeps the dev's rationale, nothing more — so authorship lives where the
+/// plan writes left it: the history log. The author is the actor on the
+/// EARLIEST plan event tagged to the change, which is whoever authored its
+/// entries. A plan write that named no actor lands as `agent`, still an
+/// identity a countersignature must differ from, so a host that attributes
+/// nothing meets the gate rather than slipping past it.
+///
+/// `None` only when the change authored nothing the log saw — and a change
+/// that wrote no claim has nothing to fold either.
+fn change_author(history: &[HistoryEvent], change_id: &str) -> Option<String> {
+    history
+        .iter()
+        .find(|e| e.kind == EventKind::Plan && e.change_id.as_deref() == Some(change_id))
+        .map(|e| e.by.clone())
+}
+
+/// Gate 0 — the countersignature, for a project that opted in.
+///
+/// The test is on the ACTOR ID and nothing else: the fold passes when some
+/// actor other than the author has signed the change off. Proxy-ness is
+/// recorded, never gated — a sign-off an agent made on a developer's behalf
+/// counts exactly when its `by` differs, because the question the policy asks
+/// is "did a second party look at this", and a second party is a second
+/// identity. Answering it by inspecting `onBehalfOf` would refuse precisely
+/// the review a host is set up to perform.
+///
+/// `Err` refuses the WHOLE fold: nothing folds, the plan is untouched (this
+/// runs before the gates that write to it), and the message names what is
+/// missing. Returns silently for a project with no policy, which is every
+/// project that has not opted in.
+fn countersign_gate(
+    model_ref: &ModelRef,
+    committed: &ScryModel,
+    planned: &ScryModel,
+    in_fold: &BTreeSet<String>,
+    out: &mut GateOutcome,
+) -> Result<(), String> {
+    if in_fold.is_empty() || !changes::requires_countersigned_folds(committed) {
+        return Ok(());
+    }
+    let history = scryer_core::history::read_history(model_ref);
+    for cid in in_fold {
+        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid) else { continue };
+        let author = change_author(&history, cid);
+        let signature = meta.signed_off.as_ref();
+        let signer = signature.and_then(|s| s.by.as_deref());
+        let missing = match (signer, author.as_deref()) {
+            // Signed by somebody who is not the author: countersigned.
+            (Some(by), a) if Some(by) != a => None,
+            (Some(by), _) => Some(format!("is signed off only by its own author, {by}")),
+            (None, _) if signature.is_none() => Some("carries no sign-off at all".to_string()),
+            (None, _) => {
+                Some("carries a sign-off that names no actor, so nobody is on record as \
+                      having approved it"
+                    .to_string())
+            }
+        };
+        let Some(missing) = missing else {
+            // Passed — say by whom, and say when it was a proxy, so the fold's
+            // own transcript carries the approval it folded on.
+            let by = signer.unwrap_or_default();
+            let proxy = signature
+                .and_then(|s| s.on_behalf_of.as_deref())
+                .map(|p| format!(" on behalf of {p}"))
+                .unwrap_or_default();
+            out.lines.push(format!(
+                "COUNTERSIGNED {cid} by {by}{proxy} (authored by {}) — this project requires a \
+                 fold to be signed off by a team member other than the author",
+                author.as_deref().unwrap_or("nobody on record")
+            ));
+            continue;
+        };
+        let whose = match author.as_deref() {
+            Some(a) => format!("its author ({a})"),
+            None => "its author".to_string(),
+        };
+        return Err(format!(
+            "REFUSED: nothing was folded. This project requires a fold to be countersigned, and \
+             {cid} {missing}. A team member other than {whose} must sign {cid} off — have them \
+             run `sign_off {{change_id: \"{cid}\"}}` under their own identity (the MCP server \
+             reads it from SCRYER_ACTOR) — then fold again. The test is on the signing ACTOR, so \
+             a sign-off made on someone's behalf counts whenever the actor differs. The policy is \
+             `policy.requireCountersignedFolds` in .scryer/model.scry; a project that clears it \
+             folds as before."
+        ));
+    }
+    Ok(())
+}
+
+/// Run the gates over `candidates` (the claims this fold is about to commit).
 /// `tests_in_call` maps claim id → test files attached in the SAME call: an
 /// attachment with no verdict yet still refuses (the verdict comes from a run
 /// + ingest, which must precede the fold), but the refusal names those files.
+/// `change` is the change `mark_implemented` was pointed at by name, when it
+/// was — gate 0 needs it even for a fold whose candidates are empty.
 pub(crate) fn gate(
     model_ref: &ModelRef,
+    committed: &ScryModel,
     planned: &mut ScryModel,
     candidates: &[String],
+    change: Option<&str>,
     tests_in_call: &HashMap<String, Vec<String>>,
     force: bool,
     now: u64,
 ) -> Result<GateOutcome, String> {
     let mut out = GateOutcome::default();
 
+    // The changes this fold lands work under: whatever its candidates are
+    // tagged to, plus the one it was pointed at by name — a `mark_implemented
+    // {change}` whose tags are all carriers has no candidate to speak for it.
+    let involved: BTreeSet<String> = candidates
+        .iter()
+        .filter_map(|id| {
+            planned.change_map.get(&changes::element_key(EK::Responsibility, None, id)).cloned()
+        })
+        .collect();
+
+    // ---- 0. Countersignature: opt-in, and it refuses the whole fold. -------
+    // First, and before anything below writes to the plan: a fold nobody
+    // approved must leave no trace at all.
+    let mut in_fold = involved.clone();
+    in_fold.extend(change.map(str::to_string));
+    countersign_gate(model_ref, committed, planned, &in_fold, &mut out)?;
+
     // ---- 1. Sign-off: amendments and additions stay behind as vagrant. -----
-    let mut involved: BTreeSet<String> = BTreeSet::new();
     for id in candidates {
         let key = changes::element_key(EK::Responsibility, None, id);
-        if let Some(cid) = planned.change_map.get(&key) {
-            involved.insert(cid.clone());
-        }
         let Some((cid, class, snap)) = changes::classify_key(planned, &key) else { continue };
         let Some(origin) = class.origin() else { continue };
         let Some((host, r)) = find_resp_mut(planned, id) else { continue };

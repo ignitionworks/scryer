@@ -1076,8 +1076,10 @@ impl ScryerServer {
         let mut planned_gated = planned.clone();
         let gate = match fold_gate::gate(
             &model_ref,
+            &committed_now,
             &mut planned_gated,
             &candidates,
+            req.change.as_deref(),
             &tests_in_call,
             force,
             now,
@@ -4055,6 +4057,187 @@ mod tests {
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(planned.change_map.get("resp:resp-1").map(String::as_str), Some(cid.as_str()));
         assert!(planned.changes.iter().any(|c| c.id == cid), "the change stays open on it");
+    }
+
+    // ---- resp-6zv79y: the opt-in countersignature gate. -------------------
+
+    /// A project with one pending claim tagged to a change, and the
+    /// countersigned-fold policy set (or not) on the COMMITTED model — which
+    /// is how a team opts in. Ubiquitous statement, so the evidence gate stays
+    /// out of the picture.
+    fn countersign_project(model_ref: &ModelRef, opted_in: bool) -> String {
+        let mut committed = ScryModel::new();
+        committed.nodes.push(node("vt", Kind::Symbol, "verify_token", None));
+        if opted_in {
+            committed.policy =
+                Some(scryer_core::changes::Policy { require_countersigned_folds: true });
+        }
+        scryer_core::write_model_at(model_ref, &committed).unwrap();
+        scryer_core::ensure_planned_at(model_ref).unwrap();
+        let mut planned = scryer_core::read_planned_at(model_ref).unwrap();
+        let host = planned.nodes.iter_mut().find(|n| n.id == "vt").unwrap();
+        let mut r1 = resp("resp-1");
+        r1.statement = "Verifies the token".into();
+        host.responsibilities.push(r1);
+        let cid = scryer_core::changes::open_change(&mut planned, "verify tokens", 1);
+        scryer_core::changes::tag(&mut planned, &["resp:resp-1".to_string()], &cid);
+        scryer_core::write_planned_at(model_ref, &planned).unwrap();
+        cid
+    }
+
+    /// Sign `cid` off as `actor`, optionally as `person`'s proxy — the
+    /// approval arriving after the change was authored.
+    fn sign_as(model_ref: &ModelRef, cid: &str, actor: &str, person: Option<&str>) {
+        let mut planned = scryer_core::read_planned_at(model_ref).unwrap();
+        scryer_core::changes::sign_off_for(&mut planned, cid, 9, Some(actor), person).unwrap();
+        scryer_core::write_planned_at(model_ref, &planned).unwrap();
+    }
+
+    /// Who the history log says authored `cid` — the identity a
+    /// countersignature has to differ from.
+    fn author_of(model_ref: &ModelRef, cid: &str) -> String {
+        scryer_core::history::read_history(model_ref)
+            .into_iter()
+            .find(|e| e.change_id.as_deref() == Some(cid))
+            .expect("the plan write that authored the change is in the log")
+            .by
+    }
+
+    /// `mark_implemented {change}` without asserting the outcome: the
+    /// countersignature gate refuses the WHOLE call, which is the one error
+    /// result `fold_change` forbids.
+    fn fold_change_raw(server: &ScryerServer, dir: &std::path::Path, cid: &str) -> (bool, String) {
+        let r = server
+            .mark_implemented(Parameters(MarkImplementedRequest {
+                project: Some(dir.to_string_lossy().to_string()),
+                node_id: None,
+                responsibility_ids: None,
+                property_labels: None,
+                link_ids: None,
+                group_ids: None,
+                commit_ancestors: None,
+                force: None,
+                anchors: None,
+                tests: None,
+                change: Some(cid.into()),
+            }))
+            .unwrap();
+        (r.is_error.unwrap_or(false), tool_text(&r))
+    }
+
+    /// The solo-user test. While the project carries no policy — every
+    /// existing model, and upstream's — a change nobody signed off folds and
+    /// closes exactly as it always did, and the fold says nothing about
+    /// countersignatures.
+    #[test]
+    fn resp_6zv79y_an_unsigned_change_folds_while_the_project_has_not_opted_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let cid = countersign_project(&model_ref, false);
+
+        let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
+        assert!(committed_has(&model_ref, "resp-1"), "{text}");
+        assert!(!text.contains("countersign"), "{text}");
+    }
+
+    /// Opted in, and the change carries no second signature at all: the fold
+    /// is refused whole. Nothing folds, the claim stays pending, and the
+    /// message names what is missing. An unattributed sign-off is the same
+    /// refusal — a signature nobody is on record for cannot be a second
+    /// party's.
+    #[test]
+    fn resp_6zv79y_a_required_countersignature_refuses_a_change_nobody_signed() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let cid = countersign_project(&model_ref, true);
+
+        let (is_error, text) = fold_change_raw(&ScryerServer::new(), dir.path(), &cid);
+        assert!(is_error, "{text}");
+        assert!(text.contains("no sign-off at all"), "{text}");
+        assert!(text.contains("A team member other than its author"), "{text}");
+        assert!(text.contains("nothing was folded"), "{text}");
+        assert!(!committed_has(&model_ref, "resp-1"), "the fold landed nothing");
+        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim is still pending");
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(planned.changes.iter().any(|c| c.id == cid), "the change is still open");
+        assert_eq!(planned.change_map.get("resp:resp-1").map(String::as_str), Some(cid.as_str()));
+
+        // A sign-off that names nobody is not a countersignature either.
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        scryer_core::changes::sign_off(&mut planned, &cid, 9).unwrap();
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        let (is_error, text) = fold_change_raw(&ScryerServer::new(), dir.path(), &cid);
+        assert!(is_error, "{text}");
+        assert!(text.contains("names no actor"), "{text}");
+        assert!(!committed_has(&model_ref, "resp-1"));
+    }
+
+    /// Opted in, and the only sign-off is the author's own: refused, naming
+    /// them. Signing off your own work is exactly what the policy exists to
+    /// stop being enough.
+    #[test]
+    fn resp_6zv79y_a_required_countersignature_refuses_a_change_signed_only_by_its_author() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let cid = countersign_project(&model_ref, true);
+        let author = author_of(&model_ref, &cid);
+        sign_as(&model_ref, &cid, &author, None);
+
+        let (is_error, text) = fold_change_raw(&ScryerServer::new(), dir.path(), &cid);
+        assert!(is_error, "{text}");
+        assert!(text.contains(&format!("signed off only by its own author, {author}")), "{text}");
+        assert!(text.contains(&format!("other than its author ({author})")), "{text}");
+        assert!(!committed_has(&model_ref, "resp-1"), "the fold landed nothing");
+        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim is still pending");
+    }
+
+    /// Opted in, and a second actor signed: the fold proceeds as it always
+    /// did, and its transcript names the approval it folded on.
+    #[test]
+    fn resp_6zv79y_a_change_countersigned_by_another_actor_folds() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let cid = countersign_project(&model_ref, true);
+        let author = author_of(&model_ref, &cid);
+        assert_ne!(author, "reviewer-bea", "the countersignature is a DIFFERENT actor");
+        sign_as(&model_ref, &cid, "reviewer-bea", None);
+
+        let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
+        assert!(text.contains(&format!("COUNTERSIGNED {cid} by reviewer-bea")), "{text}");
+        assert!(committed_has(&model_ref, "resp-1"), "{text}");
+    }
+
+    /// The driver's ruling: the test is on the ACTOR ID, not on proxy-ness. A
+    /// sign-off an agent made on a developer's behalf counts as a
+    /// countersignature because its actor differs from the author — and the
+    /// proxy is RECORDED, in the ledger and in the fold's own transcript,
+    /// rather than gated on.
+    #[test]
+    fn resp_6zv79y_a_proxy_countersignature_passes_and_is_recorded_as_a_proxy() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let cid = countersign_project(&model_ref, true);
+        let author = author_of(&model_ref, &cid);
+        assert_ne!(author, "claude-session-7");
+        sign_as(&model_ref, &cid, "claude-session-7", Some("jesseh"));
+
+        // Recorded as a proxy before the fold ever looks at it.
+        let signed = scryer_core::read_planned_at(&model_ref)
+            .unwrap()
+            .changes
+            .iter()
+            .find(|c| c.id == cid)
+            .and_then(|c| c.signed_off.clone())
+            .expect("signed");
+        assert_eq!(signed.by.as_deref(), Some("claude-session-7"));
+        assert_eq!(signed.on_behalf_of.as_deref(), Some("jesseh"));
+
+        let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
+        assert!(
+            text.contains(&format!("COUNTERSIGNED {cid} by claude-session-7 on behalf of jesseh")),
+            "the fold names the proxy it folded on: {text}"
+        );
+        assert!(committed_has(&model_ref, "resp-1"), "{text}");
     }
 
     /// The fold response carries a scoped post-flight: what's still pending on
