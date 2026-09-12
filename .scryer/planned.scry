@@ -11251,14 +11251,19 @@
       "responsibilities": [
         {
           "id": "resp-640",
-          "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, and change closures",
-          "lastTouchedAt": 1784884312
+          "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, change closures and plan edits",
+          "lastTouchedAt": 1789204961
         },
         {
           "id": "resp-ap0x79",
           "statement": "**When** an appended event carries an actor, **name** that actor as the one who drove it instead of the agent",
           "concern": "oversight",
           "lastTouchedAt": 1789073901
+        },
+        {
+          "id": "resp-hmesby",
+          "statement": "**While** the timeline is read, **carry** plan events as their own kind, distinct from folds, so a reader can show what was proposed apart from what was built",
+          "lastTouchedAt": 1789204961
         }
       ]
     },
@@ -13334,6 +13339,12 @@
           "statement": "**If** a change to be signed off has no live plan entry, every tag it carries naming an element that is not pending, **then** **refuse** the sign-off saying the change would close as abandoned, rather than returning a count",
           "concern": "validation",
           "lastTouchedAt": 1789183029
+        },
+        {
+          "id": "resp-ag8ngf",
+          "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor, the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
+          "concern": "oversight",
+          "lastTouchedAt": 1789204961
         }
       ]
     },
@@ -17386,10 +17397,38 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-bkvs6e",
+      "rationale": "260912-plan-write-history: a canvas or agent write of the plan layer leaves no trace in the engine's history, so nothing downstream can tell a returning person what changed in the plan since they last looked; write_planned appends a plan event to history with the actor, the change and the per-node rows it added, reworded or removed, and the event stream carries it. Generic: a solo user's timeline gains the plan edits it never showed.",
+      "createdAt": 1789204906,
+      "signedOff": {
+        "at": 1789204982,
+        "entries": {
+          "resp:resp-640": {
+            "hash": "d18b7b0bf76dca04",
+            "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, change closures and plan edits",
+            "host": "node-596"
+          },
+          "resp:resp-ag8ngf": {
+            "hash": "a962ac4a0db2e535",
+            "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor, the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
+            "host": "node-rqqgcp"
+          },
+          "resp:resp-hmesby": {
+            "hash": "bcd1b3e490415ae3",
+            "statement": "**While** the timeline is read, **carry** plan events as their own kind, distinct from folds, so a reader can show what was proposed apart from what was built",
+            "host": "node-596"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
+    "resp:resp-640": "chg-bkvs6e",
     "resp:resp-683": "chg-qxjsaq",
+    "resp:resp-ag8ngf": "chg-bkvs6e",
+    "resp:resp-hmesby": "chg-bkvs6e",
     "resp:resp-kc1r12": "chg-j88eqf"
   }
 }
