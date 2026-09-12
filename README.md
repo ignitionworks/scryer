@@ -230,6 +230,34 @@ pnpm dev              # Run frontend only
 pnpm tauri build      # Production build
 ```
 
+### The committed export viewer
+
+`crates/scryer-app/assets/export-viewer.html` is **generated and checked in** —
+about 630 KB of built, minified viewer with a sentinel where a project's model
+goes. The engine's `export_html` command substitutes the model into it, so a
+host can offer an HTML export with no Node, no bundler and no scryer checkout
+on the machine. Without it the command only works where someone has cloned this
+repo and run `pnpm install`, which a service consuming `scryer-app` as a library
+has not.
+
+Be clear-eyed about what that costs. It is build output living in git: it goes
+stale the moment the UI changes, minified JS diffs badly so each refresh adds
+roughly a whole copy to the repo's history, and a stale artifact fails silently
+— the export keeps working and keeps shipping last month's viewer.
+
+So regenerate it whenever the UI or the export viewer changes:
+
+```bash
+cargo run -p xtask -- export-template            # rebuild and commit the artifact
+cargo run -p xtask -- export-template --check    # fail if the committed copy is stale
+```
+
+`--check` runs in CI and is what catches the silent case. It needs Node and an
+installed checkout — the dependency the artifact exists to spare everybody else.
+Setting `SCRYER_EXPORT_SCRIPT` to `scripts/export-html.mjs` in a checkout makes
+`export_html` run the real build instead, which is the way to iterate on the
+viewer without regenerating the artifact for every change.
+
 ## License
 
 Scryer is [Fair Source](https://fair.io/) software under the [Functional Source License (FSL-1.1-MIT)](LICENSE). You can use it, view the source, and contribute. You just can't build a competitor with it. The license converts to MIT after two years.
