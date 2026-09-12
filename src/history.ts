@@ -9,7 +9,7 @@
 
 import type { SourceLocation } from "./viewmodel";
 
-export type EventKind = "impl" | "drift" | "move" | "born";
+export type EventKind = "impl" | "drift" | "move" | "born" | "plan";
 
 export interface EventRow {
   /** Single-char marker — `+` added, `−`/`~` reworded, `!` stale, `→` moved. */
@@ -57,6 +57,15 @@ export const EVENT_META: Record<EventKind, { label: string; dot: string; badge: 
     label: "created from code",
     dot: "var(--text-ghost)",
     badge: "text-[var(--text-tertiary)] border-[var(--border)]",
+  },
+  // The one event that records what was PROPOSED rather than what was built.
+  // Blue on purpose: it is the one hue the change palette in `changeMarks` does
+  // NOT spend, so the chrome can say "this is a proposal" without colliding
+  // with the add/delete/amber diff glyphs the rows inside already carry.
+  plan: {
+    label: "planned",
+    dot: "var(--color-blue-500)",
+    badge: "text-blue-700 dark:text-blue-400 border-blue-500/30",
   },
 };
 

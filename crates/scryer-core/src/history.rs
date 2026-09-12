@@ -8,6 +8,11 @@
 //! session-only journal. The log is git-tracked like the model itself: it is not
 //! regenerable, so it is the source of truth for what happened when.
 //!
+//! One kind is not a committed-model event at all: [`EventKind::Plan`] records a
+//! plan WRITE — what was proposed rather than what was built. It rides the same
+//! log so one timeline answers "when was this claimed?" as well as "when was it
+//! implemented?", and it keeps its own kind so a reader can tell the two apart.
+//!
 //! Append-only JSONL (one event per line) keeps writes cheap and crash-safe — a
 //! torn final line drops exactly one event instead of corrupting the whole log.
 
@@ -32,6 +37,13 @@ pub enum EventKind {
     /// The one event kind that spans nodes: `node_id` is empty, `change_id`
     /// names the change, and the rows carry its rationale.
     Change,
+    /// A plan WRITE changed what the plan claims — a canvas save or an agent's
+    /// authoring tool. The only kind that is not a fold or a structural move:
+    /// it records what was PROPOSED, not what was built, so a reader can show
+    /// the two apart. Rows are the touched claims (`+` added, `−` removed,
+    /// `!` reworded); `driver` is the change the edits are tagged to, or
+    /// `plan` when they are untagged.
+    Plan,
 }
 
 /// One diff row inside an event: a marker glyph, its text, and an optional source
@@ -232,5 +244,61 @@ mod tests {
         assert_eq!(log[0].by, "jesseh", "the named actor drove it");
         assert_eq!(log[1].by, "agent", "no actor supplied: unattributed");
         assert_eq!(log[2].by, "agent", "a blank actor names nobody");
+    }
+
+    /// While the timeline is read, a plan event comes back as its OWN kind —
+    /// never collapsed into the fold beside it — so a reader can show what was
+    /// proposed apart from what was built. The wire name is `plan`.
+    #[test]
+    fn resp_hmesby_a_plan_event_reads_back_as_its_own_kind() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+
+        let proposed = HistoryEvent::new(100, EventKind::Plan, "n1", "chg-7")
+            .with_change("chg-7")
+            .with_rows(vec![EventRow::new("+", "**When** the card is charged, **record** it")]);
+        let built = HistoryEvent::new(200, EventKind::Impl, "n1", "fill");
+        append_event(&r, &proposed).unwrap();
+        append_event(&r, &built).unwrap();
+
+        let log = read_history(&r);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].kind, EventKind::Plan, "the proposal keeps its own kind");
+        assert_ne!(log[0].kind, log[1].kind, "a plan event is not the fold beside it");
+        assert_eq!(log[0].change_id.as_deref(), Some("chg-7"));
+        assert_eq!(log[0].rows[0].marker, "+");
+
+        // The serialised name every other reader keys on.
+        let line = serde_json::to_string(&proposed).unwrap();
+        assert!(line.contains(r#""kind":"plan""#), "serialises as `plan`: {line}");
+    }
+
+    /// A reader that has never heard of an event kind SKIPS that line — the
+    /// same rule that carries a torn write — so `plan` landing in an old
+    /// project's log cannot take the timeline down with it. Simulated by a kind
+    /// no build knows: today's reader is tomorrow's old reader.
+    #[test]
+    fn resp_hmesby_an_event_of_an_unknown_kind_is_skipped_not_fatal() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+
+        let before = HistoryEvent::new(100, EventKind::Born, "n1", "build");
+        let after = HistoryEvent::new(300, EventKind::Plan, "n1", "plan");
+        append_event(&r, &before).unwrap(); // creates `.scryer/`; overwritten below
+        fs::write(
+            r.history_path(),
+            format!(
+                "{}\n{}\n{}\n",
+                serde_json::to_string(&before).unwrap(),
+                r#"{"at":200,"by":"agent","driver":"plan","kind":"quorum","nodeId":"n1"}"#,
+                serde_json::to_string(&after).unwrap(),
+            ),
+        )
+        .unwrap();
+
+        let log = read_history(&r);
+        assert_eq!(log.len(), 2, "the unknown kind is dropped, its neighbours survive");
+        assert_eq!(log[0].kind, EventKind::Born);
+        assert_eq!(log[1].kind, EventKind::Plan);
     }
 }
