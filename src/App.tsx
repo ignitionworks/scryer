@@ -67,7 +67,13 @@ import {
   type ScryModel,
 } from "./viewmodel";
 import type { Editor } from "./editor";
-import { HostBridgeProvider, useHostBridge, useHostBridgeWiring, type HostBridgeRef } from "./host";
+import {
+  HostBridgeProvider,
+  useHostBridge,
+  useHostBridgeWiring,
+  useHostOpener,
+  type HostBridgeRef,
+} from "./host";
 
 /** Whether a keydown landed inside an editable field (input, textarea, or an
  *  in-place contentEditable). Global shortcuts that overlap with text entry
@@ -110,6 +116,16 @@ function AppBody() {
   const storage = useModelStorage();
   const build = useModelBuild(storage);
   const model = storage.model;
+
+  // Opening a project is the one thing a host needs before a workspace exists,
+  // so the bridge borrows it here rather than from the Workspace below — which
+  // is not mounted until a project is already open. Null without a host.
+  useHostOpener({
+    bridge: useHostBridge(),
+    status: storage.status,
+    error: storage.error,
+    openProject: storage.openProject,
+  });
 
   if (!model || storage.status !== "ready") {
     return <ProjectPicker storage={storage} build={build} />;

@@ -22,7 +22,7 @@ import {
   isHostThemed,
   resolveHostTheme,
 } from "../src/host/theme";
-import type { HostSelection, NavDriver } from "../src/host/types";
+import type { HostSelection, NavDriver, OpenResult } from "../src/host/types";
 import { respElementId } from "../src/SourceSection";
 import { DEFAULT_THEME, PALETTES, saveTheme, SHADES } from "../src/theme";
 import { emptyModel, type ScryModel } from "../src/viewmodel";
@@ -273,6 +273,82 @@ describe("resp-qzkjwm — navigating where a host names", () => {
     bridge.navigateTo({ kind: "node", id: "node-2" });
     expect(first.calls).toEqual(["selectNode:node-1"]);
     expect(second.calls).toEqual(["selectNode:node-2"]);
+  });
+});
+
+describe("resp-7pgwkq — opening a project", () => {
+  it("resp-7pgwkq: opens the project a host names, exactly as the picker would", async () => {
+    const opened: string[] = [];
+    const bridge = createHostBridge();
+    bridge.attachOpener({
+      open: async (path) => {
+        opened.push(path);
+        // The shell answers with where it ended up — the recent list bumped,
+        // the model loaded — which is the picker's own behaviour, reached
+        // through the picker's own callback rather than reimplemented here.
+        return { ok: true, status: "ready" };
+      },
+    });
+
+    await expect(bridge.openProject("/work/acme")).resolves.toEqual({
+      ok: true,
+      status: "ready",
+    });
+    expect(opened).toEqual(["/work/acme"]);
+  });
+
+  it("resp-7pgwkq: says when there is no model to open, or the model is too old", async () => {
+    const bridge = createHostBridge();
+    let answer: OpenResult = { ok: true, status: "ready" };
+    bridge.attachOpener({ open: async () => answer });
+
+    // A directory with no `.scryer` in it: not an error, a thing to offer to
+    // create — so a host can render the picker's own next step.
+    answer = { ok: false, status: "needs-model" };
+    expect(await bridge.openProject("/work/empty")).toEqual({
+      ok: false,
+      status: "needs-model",
+    });
+
+    // A model from a scryer too old to load.
+    answer = { ok: false, status: "legacy", message: "pre-0.3 model" };
+    const legacy = await bridge.openProject("/work/old");
+    expect(legacy.ok).toBe(false);
+    expect(legacy).toMatchObject({ status: "legacy", message: "pre-0.3 model" });
+
+    // And everything else, carrying what the shell would have shown.
+    answer = { ok: false, status: "error", message: "permission denied" };
+    expect(await bridge.openProject("/work/locked")).toMatchObject({
+      status: "error",
+      message: "permission denied",
+    });
+  });
+
+  it("resp-7pgwkq: an app that is not mounted says so rather than hanging", async () => {
+    // The desktop app never builds a bridge at all; this is the next-worst
+    // case, and a promise that never settles would be the worst answer of all.
+    const bridge = createHostBridge();
+    await expect(bridge.openProject("/work/acme")).resolves.toEqual({
+      ok: false,
+      status: "unattached",
+    });
+
+    // An app that unmounts stops answering, and a fresh one takes over.
+    const detach = bridge.attachOpener({ open: async () => ({ ok: true, status: "ready" }) });
+    expect(await bridge.openProject("/work/acme")).toEqual({ ok: true, status: "ready" });
+    detach();
+    expect((await bridge.openProject("/work/acme")).ok).toBe(false);
+  });
+
+  it("resp-7pgwkq: opening a project is not navigating within one", async () => {
+    // A project is which model, not where in it — and it resolves against no
+    // model at all, since none is loaded yet. Naming one as a nav target is
+    // refused rather than quietly half-working.
+    const { driver } = recordingDriver();
+    const bridge = createHostBridge();
+    bridge.attach(driver);
+    const result = bridge.navigateTo({ kind: "project", id: "/work/acme" } as never);
+    expect(result.ok).toBe(false);
   });
 });
 
