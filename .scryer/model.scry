@@ -13241,6 +13241,11 @@
           "statement": "**When** a plan write names a base revision that is not current, **refuse** it with the current revision",
           "concern": "failure-handling",
           "lastTouchedAt": 1789075612
+        },
+        {
+          "id": "resp-bs0y4b",
+          "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained file the export script builds, from the committed model or the plan as asked, and **return** it",
+          "lastTouchedAt": 1789179403
         }
       ]
     },
@@ -21983,6 +21988,12 @@
         "symbol": "by_actor"
       }
     ],
+    "resp-bs0y4b": [
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "export_html"
+      }
+    ],
     "resp-by5pbn": [
       {
         "pattern": "src-tauri/src/project.rs",
@@ -23963,6 +23974,12 @@
       {
         "pattern": "crates/scryer-core/src/history.rs",
         "symbol": "an_event_carrying_an_actor_names_it_instead_of_the_agent"
+      }
+    ],
+    "resp-bs0y4b": [
+      {
+        "pattern": "crates/scryer-app/tests/serve.rs",
+        "symbol": "resp_bs0y4b_exports_the_self_contained_file_from_the_layer_asked_for"
       }
     ],
     "resp-by5pbn": [
