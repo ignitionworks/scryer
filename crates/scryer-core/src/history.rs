@@ -16,7 +16,7 @@
 //! Append-only JSONL (one event per line) keeps writes cheap and crash-safe — a
 //! torn final line drops exactly one event instead of corrupting the whole log.
 
-use crate::{ModelRef, SourceLocation};
+use crate::{changes, diff, ModelRef, ScryModel, SourceLocation};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -149,6 +149,108 @@ pub fn append_event(r: &ModelRef, ev: &HistoryEvent) -> Result<(), String> {
         .open(r.history_path())
         .map_err(|e| e.to_string())?;
     writeln!(f, "{}", line).map_err(|e| e.to_string())
+}
+
+/// The plan events one plan write earns — one per node or group whose CLAIMS
+/// the write changed, rows carrying each claim it added, reworded or removed.
+///
+/// "What the plan claims" is the responsibilities, not the structure: a rename,
+/// a reparent or a repointed link is a structural edit with its own event kind,
+/// and an anchor or a verdict landing on the draft is bookkeeping. So only
+/// [`diff::ElementKind::Responsibility`] entries earn a row, and a write that
+/// touches nothing else returns an EMPTY vec — the "a write that changes
+/// nothing appends nothing" half, which falls out rather than being special-
+/// cased.
+///
+/// A claim that only MOVED keeps its words, so it earns no row here either; if
+/// the move came with a reword, the reword is what shows.
+///
+/// `driver` names the change the edits are tagged to — read off `after`'s
+/// change map, falling back to `before`'s for a claim the write deleted (the
+/// ledger GC may already have retired its tag). One event spans one node, so it
+/// can only name one change: when the node's touched claims disagree, or none
+/// is tagged, the driver is the bare `plan`.
+///
+/// Deterministic: the diff indexes by `BTreeMap`, and events come back sorted
+/// by owner, so the same write always writes the same lines.
+pub fn plan_events(before: &ScryModel, after: &ScryModel, at: u64) -> Vec<HistoryEvent> {
+    use std::collections::BTreeMap;
+
+    let mut by_owner: BTreeMap<&str, (Vec<EventRow>, Option<&str>, bool)> = BTreeMap::new();
+    let plan_diff = diff::diff(before, after);
+    for ch in &plan_diff.changes {
+        if ch.kind != diff::ElementKind::Responsibility {
+            continue;
+        }
+        let Some(marker) = claim_marker(&ch.changes) else {
+            continue;
+        };
+        let Some(owner) = ch.owner_id.as_deref() else {
+            continue;
+        };
+        let key = changes::key_for(ch);
+        let tag = after.change_map.get(&key).or_else(|| before.change_map.get(&key));
+        let slot = by_owner.entry(owner).or_insert((Vec::new(), None, false));
+        slot.0.push(EventRow::new(marker, ch.label.clone()));
+        match (tag.map(String::as_str), slot.1) {
+            (Some(cid), None) if !slot.2 => slot.1 = Some(cid),
+            (Some(cid), Some(prev)) if cid != prev => {
+                slot.1 = None; // two changes in one node: neither speaks for the event
+                slot.2 = true;
+            }
+            _ => {}
+        }
+    }
+
+    by_owner
+        .into_iter()
+        .map(|(owner, (rows, cid, _))| {
+            let ev = HistoryEvent::new(at, EventKind::Plan, owner, cid.unwrap_or(PLAN_DRIVER))
+                .with_rows(rows);
+            match cid {
+                Some(c) => ev.with_change(c),
+                None => ev,
+            }
+        })
+        .collect()
+}
+
+/// The driver on a plan event whose edits are untagged — a canvas save outside
+/// any change, or a node whose touched claims name two.
+const PLAN_DRIVER: &str = "plan";
+
+/// The row marker for one claim's divergence, or `None` when the change is not
+/// one the plan-event rows speak: `+` added, `−` removed, `!` reworded.
+fn claim_marker(changes: &[diff::Change]) -> Option<&'static str> {
+    if changes.iter().any(|c| matches!(c, diff::Change::Added)) {
+        return Some("+");
+    }
+    if changes.iter().any(|c| matches!(c, diff::Change::Deleted)) {
+        return Some("−");
+    }
+    if changes.iter().any(|c| matches!(c, diff::Change::Reworded { .. })) {
+        return Some("!");
+    }
+    None
+}
+
+/// Append [`plan_events`] for one plan write, naming `actor` on each. Called at
+/// the two seams every plan write passes — [`crate::write_planned_at`] (the
+/// agent's authoring tools) and the service's own `write_planned` (the canvas
+/// save) — and NOT at [`crate::write_planned_raw_at`], which the fold also uses
+/// to rewrite the draft: a fold is not a proposal, and an event there would
+/// shadow every `impl` it sits beside.
+///
+/// Best-effort like [`append_event`]: a log failure never aborts the write.
+pub fn append_plan_events(
+    r: &ModelRef,
+    before: &ScryModel,
+    after: &ScryModel,
+    actor: Option<&str>,
+) {
+    for ev in plan_events(before, after, crate::drift::now_secs()) {
+        let _ = append_event(r, &ev.by_actor(actor));
+    }
 }
 
 /// Read the whole log in file order (oldest first). Skips blank or malformed
@@ -300,5 +402,126 @@ mod tests {
         assert_eq!(log.len(), 2, "the unknown kind is dropped, its neighbours survive");
         assert_eq!(log[0].kind, EventKind::Born);
         assert_eq!(log[1].kind, EventKind::Plan);
+    }
+
+    // --- plan events ---
+
+    /// A plan with one node carrying the given claims.
+    fn plan_of(claims: &[(&str, &str)]) -> ScryModel {
+        let mut m = ScryModel::new();
+        let mut node: crate::Node = serde_json::from_value(
+            serde_json::json!({ "id": "node-1", "kind": "system", "name": "Acme" }),
+        )
+        .unwrap();
+        for (id, statement) in claims {
+            node.responsibilities.push(
+                serde_json::from_value(serde_json::json!({ "id": id, "statement": statement }))
+                    .unwrap(),
+            );
+        }
+        m.nodes.push(node);
+        m
+    }
+
+    /// One event per touched node, with the claims it added, reworded and
+    /// removed as rows under the existing markers — and the change the edits
+    /// are tagged to as the driver.
+    #[test]
+    fn resp_ag8ngf_a_plan_write_earns_one_event_per_touched_node() {
+        let before = plan_of(&[("resp-1", "**When** asked, **answer**"), ("resp-2", "**Log** it")]);
+        let mut after = plan_of(&[
+            ("resp-1", "**When** asked politely, **answer**"),
+            ("resp-3", "**Retry** once"),
+        ]);
+        after.change_map.insert("resp:resp-1".into(), "chg-7".into());
+        after.change_map.insert("resp:resp-3".into(), "chg-7".into());
+        after.change_map.insert("resp:resp-2".into(), "chg-7".into());
+
+        let events = plan_events(&before, &after, 500);
+        assert_eq!(events.len(), 1, "one node touched, one event");
+        let ev = &events[0];
+        assert_eq!(ev.kind, EventKind::Plan);
+        assert_eq!(ev.node_id, "node-1");
+        assert_eq!(ev.driver, "chg-7", "the change the edits are tagged to");
+        assert_eq!(ev.change_id.as_deref(), Some("chg-7"));
+
+        let rows: Vec<(&str, &str)> =
+            ev.rows.iter().map(|r| (r.marker.as_str(), r.text.as_str())).collect();
+        assert!(rows.contains(&("!", "**When** asked politely, **answer**")), "reworded: {rows:?}");
+        assert!(rows.contains(&("+", "**Retry** once")), "added: {rows:?}");
+        assert!(rows.contains(&("−", "**Log** it")), "removed: {rows:?}");
+        assert_eq!(rows.len(), 3);
+    }
+
+    /// A write that changes nothing the plan CLAIMS appends nothing — an
+    /// identical plan, and a plan whose only edit is bookkeeping (an anchor
+    /// landing, a tag retiring) rather than a claim.
+    #[test]
+    fn resp_ag8ngf_a_write_that_changes_no_claim_appends_nothing() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let before = plan_of(&[("resp-1", "**When** asked, **answer**")]);
+
+        assert!(plan_events(&before, &before, 500).is_empty(), "an identical plan is silent");
+
+        let mut after = before.clone();
+        after.source_map.insert(
+            "resp-1".into(),
+            vec![SourceLocation {
+                pattern: "src/lib.rs".into(),
+                symbol: Some("answer".into()),
+                line: None,
+                end_line: None,
+            }],
+        );
+        after.change_map.insert("resp:resp-1".into(), "chg-7".into());
+        assert!(
+            plan_events(&before, &after, 500).is_empty(),
+            "an anchor landing and a tag are not claims"
+        );
+
+        append_plan_events(&r, &before, &after, Some("jesseh"));
+        assert!(read_history(&r).is_empty(), "nothing appended, so no log at all");
+    }
+
+    /// The driver falls back to the bare `plan` when the edits carry no tag —
+    /// and when one node's touched claims name two different changes, since a
+    /// single event cannot speak for both.
+    #[test]
+    fn resp_ag8ngf_untagged_or_split_edits_drive_as_plan() {
+        let before = plan_of(&[]);
+        let after = plan_of(&[("resp-1", "**Retry** once"), ("resp-2", "**Log** it")]);
+
+        let untagged = plan_events(&before, &after, 500);
+        assert_eq!(untagged[0].driver, "plan");
+        assert_eq!(untagged[0].change_id, None);
+
+        let mut split = after.clone();
+        split.change_map.insert("resp:resp-1".into(), "chg-7".into());
+        split.change_map.insert("resp:resp-2".into(), "chg-8".into());
+        let split = plan_events(&before, &split, 500);
+        assert_eq!(split.len(), 1);
+        assert_eq!(split[0].driver, "plan", "two changes in one node: neither speaks for it");
+        assert_eq!(split[0].change_id, None);
+        assert_eq!(split[0].rows.len(), 2, "both claims are still on the record");
+    }
+
+    /// The actor who drove the write names the plan event, exactly as it names
+    /// every other kind; a write with no actor stays the agent's.
+    #[test]
+    fn resp_ag8ngf_the_actor_on_the_write_names_the_plan_event() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let before = plan_of(&[]);
+        let after = plan_of(&[("resp-1", "**Retry** once")]);
+
+        append_plan_events(&r, &before, &after, Some("jesseh"));
+        append_plan_events(&r, &before, &after, None);
+
+        let log = read_history(&r);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].by, "jesseh");
+        assert_eq!(log[1].by, "agent");
+        assert!(log.iter().all(|e| e.kind == EventKind::Plan));
     }
 }

@@ -2842,11 +2842,21 @@ mod tests {
         );
 
         // The fold is recorded as an `impl` event listing both folded claims.
+        // The log also holds the `plan` event the setup's plan write earned —
+        // the draft gaining those two claims is itself on the record now — so
+        // the fold is found by its kind rather than by being the only entry.
         let log = scryer_core::history::read_history(&model_ref);
-        assert_eq!(log.len(), 1, "one impl event");
-        assert_eq!(log[0].kind, scryer_core::history::EventKind::Impl);
-        assert_eq!(log[0].node_id, "node-1");
-        assert_eq!(log[0].rows.len(), 2, "both newly-folded claims listed");
+        let folds: Vec<_> = log
+            .iter()
+            .filter(|e| e.kind == scryer_core::history::EventKind::Impl)
+            .collect();
+        assert_eq!(folds.len(), 1, "one impl event");
+        assert_eq!(folds[0].node_id, "node-1");
+        assert_eq!(folds[0].rows.len(), 2, "both newly-folded claims listed");
+        assert!(
+            log.iter().any(|e| e.kind == scryer_core::history::EventKind::Plan),
+            "and the plan write that proposed them, kept apart from the fold"
+        );
     }
 
     /// Design-first close: without `commit_ancestors` a built leaf's fold is
