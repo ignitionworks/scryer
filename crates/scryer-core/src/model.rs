@@ -387,6 +387,17 @@ pub struct ScryModel {
     /// like `changes`; kept honest by [`changes::gc`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub change_map: BTreeMap<String, String>,
+    /// The project's own policy on how changes are approved
+    /// ([`changes::Policy`]) — today, whether a fold requires a
+    /// countersignature by a team member other than the change's author.
+    ///
+    /// COMMITTED-LAYER state, the mirror image of `changes`/`change_map`: a
+    /// policy is the repo's setting, so it rides `model.scry` (git-tracked,
+    /// shared) rather than the draft, and `write_model_at` leaves it alone
+    /// where it strips the ledger. Absent = every policy off, so an existing
+    /// model and upstream are unaffected and a solo user never meets a gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<changes::Policy>,
 }
 
 impl ScryModel {
@@ -402,6 +413,7 @@ impl ScryModel {
             concerns: Vec::new(),
             changes: Vec::new(),
             change_map: BTreeMap::new(),
+            policy: None,
         }
     }
 }
