@@ -155,7 +155,24 @@ pub fn write_planned(
 }
 
 /// Sign off a change, recording WHO gave the go-ahead. Mirrors
-/// `project.rs::sign_off_change`, plus the actor.
+/// `project.rs::sign_off_change`, plus the actor — and plus a refusal upstream
+/// does not make.
+///
+/// A change whose every tag is DEAD — each naming an element the plan diff does
+/// not hold, because it folded, was edited back to its committed form, or was
+/// filed under a key that was never canonical — is closed as abandoned by the
+/// ledger GC on the very next plan write. Signing one off therefore used to
+/// answer `200` with a count of entries snapshotted onto a change that was
+/// about to disappear, ledger and all. The count was true and the outcome was
+/// not, and the caller had no way to tell.
+///
+/// So it is refused instead, naming the dead tags: that is the only place the
+/// real cause — usually one mis-keyed tag — is visible at all. A change
+/// carrying no tags yet is untouched by the GC and signs off as before.
+///
+/// A DELIBERATE DELTA from upstream, like the plan-write guard: `src-tauri`'s
+/// `sign_off_change` still returns the count. Additive — that command is
+/// untouched.
 pub fn sign_off_change(
     state: &AppState,
     project_path: &str,
@@ -165,6 +182,23 @@ pub fn sign_off_change(
     let r = state.model_ref(project_path)?;
     let _lock = scryer_core::lock_model(&r)?;
     let mut plan = scryer_core::read_planned_seeded_at(&r)?;
+
+    let committed = scryer_core::read_model_at(&r).unwrap_or_default();
+    if scryer_core::changes::would_abandon(&committed, &plan, change_id) {
+        let dead = scryer_core::changes::dead_tags(&committed, &plan, change_id);
+        return Err(CommandError::BadArguments {
+            command: "sign_off_change".to_string(),
+            message: format!(
+                "'{change_id}' has no pending work: {} tag(s) name nothing in the plan diff, so \
+                 signing it off would close it as abandoned on the next plan write. Dead tag(s): \
+                 {}. File the work under it (element keys are `resp:`/`node:`/`group:`/`link:`/\
+                 `prop:` prefixed), or close the change.",
+                dead.len(),
+                dead.join(", ")
+            ),
+        });
+    }
+
     let n = scryer_core::changes::sign_off_as(
         &mut plan,
         change_id,
