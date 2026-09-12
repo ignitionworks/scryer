@@ -72,9 +72,16 @@ pub const COMMANDS: &[&str] = &[
     "drop_node",
     "reimplement_node",
     "cancel_agent_session",
-    // Not a desktop command: upstream's export is a CLI script.
+    // …then the service's own, listed in `SERVICE_ONLY`.
     "export_html",
 ];
+
+/// The names on the surface that the desktop's `invoke_handler` does NOT have.
+/// Upstream exports from a CLI script a user runs by hand; a host mounting the
+/// UI has no terminal to run it from, so the service offers the same artifact
+/// as a command. Everything else in [`COMMANDS`] mirrors a desktop command
+/// one-for-one, and this list is what keeps that claim checkable.
+pub const SERVICE_ONLY: &[&str] = &["export_html"];
 
 /// The identity the caller claims, threaded onto every write. Opaque: the
 /// service never parses it, never checks it, and never asks what it means. A
@@ -484,14 +491,23 @@ mod tests {
     }
 
     /// The surface names every command the desktop's `invoke_handler` does —
-    /// thirty-nine — plus `export_html`, which the desktop has no equivalent
-    /// for (it exports from a CLI script). No duplicates.
+    /// thirty-nine, no duplicates — beside the service's own, which the
+    /// desktop has no equivalent for.
     #[test]
-    fn the_surface_names_all_thirty_nine_desktop_commands_and_the_service_s_own() {
+    fn the_surface_names_all_thirty_nine_desktop_commands() {
         let unique: std::collections::BTreeSet<_> = COMMANDS.iter().collect();
         assert_eq!(unique.len(), COMMANDS.len(), "no name is listed twice");
+
+        // Counted without the service's own names, the surface is still exactly
+        // the desktop's — which is the claim, and what would otherwise quietly
+        // stop being true the first time something is added here.
+        let desktop: Vec<_> = COMMANDS
+            .iter()
+            .filter(|name| !SERVICE_ONLY.contains(name))
+            .collect();
+        assert_eq!(desktop.len(), 39);
         assert!(COMMANDS.contains(&"export_html"));
-        assert_eq!(COMMANDS.len(), 40);
+        assert_eq!(COMMANDS.len(), desktop.len() + SERVICE_ONLY.len());
     }
 
     /// A call missing an argument the command needs is a `badArguments`
