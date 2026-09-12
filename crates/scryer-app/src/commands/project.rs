@@ -85,10 +85,12 @@ pub struct PlannedWrite {
 /// a change is opened by the agent over MCP and only ever altered by
 /// [`sign_off_change`] and [`close_change`]. What a client DOES author is the
 /// tagging — `change_map`, which files each canvas edit under a change — so
-/// that half is taken from the body and the registry is taken from disk. Skip
-/// this and a client echoing a document it read before a sign-off silently
-/// drops the snapshot, and a change the agent opened in between vanishes with
-/// it; `None` for `base_revision` leaves nothing else to catch it.
+/// that half is merged rather than replaced. Skip this and a client echoing a
+/// document it read before a sign-off silently drops the snapshot, and a change
+/// the agent opened in between vanishes with it; `None` for `base_revision`
+/// leaves nothing else to catch it. [`scryer_core::carry_change_state_at`]
+/// holds both halves of that rule, including what happens when there is no plan
+/// file to be authoritative yet.
 ///
 /// A DELIBERATE DELTA from upstream: `src-tauri`'s `write_planned` has neither
 /// guard, so the desktop keeps the race (its canvas learns of a sign-off only
@@ -123,7 +125,10 @@ pub fn write_planned(
             message: format!("`data` is not a model document: {e}"),
         })?;
 
-    plan.changes = scryer_core::read_planned_seeded_at(&r)?.changes;
+    // Registry from disk, tagging merged — and NOT through a seeded read, which
+    // on a project with no plan file yet would hand back the committed model's
+    // empty ledger and wipe what the caller is holding.
+    scryer_core::carry_change_state_at(&r, &mut plan);
 
     // A canvas save is the DEVELOPER editing the plan — intent by definition.
     // Re-stamp every signed-off change's snapshot, against the plan AS MERGED,

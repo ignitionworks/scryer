@@ -583,3 +583,124 @@ fn resp_tt9ags_a_plan_write_keeps_the_registry_on_disk_authoritative() {
         "the refusal left the plan alone"
     );
 }
+
+/// `resp-9yasmq` — a command that reads the plan to modify and rewrite it
+/// carries the change registry and the tag map from the plan on disk through to
+/// the write, even when the plan is seeded from the committed model.
+///
+/// The seed is the case that bites. A project whose `planned.scry` does not
+/// exist yet has its plan minted from the committed model, which never carries
+/// change state — so a write that treats that read as the authority hands back
+/// an empty registry and erases the ledger it was given. Downstream, the
+/// sign-off then fails with "no open change", which is how the acceptance
+/// session found it.
+#[test]
+fn resp_9yasmq_the_ledger_survives_a_plan_seeded_from_the_committed_model() {
+    // Committed holds the node but not the claim, so the claim is a PENDING
+    // plan entry and the tag naming it is live.
+    let dir = tempfile::tempdir().unwrap();
+    let r = scryer_core::ModelRef::ProjectLocal(dir.path().to_path_buf());
+    let mut committed = scryer_core::ScryModel::new();
+    committed.nodes.push(
+        serde_json::from_value(serde_json::json!({
+            "id": "node-1", "kind": "system", "name": "Acme", "responsibilities": [],
+        }))
+        .unwrap(),
+    );
+    scryer_core::write_model_at(&r, &committed).unwrap();
+    assert!(
+        !dir.path().join(".scryer/planned.scry").exists(),
+        "the project has no plan file — the seed path"
+    );
+
+    let serve = Serve::start(dir.path());
+    let path = dir.path().to_string_lossy().to_string();
+
+    let body = serde_json::json!({
+        "version": "0.3",
+        "nodes": [{
+            "id": "node-1", "kind": "system", "name": "Acme",
+            "responsibilities": [{ "id": "resp-1", "statement": "**Do** a thing" }],
+        }],
+        "links": [], "groups": [],
+        "changes": [{ "id": "chg-1", "rationale": "opened before any plan file", "createdAt": 1_700_000_000 }],
+        "changeMap": { "resp:resp-1": "chg-1" },
+    });
+    let (status, out) = serve.post(
+        "write_planned",
+        &serde_json::json!({ "cwd": path, "data": body.to_string() }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{out}");
+
+    let plan = planned_on_disk(dir.path());
+    assert_eq!(
+        plan.changes
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["chg-1"],
+        "the registry survived a plan seeded from committed"
+    );
+    assert_eq!(
+        plan.change_map.get("resp:resp-1").map(String::as_str),
+        Some("chg-1"),
+        "and so did the tagging"
+    );
+
+    // The proof that it is really there: the change can now be signed off,
+    // which is the step that failed with "no open change" before.
+    let (status, out) = serve.post(
+        "sign_off_change",
+        &serde_json::json!({ "cwd": path, "changeId": "chg-1" }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out, "1", "the sign-off snapshotted the tagged entry");
+    assert!(
+        planned_on_disk(dir.path()).changes[0].signed_off.is_some(),
+        "and landed on the change"
+    );
+
+    // The tag map is shared, so it is merged rather than replaced: a tag the
+    // agent filed while the client wasn't looking survives the client's save,
+    // and the client's own tag still lands.
+    {
+        let _lock = scryer_core::lock_model(&r).unwrap();
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        plan.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "node-2", "kind": "container", "name": "Agent's Node",
+                "responsibilities": [],
+            }))
+            .unwrap(),
+        );
+        plan.change_map
+            .insert("node:node-2".to_string(), "chg-1".to_string());
+        scryer_core::write_planned_at(&r, &plan).unwrap();
+    }
+    let mut echo: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&planned_on_disk(dir.path())).unwrap())
+            .unwrap();
+    // The client echoes the plan back knowing nothing of the agent's tag.
+    echo["changeMap"] = serde_json::json!({ "resp:resp-1": "chg-1" });
+    let (status, out) = serve.post(
+        "write_planned",
+        &serde_json::json!({ "cwd": path, "data": echo.to_string() }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{out}");
+
+    let plan = planned_on_disk(dir.path());
+    assert_eq!(
+        plan.change_map.get("node:node-2").map(String::as_str),
+        Some("chg-1"),
+        "the agent's tag survived a client save that never knew about it: {:?}",
+        plan.change_map
+    );
+    assert_eq!(
+        plan.change_map.get("resp:resp-1").map(String::as_str),
+        Some("chg-1"),
+        "and the client's own tag is still filed"
+    );
+}

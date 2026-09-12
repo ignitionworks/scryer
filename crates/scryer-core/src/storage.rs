@@ -437,6 +437,38 @@ pub fn read_planned_seeded_at(r: &ModelRef) -> Result<ScryModel, String> {
     Ok(planned)
 }
 
+/// Carry the plan's change state — the registry and the tag map — from the plan
+/// ON DISK onto a model that is about to be written back.
+///
+/// For any path that reads the plan, edits it and rewrites it, this is what
+/// keeps the ledger whole. The registry is never a caller's to send: another
+/// writer may have opened, signed off or closed a change since the caller read,
+/// so disk wins. The tag map is shared — the agent files its writes, the canvas
+/// files its edits — so the two are MERGED, the caller winning a re-tag of a key
+/// it also holds, which is the "last writer wins a re-tag" the canvas already
+/// assumes.
+///
+/// The seed is the case worth naming. [`read_planned_seeded_at`] mints a missing
+/// plan from the committed model, which NEVER carries change state, so a caller
+/// that treated that read as the authority would wipe its own ledger on a
+/// project whose plan file does not exist yet. There is nothing on disk to
+/// carry then, so the model keeps what it arrived with.
+///
+/// Caller must hold the model lock. Returns whether anything was carried.
+pub fn carry_change_state_at(r: &ModelRef, model: &mut ScryModel) -> bool {
+    if !r.planned_path().exists() {
+        return false;
+    }
+    let Ok(on_disk) = read_planned_at(r) else {
+        return false;
+    };
+    model.changes = on_disk.changes;
+    for (key, change) in on_disk.change_map {
+        model.change_map.entry(key).or_insert(change);
+    }
+    true
+}
+
 /// The plan diff: how the draft (`planned`) diverges from the committed `model` —
 /// the planning substrate. Empty when there is no pending plan.
 pub fn plan_diff_at(r: &ModelRef) -> Result<diff::ModelDiff, String> {
