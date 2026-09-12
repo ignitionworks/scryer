@@ -2,6 +2,11 @@
 //! invokes, written once as plain functions with no window or shell behind
 //! them, plus the by-name dispatch a host calls them through.
 //!
+//! One name is the service's own. `export_html` has no desktop equivalent —
+//! upstream exports from a CLI script a user runs by hand — but a host
+//! mounting this UI has no terminal to run it from, so the service offers the
+//! same artifact as a command (see [`export`]).
+//!
 //! The functions in the submodules are the surface. [`dispatch`] is a
 //! convenience over it — a host that speaks a name and a bag of arguments
 //! (`invoke(cmd, args)` in upstream's frontend, `POST /api/cmd/{name}` over
@@ -10,6 +15,7 @@
 pub mod agent_state;
 pub mod agents;
 pub mod build;
+pub mod export;
 pub(crate) mod highlight;
 pub mod mcp_setup;
 pub mod observability;
@@ -66,6 +72,8 @@ pub const COMMANDS: &[&str] = &[
     "drop_node",
     "reimplement_node",
     "cancel_agent_session",
+    // Not a desktop command: upstream's export is a CLI script.
+    "export_html",
 ];
 
 /// The identity the caller claims, threaded onto every write. Opaque: the
@@ -243,6 +251,9 @@ pub async fn dispatch(
             )
             .await?,
         ),
+
+        // ── the export a host offers as a download ──────────────────────────
+        "export_html" => json(export::export_html(&a.project()?, a.parse("layer")?).await?),
 
         // ── the machine's AI-tool config ────────────────────────────────────
         "detect_ai_tools" => json(mcp_setup::detect_ai_tools(a.project().ok())),
@@ -473,12 +484,14 @@ mod tests {
     }
 
     /// The surface names every command the desktop's `invoke_handler` does —
-    /// thirty-nine, no duplicates.
+    /// thirty-nine — plus `export_html`, which the desktop has no equivalent
+    /// for (it exports from a CLI script). No duplicates.
     #[test]
-    fn the_surface_names_all_thirty_nine_desktop_commands() {
+    fn the_surface_names_all_thirty_nine_desktop_commands_and_the_service_s_own() {
         let unique: std::collections::BTreeSet<_> = COMMANDS.iter().collect();
         assert_eq!(unique.len(), COMMANDS.len(), "no name is listed twice");
-        assert_eq!(COMMANDS.len(), 39);
+        assert!(COMMANDS.contains(&"export_html"));
+        assert_eq!(COMMANDS.len(), 40);
     }
 
     /// A call missing an argument the command needs is a `badArguments`
