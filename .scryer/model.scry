@@ -10527,15 +10527,20 @@
       "description": "Appends and reads the durable, append-only log of committed-model events.",
       "responsibilities": [
         {
-          "id": "resp-640",
-          "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, and change closures",
-          "lastTouchedAt": 1784884312
-        },
-        {
           "id": "resp-ap0x79",
           "statement": "**When** an appended event carries an actor, **name** that actor as the one who drove it instead of the agent",
           "concern": "oversight",
           "lastTouchedAt": 1789075625
+        },
+        {
+          "id": "resp-640",
+          "statement": "Appends and reads the durable, append-only timeline of committed-model events — builds, folds, drift, moves, change closures and plan edits",
+          "lastTouchedAt": 1789206220
+        },
+        {
+          "id": "resp-hmesby",
+          "statement": "**While** the timeline is read, **carry** plan events as their own kind, distinct from folds, so a reader can show what was proposed apart from what was built",
+          "lastTouchedAt": 1789206248
         }
       ]
     },
@@ -13409,6 +13414,12 @@
           "statement": "**If** a change to be signed off has no live plan entry, every tag it carries naming an element that is not pending, **then** **refuse** the sign-off saying the change would close as abandoned, rather than returning a count",
           "concern": "validation",
           "lastTouchedAt": 1789183762
+        },
+        {
+          "id": "resp-ag8ngf",
+          "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor, the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
+          "concern": "oversight",
+          "lastTouchedAt": 1789206246
         }
       ]
     },
@@ -22072,6 +22083,24 @@
         "symbol": "sign_off"
       }
     ],
+    "resp-ag8ngf": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "plan_events"
+      },
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "append_plan_events"
+      },
+      {
+        "pattern": "crates/scryer-core/src/storage.rs",
+        "symbol": "write_planned_at"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "write_planned"
+      }
+    ],
     "resp-ap0x79": [
       {
         "pattern": "crates/scryer-core/src/history.rs",
@@ -22173,6 +22202,16 @@
       {
         "pattern": "src/inbox.ts",
         "symbol": "buildInboxCards"
+      }
+    ],
+    "resp-hmesby": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "EventKind"
+      },
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "read_history"
       }
     ],
     "resp-j5banp": [
@@ -24157,6 +24196,32 @@
         "symbol": "restamp_signoffs_refreshes_signed_changes_only"
       }
     ],
+    "resp-ag8ngf": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "resp_ag8ngf_a_plan_write_earns_one_event_per_touched_node"
+      },
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "resp_ag8ngf_a_write_that_changes_no_claim_appends_nothing"
+      },
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "resp_ag8ngf_untagged_or_split_edits_drive_as_plan"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "resp_ag8ngf_the_actor_on_the_write_names_the_plan_event"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "resp_ag8ngf_a_plan_write_appends_a_plan_event_per_touched_node"
+      },
+      {
+        "pattern": "crates/scryer-core/src/storage.rs",
+        "symbol": "resp_ag8ngf_the_agents_own_plan_write_is_recorded_too"
+      }
+    ],
     "resp-ap0x79": [
       {
         "pattern": "crates/scryer-core/src/history.rs",
@@ -24267,6 +24332,16 @@
       {
         "pattern": "tests/inbox.test.ts",
         "symbol": "clears a refused fold's card when the refusals ledger no longer holds it"
+      }
+    ],
+    "resp-hmesby": [
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "resp_hmesby_a_plan_event_reads_back_as_its_own_kind"
+      },
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "resp_hmesby_an_event_of_an_unknown_kind_is_skipped_not_fatal"
       }
     ],
     "resp-j5banp": [
