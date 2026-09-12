@@ -9785,6 +9785,12 @@
           "id": "resp-csjk7a",
           "statement": "**When** a change is signed off by a named actor, **record** the actor beside the snapshot",
           "lastTouchedAt": 1789075627
+        },
+        {
+          "id": "resp-31qtx9",
+          "statement": "**Carry** a project-level policy on whether a fold requires a countersignature by a team member other than the author, defaulting to off so a solo user and upstream are unaffected.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789209137
         }
       ]
     },
@@ -12784,6 +12790,12 @@
           "id": "resp-913",
           "statement": "**When** a signed-off claim was dropped from the plan, **restore** it as pending intent and **note** that the agent proposed dropping it",
           "lastTouchedAt": 1788500906
+        },
+        {
+          "id": "resp-6zv79y",
+          "statement": "**When** the project requires countersigned folds and the change carries no sign-off by an actor other than its author, **refuse** the fold, naming that a team member other than the author must sign; **while** the project does not require it, **fold** as before.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789209162
         }
       ]
     },
@@ -12825,6 +12837,12 @@
           "id": "resp-a44pxh",
           "statement": "**When** a change is signed off, **snapshot** every tagged entry's content hash and, for claims, the approved statement",
           "lastTouchedAt": 1788500915
+        },
+        {
+          "id": "resp-k4yw29",
+          "statement": "**When** a sign-off is made for one person by another actor, **record** both the signing actor and the person it is on behalf of, so a proxy signature counts as a different signer yet is never read as the person's own.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789209160
         }
       ]
     },
@@ -18338,8 +18356,8 @@
       {
         "pattern": "crates/scryer-mcp/src/helpers.rs",
         "symbol": "BaselineCounts",
-        "line": 654,
-        "endLine": 658
+        "line": 667,
+        "endLine": 671
       }
     ],
     "node-72": [
@@ -19324,6 +19342,20 @@
       {
         "pattern": "src/health.ts",
         "symbol": "pathsForLink"
+      }
+    ],
+    "resp-31qtx9": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "Policy"
+      },
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "requires_countersigned_folds"
+      },
+      {
+        "pattern": "crates/scryer-core/src/model.rs",
+        "symbol": "ScryModel"
       }
     ],
     "resp-320": [
@@ -21111,8 +21143,8 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "retag",
-        "line": 474,
-        "endLine": 521
+        "line": 546,
+        "endLine": 593
       }
     ],
     "resp-697": [
@@ -21141,6 +21173,20 @@
       {
         "pattern": "crates/scryer-extract/src/lang.rs",
         "symbol": "collect_clojure"
+      }
+    ],
+    "resp-6zv79y": [
+      {
+        "pattern": "crates/scryer-mcp/src/tools/fold_gate.rs",
+        "symbol": "countersign_gate"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/fold_gate.rs",
+        "symbol": "change_author"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/fold_gate.rs",
+        "symbol": "gate"
       }
     ],
     "resp-7": [
@@ -22233,6 +22279,24 @@
         "symbol": "collect_clj_idents"
       }
     ],
+    "resp-k4yw29": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "SignOff"
+      },
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "sign_off_for"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/helpers.rs",
+        "symbol": "env_on_behalf_of"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/misc.rs",
+        "symbol": "sign_off"
+      }
+    ],
     "resp-kema2k": [
       {
         "pattern": "crates/scryer-mcp/src/tools/read.rs",
@@ -22497,6 +22561,12 @@
       {
         "pattern": "tests/mintId.test.ts",
         "symbol": "clears both the plan and the committed layer when adding a node"
+      }
+    ],
+    "resp-31qtx9": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "resp_31qtx9_the_countersigned_fold_policy_is_carried_with_the_model_and_defaults_off"
       }
     ],
     "resp-352": [
@@ -23459,6 +23529,28 @@
         "symbol": "clojure_def_forms_collected"
       }
     ],
+    "resp-6zv79y": [
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_6zv79y_an_unsigned_change_folds_while_the_project_has_not_opted_in"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_6zv79y_a_required_countersignature_refuses_a_change_nobody_signed"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_6zv79y_a_required_countersignature_refuses_a_change_signed_only_by_its_author"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_6zv79y_a_change_countersigned_by_another_actor_folds"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_6zv79y_a_proxy_countersignature_passes_and_is_recorded_as_a_proxy"
+      }
+    ],
     "resp-7": [
       {
         "pattern": "crates/xtask/src/main.rs",
@@ -24365,6 +24457,12 @@
       {
         "pattern": "crates/scryer-extract/src/context.rs",
         "symbol": "clj_external_alias_does_not_misresolve_to_a_local_def"
+      }
+    ],
+    "resp-k4yw29": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "resp_k4yw29_a_proxy_sign_off_records_the_signer_and_the_person_it_is_for"
       }
     ],
     "resp-kema2k": [
