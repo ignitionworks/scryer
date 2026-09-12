@@ -39,6 +39,44 @@ use crate::{ModelRef, ScryModel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
+/// Project-level policy on how changes are approved.
+///
+/// Unlike everything else in this module, a policy is NOT plan state: it is
+/// the project's own setting, persisted with the COMMITTED model
+/// (`.scryer/model.scry`, key `policy`) so it is git-tracked and shared by
+/// everyone working the repo, and so a plan draft cannot switch it off.
+/// [`crate::write_model_at`] strips `changes`/`change_map` on the way to
+/// committed but leaves this standing, and the fold reads it from committed.
+///
+/// ABSENT MEANS EVERY POLICY OFF. A model written before the field existed —
+/// upstream's, and a solo user's — loads and behaves exactly as before; only a
+/// project that opts in by writing the key sees a gate.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Policy {
+    /// `true` = a fold refuses a change that no team member OTHER THAN its
+    /// author has signed off ([`crate::ScryModel::policy`], read by the fold
+    /// gate). Off by default: the sign-off gates ask "has the plan drifted
+    /// since approval", and only a team that opts in also asks "was it
+    /// approved by someone else".
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub require_countersigned_folds: bool,
+}
+
+/// `skip_serializing_if` for a bool that defaults to false — off stays absent
+/// from the file, so opting out leaves no trace and the diff shows only what a
+/// project actually turned on.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// Whether this project requires a fold to be countersigned by a team member
+/// other than the change's author. False for every model that carries no
+/// policy — the default, and the only behaviour upstream has.
+pub fn requires_countersigned_folds(model: &ScryModel) -> bool {
+    model.policy.as_ref().is_some_and(|p| p.require_countersigned_folds)
+}
+
 /// One open change in the plan's registry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -693,6 +731,49 @@ mod tests {
         // Upstream's shape (no `by`) still loads.
         let legacy: SignOff = serde_json::from_str(r#"{"at":1,"entries":{}}"#).unwrap();
         assert!(legacy.by.is_none());
+    }
+
+    /// resp-31qtx9 — the project's countersigned-fold policy is carried WITH
+    /// THE MODEL and defaults to off: a model with no `policy` (upstream's,
+    /// and a solo user's) reads false and serializes no key at all, and a
+    /// project that opts in round-trips through the committed layer, which
+    /// strips the ledger but must never strip this.
+    #[test]
+    fn resp_31qtx9_the_countersigned_fold_policy_is_carried_with_the_model_and_defaults_off() {
+        let dir = tempdir().unwrap();
+        let r = crate::ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        // Off is the ABSENCE of the field: nothing to opt out of.
+        let mut model = model_with_resps(&[("r1", "exists")]);
+        assert!(model.policy.is_none());
+        assert!(!requires_countersigned_folds(&model), "no policy = off");
+        write_model_at(&r, &model).unwrap();
+        let raw = std::fs::read_to_string(r.model_path()).unwrap();
+        assert!(!raw.contains("policy"), "an unset policy leaves no trace in the file: {raw}");
+        assert!(!requires_countersigned_folds(&read_model_at(&r).unwrap()));
+
+        // Opting in survives the committed write that strips change state.
+        model.policy = Some(Policy { require_countersigned_folds: true });
+        let cid = open_change(&mut model, "not the committed layer's business", 100);
+        tag(&mut model, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+        write_model_at(&r, &model).unwrap();
+        let back = read_model_at(&r).unwrap();
+        assert!(back.changes.is_empty(), "the ledger is still stripped");
+        assert!(requires_countersigned_folds(&back), "the policy is not");
+        assert!(std::fs::read_to_string(r.model_path())
+            .unwrap()
+            .contains("\"requireCountersignedFolds\": true"));
+
+        // Turning it back off is the absence again, not `false` on disk.
+        model.policy = Some(Policy::default());
+        write_model_at(&r, &model).unwrap();
+        assert!(!requires_countersigned_folds(&read_model_at(&r).unwrap()));
+        assert!(!std::fs::read_to_string(r.model_path()).unwrap().contains("requireCountersigned"));
+
+        // Upstream's shape (no `policy` key) still loads.
+        let legacy: ScryModel =
+            serde_json::from_str(r#"{"version":"1","nodes":[],"links":[]}"#).unwrap();
+        assert!(!requires_countersigned_folds(&legacy));
     }
 
     /// A model whose single component `n1` carries the given responsibilities.
