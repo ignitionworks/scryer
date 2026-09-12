@@ -72,7 +72,8 @@ pub struct PlannedWrite {
     pub revision: String,
 }
 
-/// Write the plan, refusing one whose base revision has moved on.
+/// Write the plan, refusing one whose base revision has moved on, and keeping
+/// the change registry on disk authoritative.
 ///
 /// `base_revision` is what the caller last read (or wrote). When it names a
 /// revision that is not current, the write is refused with
@@ -80,9 +81,22 @@ pub struct PlannedWrite {
 /// reloads, re-applies its edit, and writes again. `None` skips the check —
 /// the desktop's behaviour, for a caller that knows it is alone.
 ///
-/// The check happens under the model lock, so the read-compare-write cannot
-/// interleave with the agent's MCP writer. Mirrors `project.rs::write_planned`
-/// otherwise, sign-off re-stamp included.
+/// The registry is not the caller's to send. A client never authors `changes`:
+/// a change is opened by the agent over MCP and only ever altered by
+/// [`sign_off_change`] and [`close_change`]. What a client DOES author is the
+/// tagging — `change_map`, which files each canvas edit under a change — so
+/// that half is taken from the body and the registry is taken from disk. Skip
+/// this and a client echoing a document it read before a sign-off silently
+/// drops the snapshot, and a change the agent opened in between vanishes with
+/// it; `None` for `base_revision` leaves nothing else to catch it.
+///
+/// A DELIBERATE DELTA from upstream: `src-tauri`'s `write_planned` has neither
+/// guard, so the desktop keeps the race (its canvas learns of a sign-off only
+/// when the file watcher reloads, and a save that beats the reload clobbers
+/// it). Additive — the desktop's own command is untouched.
+///
+/// Everything happens under the model lock, so read-merge-write cannot
+/// interleave with the agent's MCP writer.
 pub fn write_planned(
     state: &AppState,
     project_path: &str,
@@ -100,29 +114,36 @@ pub fn write_planned(
         }
     }
 
+    // Refused rather than written through: a body that will not parse is one
+    // whose registry cannot be merged, and writing it verbatim is exactly the
+    // clobber this exists to prevent.
+    let mut plan: scryer_core::ScryModel =
+        serde_json::from_str(data).map_err(|e| CommandError::BadArguments {
+            command: "write_planned".to_string(),
+            message: format!("`data` is not a model document: {e}"),
+        })?;
+
+    plan.changes = scryer_core::read_planned_seeded_at(&r)?.changes;
+
     // A canvas save is the DEVELOPER editing the plan — intent by definition.
-    // Re-stamp every signed-off change's snapshot so their edits never read as
-    // the agent's amendments at the next fold, naming the actor who saved.
-    if let Ok(mut plan) = serde_json::from_str::<scryer_core::ScryModel>(data) {
-        if plan.changes.iter().any(|c| c.signed_off.is_some()) {
-            let now = scryer_core::drift::now_secs();
-            let signed: Vec<String> = plan
-                .changes
-                .iter()
-                .filter(|c| c.signed_off.is_some())
-                .map(|c| c.id.clone())
-                .collect();
-            for cid in &signed {
-                let _ = scryer_core::changes::sign_off_as(&mut plan, cid, now, actor);
-            }
-            let json = serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?;
-            scryer_core::write_planned_raw_at(&r, &json)?;
-            return Ok(PlannedWrite {
-                revision: revision(&r),
-            });
+    // Re-stamp every signed-off change's snapshot, against the plan AS MERGED,
+    // so their edits never read as the agent's amendments at the next fold,
+    // naming the actor who saved.
+    let signed: Vec<String> = plan
+        .changes
+        .iter()
+        .filter(|c| c.signed_off.is_some())
+        .map(|c| c.id.clone())
+        .collect();
+    if !signed.is_empty() {
+        let now = scryer_core::drift::now_secs();
+        for cid in &signed {
+            let _ = scryer_core::changes::sign_off_as(&mut plan, cid, now, actor);
         }
     }
-    scryer_core::write_planned_raw_at(&r, data)?;
+
+    let json = serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?;
+    scryer_core::write_planned_raw_at(&r, &json)?;
     Ok(PlannedWrite {
         revision: revision(&r),
     })
