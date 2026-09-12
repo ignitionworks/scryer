@@ -14,6 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHostBridge } from "../src/host/bridge";
+import { isStaleRevision, serviceInvoke, type HostInvoke } from "../src/host/commands";
 import { changeElementId, claimHost, resolveNav } from "../src/host/navigation";
 import { hostSelection, sameSelection } from "../src/host/selection";
 import {
@@ -433,6 +434,158 @@ describe("resp-xrrngm — emitting the selection", () => {
       id: "inbox",
       view: "wiki",
     });
+  });
+});
+
+describe("resp-svcshp — speaking the service's shapes", () => {
+  /** A transport that answers the way the engine service does, and records
+   *  every call so what the app sent can be told from what the service got. */
+  function service(plan = "{\"version\":\"0.3\"}") {
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    let revision = "rev-1";
+    let refuseOnce = false;
+    const transport: HostInvoke = async (command, args) => {
+      calls.push({ command, args });
+      if (command === "read_planned") return { revision, data: plan };
+      if (command === "write_planned") {
+        if (refuseOnce) {
+          refuseOnce = false;
+          revision = "rev-2";
+          throw { error: { kind: "staleRevision", current: revision } };
+        }
+        revision = `rev-${calls.length}`;
+        return { revision };
+      }
+      return `answer to ${command}`;
+    };
+    return {
+      transport,
+      calls,
+      refuse: () => {
+        refuseOnce = true;
+      },
+      get revision() {
+        return revision;
+      },
+    };
+  }
+
+  it("resp-svcshp: unwraps the plan read the app expects to be a bare string", async () => {
+    const s = service("{\"version\":\"0.3\",\"nodes\":[]}");
+    const invoke = serviceInvoke(s.transport);
+    // The app does `JSON.parse(await invoke("read_planned", …))` — it must get
+    // the text, not the envelope the service wraps it in.
+    await expect(invoke("read_planned", { refStr: "project:/work/acme" })).resolves.toBe(
+      "{\"version\":\"0.3\",\"nodes\":[]}",
+    );
+    // And the write's `{revision}` answer is nothing to the app, as on the desktop.
+    await expect(
+      invoke("write_planned", { refStr: "project:/work/acme", data: "{}" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("resp-svcshp: leaves every other command exactly as the app sent it", async () => {
+    const s = service();
+    const invoke = serviceInvoke(s.transport);
+    await expect(invoke("read_model", { refStr: "project:/x" })).resolves.toBe(
+      "answer to read_model",
+    );
+    await invoke("get_model_health", { cwd: "/x" });
+    await invoke("cancel_agent_session");
+    expect(s.calls.map((c) => c.command)).toEqual([
+      "read_model",
+      "get_model_health",
+      "cancel_agent_session",
+    ]);
+    expect(s.calls[0].args).toEqual({ refStr: "project:/x" });
+    expect(s.calls[2].args).toBeUndefined();
+  });
+
+  it("resp-svcshp: sends no base revision unless the host turns it on", async () => {
+    const s = service();
+    const invoke = serviceInvoke(s.transport);
+    await invoke("read_planned", { refStr: "project:/work/acme" });
+    await invoke("write_planned", { refStr: "project:/work/acme", data: "{}" });
+    // Off by default: the app's save swallows failures, so a refusal would
+    // silently drop the user's edit. Turning the guard on is the host's call.
+    expect(s.calls.every((c) => !("baseRevision" in (c.args ?? {})))).toBe(true);
+  });
+
+  it("resp-svcshp: remembers the revision per project, and sends it when asked", async () => {
+    const s = service();
+    const invoke = serviceInvoke(s.transport, { optimistic: true });
+
+    await invoke("read_planned", { refStr: "project:/work/acme" });
+    const acmeRevision = s.revision;
+    await invoke("read_planned", { cwd: "/work/other" });
+
+    await invoke("write_planned", { refStr: "project:/work/acme", data: "{}" });
+    const write = s.calls.at(-1)!;
+    // The base is the one THIS project was last read at — a host may hold
+    // several open, and one project's revision is meaningless to another.
+    expect(write.args?.baseRevision).toBe(acmeRevision);
+    expect(write.args?.data).toBe("{}");
+
+    // `project:/x` and `/x` name one project, so they share one revision.
+    await invoke("write_planned", { cwd: "/work/acme", data: "{}" });
+    expect(s.calls.at(-1)!.args?.baseRevision).toBeTruthy();
+  });
+
+  it("resp-svcshp: a refused write re-reads, retries once, and reports the conflict", async () => {
+    const s = service();
+    const conflicts: string[] = [];
+    const invoke = serviceInvoke(s.transport, {
+      optimistic: true,
+      onConflict: (p) => conflicts.push(p),
+    });
+
+    await invoke("read_planned", { refStr: "project:/work/acme" });
+    s.refuse();
+    await expect(
+      invoke("write_planned", { refStr: "project:/work/acme", data: "{}" }),
+    ).resolves.toBeUndefined();
+
+    // read, write (refused), re-read, write again — once, not in a loop.
+    expect(s.calls.map((c) => c.command)).toEqual([
+      "read_planned",
+      "write_planned",
+      "read_planned",
+      "write_planned",
+    ]);
+    // The retry carries what is current now, not what was stale.
+    expect(s.calls[3].args?.baseRevision).toBe("rev-2");
+    expect(conflicts).toEqual(["/work/acme"]);
+  });
+
+  it("resp-svcshp: a refusal that is not a conflict is the host's to see", async () => {
+    const invoke = serviceInvoke(async () => {
+      throw new Error("the service is down");
+    }, { optimistic: true });
+    await expect(invoke("write_planned", { cwd: "/x", data: "{}" })).rejects.toThrow(
+      "the service is down",
+    );
+
+    // Hosts surface errors differently, so every shape of the service's own
+    // refusal is recognised — and nothing else is.
+    expect(isStaleRevision({ error: { kind: "staleRevision", current: "r" } })).toBe(true);
+    expect(isStaleRevision({ kind: "staleRevision" })).toBe(true);
+    expect(isStaleRevision('{"error":{"kind":"staleRevision"}}')).toBe(true);
+    expect(isStaleRevision(new Error('… "kind":"staleRevision" …'))).toBe(true);
+    expect(isStaleRevision(new Error("permission denied"))).toBe(false);
+    expect(isStaleRevision(null)).toBe(false);
+  });
+
+  it("resp-svcshp: a transport already speaking the desktop's shape is left alone", async () => {
+    // A host part-way through adopting the service still works: a bare string
+    // read passes through, and nothing is remembered to send.
+    const calls: string[] = [];
+    const invoke = serviceInvoke(async (command) => {
+      calls.push(command);
+      return command === "read_planned" ? "{\"version\":\"0.3\"}" : undefined;
+    }, { optimistic: true });
+    await expect(invoke("read_planned", { cwd: "/x" })).resolves.toBe("{\"version\":\"0.3\"}");
+    await expect(invoke("write_planned", { cwd: "/x", data: "{}" })).resolves.toBeUndefined();
+    expect(calls).toEqual(["read_planned", "write_planned"]);
   });
 });
 
