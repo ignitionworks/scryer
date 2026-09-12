@@ -17342,54 +17342,10 @@
           }
         }
       }
-    },
-    {
-      "id": "chg-g0szj7",
-      "rationale": "260912-host-bridge: a navigation command, a selection event and a theme hook so a mounting host can drive the UI to a node, claim or change, follow what it selects, and give it a palette and type stack, each generic and inert when no host is attached.",
-      "createdAt": 1789175481,
-      "signedOff": {
-        "at": 1789175589,
-        "entries": {
-          "node:node-5b6qhs": {
-            "hash": "7ec4aec1f70ffb70"
-          },
-          "resp:resp-9ev5dh": {
-            "hash": "8febf7508c6fd28b",
-            "statement": "**While** no host is attached, **behave** exactly as the desktop app does.",
-            "host": "node-5b6qhs"
-          },
-          "resp:resp-m447bf": {
-            "hash": "1eb581a8d0dbf87b",
-            "statement": "**When** a host supplies a palette and type stack, **apply** them through the theme's own custom properties in place of the default theme, leaving layout and components untouched.",
-            "host": "node-5b6qhs"
-          },
-          "resp:resp-qzkjwm": {
-            "hash": "5999f878f57eee11",
-            "statement": "**When** a host names a node, claim, change or view, **navigate** to it exactly as if the user had selected it, expanding the tree and flashing a claim row.",
-            "host": "node-5b6qhs"
-          },
-          "resp:resp-xrrngm": {
-            "hash": "d52a661d5aefad91",
-            "statement": "**When** the selected node, group, special page or view changes, **emit** the selection to the attached host.",
-            "host": "node-5b6qhs"
-          },
-          "resp:resp-zxz2y8": {
-            "hash": "9d8b9537611a8d7d",
-            "statement": "**While** a host theme is applied, **persist** nothing, the host owning the preference.",
-            "host": "node-5b6qhs"
-          }
-        }
-      }
     }
   ],
   "changeMap": {
-    "node:node-5b6qhs": "chg-g0szj7",
     "resp:resp-683": "chg-qxjsaq",
-    "resp:resp-9ev5dh": "chg-g0szj7",
-    "resp:resp-kc1r12": "chg-j88eqf",
-    "resp:resp-m447bf": "chg-g0szj7",
-    "resp:resp-qzkjwm": "chg-g0szj7",
-    "resp:resp-xrrngm": "chg-g0szj7",
-    "resp:resp-zxz2y8": "chg-g0szj7"
+    "resp:resp-kc1r12": "chg-j88eqf"
   }
 }
