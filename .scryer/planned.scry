@@ -6559,11 +6559,6 @@
           "id": "resp-375",
           "statement": "Bounds concurrent request handling so one slow client cannot stall the rest",
           "lastTouchedAt": 1784883930
-        },
-        {
-          "id": "resp-3hm9a7",
-          "statement": "**When** a touch is recorded, **emit** it as an event carrying its session and the claims and nodes it reaches",
-          "lastTouchedAt": 1789073906
         }
       ]
     },
@@ -13334,6 +13329,11 @@
           "id": "resp-h36w17",
           "statement": "**When** a client names no project, **stream** nothing rather than everything",
           "lastTouchedAt": 1789073829
+        },
+        {
+          "id": "resp-3hm9a7",
+          "statement": "**When** a touch is recorded, **emit** it as an event carrying its session and the claims and nodes it reaches",
+          "lastTouchedAt": 1789175339
         }
       ]
     },
@@ -13363,14 +13363,7 @@
       "name": "Host Application",
       "external": true,
       "technology": "Any process",
-      "description": "Any application embedding the service - it mounts the router inside its own process or talks to the serve binary, and owns identity and audience.",
-      "responsibilities": [
-        {
-          "id": "resp-b1tv86",
-          "statement": "Carries its own identity and authorisation for the people it serves",
-          "lastTouchedAt": 1789073831
-        }
-      ]
+      "description": "Any application embedding the service - it mounts the router inside its own process or talks to the serve binary, and owns identity and audience."
     },
     {
       "id": "node-3yfzg3",
@@ -13403,6 +13396,40 @@
       "directives": [
         "Know nothing about who or why a mark exists; render what the host supplies.",
         "Keep the annotation slot in its own files; never spread render hooks through upstream's components."
+      ]
+    },
+    {
+      "id": "node-5b6qhs",
+      "kind": "component",
+      "name": "Host Bridge",
+      "parentId": "node-2",
+      "description": "The API a mounting host drives the UI through: a navigation command, a selection event and a theme hook. Inert when no host is attached, so the desktop app is unchanged.",
+      "responsibilities": [
+        {
+          "id": "resp-qzkjwm",
+          "statement": "**When** a host names a node, claim, change or view, **navigate** to it exactly as if the user had selected it, expanding the tree and flashing a claim row.",
+          "lastTouchedAt": 1789175512
+        },
+        {
+          "id": "resp-xrrngm",
+          "statement": "**When** the selected node, group, special page or view changes, **emit** the selection to the attached host.",
+          "lastTouchedAt": 1789175512
+        },
+        {
+          "id": "resp-m447bf",
+          "statement": "**When** a host supplies a palette and type stack, **apply** them through the theme's own custom properties in place of the default theme, leaving layout and components untouched.",
+          "lastTouchedAt": 1789175512
+        },
+        {
+          "id": "resp-zxz2y8",
+          "statement": "**While** a host theme is applied, **persist** nothing, the host owning the preference.",
+          "lastTouchedAt": 1789175512
+        },
+        {
+          "id": "resp-9ev5dh",
+          "statement": "**While** no host is attached, **behave** exactly as the desktop app does.",
+          "lastTouchedAt": 1789175512
+        }
       ]
     }
   ],
@@ -17317,18 +17344,52 @@
       }
     },
     {
-      "id": "chg-wgbwjk",
-      "rationale": "260910-engine-api: expose the desktop's command surface as an additive engine service, with an actor on writes, touches as events, and an annotation slot the host fills - each generic, none team-aware",
-      "createdAt": 1789073828
+      "id": "chg-g0szj7",
+      "rationale": "260912-host-bridge: a navigation command, a selection event and a theme hook so a mounting host can drive the UI to a node, claim or change, follow what it selects, and give it a palette and type stack, each generic and inert when no host is attached.",
+      "createdAt": 1789175481,
+      "signedOff": {
+        "at": 1789175589,
+        "entries": {
+          "node:node-5b6qhs": {
+            "hash": "7ec4aec1f70ffb70"
+          },
+          "resp:resp-9ev5dh": {
+            "hash": "8febf7508c6fd28b",
+            "statement": "**While** no host is attached, **behave** exactly as the desktop app does.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-m447bf": {
+            "hash": "1eb581a8d0dbf87b",
+            "statement": "**When** a host supplies a palette and type stack, **apply** them through the theme's own custom properties in place of the default theme, leaving layout and components untouched.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-qzkjwm": {
+            "hash": "5999f878f57eee11",
+            "statement": "**When** a host names a node, claim, change or view, **navigate** to it exactly as if the user had selected it, expanding the tree and flashing a claim row.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-xrrngm": {
+            "hash": "d52a661d5aefad91",
+            "statement": "**When** the selected node, group, special page or view changes, **emit** the selection to the attached host.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-zxz2y8": {
+            "hash": "9d8b9537611a8d7d",
+            "statement": "**While** a host theme is applied, **persist** nothing, the host owning the preference.",
+            "host": "node-5b6qhs"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
-    "link:link-node-6qznb6-node-1": "chg-wgbwjk",
-    "link:link-node-6qznb6-node-yz4jd6": "chg-wgbwjk",
-    "node:node-6qznb6": "chg-wgbwjk",
-    "resp:resp-3hm9a7": "chg-wgbwjk",
+    "node:node-5b6qhs": "chg-g0szj7",
     "resp:resp-683": "chg-qxjsaq",
-    "resp:resp-b1tv86": "chg-wgbwjk",
-    "resp:resp-kc1r12": "chg-j88eqf"
+    "resp:resp-9ev5dh": "chg-g0szj7",
+    "resp:resp-kc1r12": "chg-j88eqf",
+    "resp:resp-m447bf": "chg-g0szj7",
+    "resp:resp-qzkjwm": "chg-g0szj7",
+    "resp:resp-xrrngm": "chg-g0szj7",
+    "resp:resp-zxz2y8": "chg-g0szj7"
   }
 }
