@@ -13287,7 +13287,7 @@
       "kind": "component",
       "name": "Command Surface",
       "parentId": "node-yz4jd6",
-      "description": "The thirty-nine commands the desktop invokes, written once as plain functions with no window or shell behind them.",
+      "description": "The forty commands the desktop invokes, written once as plain functions with no window or shell behind them.",
       "responsibilities": [
         {
           "id": "resp-9r46dt",
@@ -13314,8 +13314,20 @@
         },
         {
           "id": "resp-bs0y4b",
-          "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained file the export script builds, from the committed model or the plan as asked, and **return** it",
-          "lastTouchedAt": 1789178768
+          "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained diagram file, from the committed model or the plan as asked, and **return** it, wherever the engine runs",
+          "lastTouchedAt": 1789181566
+        },
+        {
+          "id": "resp-exprfs",
+          "statement": "**If** an export cannot be produced, **then** **refuse** it naming what was found and what is missing, never a stack trace",
+          "concern": "failure-handling",
+          "lastTouchedAt": 1789181566
+        },
+        {
+          "id": "resp-9yasmq",
+          "statement": "**When** any command reads the plan to modify and rewrite it, **carry** the change registry and change map from the plan on disk through to the write, even when the plan is seeded from the committed model",
+          "concern": "persistence",
+          "lastTouchedAt": 1789181590
         }
       ]
     },
@@ -17353,10 +17365,52 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-dakn8p",
+      "rationale": "export_html must work wherever the engine runs, not only inside a scryer checkout with node_modules: refuse honestly naming what is missing, and embed the built viewer so the export is a template substitution in Rust",
+      "createdAt": 1789181550,
+      "signedOff": {
+        "at": 1789181572,
+        "entries": {
+          "node:node-rqqgcp": {
+            "hash": "24a2a6a2207c7249"
+          },
+          "resp:resp-bs0y4b": {
+            "hash": "c094b48f6fa6d0e9",
+            "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained diagram file, from the committed model or the plan as asked, and **return** it, wherever the engine runs",
+            "host": "node-rqqgcp"
+          },
+          "resp:resp-exprfs": {
+            "hash": "ec588c83f5f9e86c",
+            "statement": "**If** an export cannot be produced, **then** **refuse** it naming what was found and what is missing, never a stack trace",
+            "host": "node-rqqgcp"
+          }
+        }
+      }
+    },
+    {
+      "id": "chg-scf822",
+      "rationale": "sign_off_change loses the change registry when the plan is seeded from the committed model: read_planned_seeded_at must carry changes and changeMap from the plan on disk through every command's read-modify-write",
+      "createdAt": 1789181577,
+      "signedOff": {
+        "at": 1789181601,
+        "entries": {
+          "resp:resp-9yasmq": {
+            "hash": "26c85d4ad90e8cab",
+            "statement": "**When** any command reads the plan to modify and rewrite it, **carry** the change registry and change map from the plan on disk through to the write, even when the plan is seeded from the committed model",
+            "host": "node-rqqgcp"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
+    "node:node-rqqgcp": "chg-dakn8p",
     "resp:resp-683": "chg-qxjsaq",
+    "resp:resp-9yasmq": "chg-scf822",
+    "resp:resp-bs0y4b": "chg-dakn8p",
+    "resp:resp-exprfs": "chg-dakn8p",
     "resp:resp-kc1r12": "chg-j88eqf"
   }
 }
