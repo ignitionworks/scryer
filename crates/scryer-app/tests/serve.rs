@@ -156,7 +156,7 @@ fn serve_answers_commands_and_lists_what_it_serves() {
         .as_str()
         .unwrap()
         .is_empty());
-    assert_eq!(listed["commands"].as_array().unwrap().len(), 39);
+    assert_eq!(listed["commands"].as_array().unwrap().len(), 40);
 
     let (status, body) = serve.post(
         "read_model",
@@ -326,5 +326,94 @@ fn a_write_waits_for_whoever_else_holds_the_model_lock() {
     assert_eq!(
         landed.nodes[0].description.as_deref(),
         Some("written under the lock")
+    );
+}
+
+/// A project whose two layers say different things, so an export can be held
+/// to the one it was asked for: `Acme` is committed, `PlanOnlyWidget` is only
+/// ever in the plan.
+fn two_layer_project() -> tempfile::TempDir {
+    let dir = project();
+    let r = scryer_core::ModelRef::ProjectLocal(dir.path().to_path_buf());
+    let mut plan = scryer_core::read_planned_at(&r).unwrap();
+    plan.nodes.push(
+        serde_json::from_value(
+            serde_json::json!({ "id": "node-2", "kind": "system", "name": "PlanOnlyWidget" }),
+        )
+        .unwrap(),
+    );
+    scryer_core::write_planned_at(&r, &plan).unwrap();
+    dir
+}
+
+/// `resp-bs0y4b` — asked for an HTML export, the service produces the
+/// self-contained file the export script builds, from the layer it was asked
+/// for, and returns it.
+///
+/// The export is the artifact upstream's CLI already ships, so what this holds
+/// is that a host gets THAT file: one document with the model baked in and no
+/// sibling assets to lose, and the committed model or the plan depending on
+/// what was asked — not whichever the script would have defaulted to.
+#[test]
+fn resp_bs0y4b_exports_the_self_contained_file_from_the_layer_asked_for() {
+    let dir = two_layer_project();
+    let serve = Serve::start(dir.path());
+    let path = dir.path().to_string_lossy().to_string();
+
+    let export = |layer: &str| -> String {
+        let (status, body) = serve.post(
+            "export_html",
+            &serde_json::json!({ "refStr": format!("project:{path}"), "layer": layer }).to_string(),
+            None,
+        );
+        assert_eq!(status, 200, "{layer}: {body}");
+        serde_json::from_str::<String>(&body).expect("the export comes back as the file's text")
+    };
+
+    let committed = export("committed");
+
+    // One file: a whole document, with every script, style and font inlined —
+    // the single-file build emits no sibling assets to reference.
+    assert!(
+        committed.trim_start().starts_with("<!doctype html"),
+        "a whole document: {}",
+        &committed[..committed.len().min(120)]
+    );
+    assert!(
+        !committed.contains("assets/"),
+        "nothing is left outside the file"
+    );
+    assert!(
+        committed.contains("<script type=\"module\" crossorigin>"),
+        "the bundle is inlined, not linked"
+    );
+    assert!(committed.len() > 100_000, "the viewer came with it");
+
+    // The model is in it, and it is the COMMITTED one.
+    assert!(committed.contains("Acme"), "the model is baked in");
+    assert!(
+        !committed.contains("PlanOnlyWidget"),
+        "the committed export does not carry the plan"
+    );
+
+    // And the plan is a different export, not the same file relabelled.
+    let planned = export("planned");
+    assert!(planned.contains("PlanOnlyWidget"), "the plan is baked in");
+    assert!(
+        planned.contains("Acme"),
+        "the plan carries committed's nodes"
+    );
+    assert!(planned.trim_start().starts_with("<!doctype html"));
+
+    // A layer nobody has is a bad argument, refused before a bundler runs.
+    let (status, body) = serve.post(
+        "export_html",
+        &serde_json::json!({ "cwd": path, "layer": "draft" }).to_string(),
+        None,
+    );
+    assert_eq!(status, 400, "{body}");
+    assert!(
+        body.contains("committed"),
+        "the real layers are named: {body}"
     );
 }

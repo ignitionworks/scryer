@@ -25,6 +25,8 @@ tower-http = { version = "0.6", features = ["fs"] }
 futures = "0.3"
 form_urlencoded = "1"
 toml_edit = "0.22"
+# The HTML export stages a model into a throwaway project for the exporter.
+tempfile = "3"
 
 # In-process symbol resolution + syntax highlighting for the source-span
 # commands — the same grammar set the desktop shell compiles in.
