@@ -417,3 +417,169 @@ fn resp_bs0y4b_exports_the_self_contained_file_from_the_layer_asked_for() {
         "the real layers are named: {body}"
     );
 }
+
+/// A project whose plan carries one open change with one tagged entry — the
+/// smallest thing a sign-off can be taken of.
+fn ledger_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let r = scryer_core::ModelRef::ProjectLocal(dir.path().to_path_buf());
+    scryer_core::write_model_at(&r, &scryer_core::ScryModel::new()).unwrap();
+    let mut plan = scryer_core::ScryModel::new();
+    plan.nodes.push(
+        serde_json::from_value(serde_json::json!({
+            "id": "node-1", "kind": "system", "name": "Acme",
+            "responsibilities": [{ "id": "resp-1", "statement": "**Do** a thing" }],
+        }))
+        .unwrap(),
+    );
+    scryer_core::changes::open_change(&mut plan, "the change under test", 1_700_000_000);
+    let change = plan.changes[0].id.clone();
+    plan.change_map.insert("resp:resp-1".to_string(), change);
+    scryer_core::write_planned_at(&r, &plan).unwrap();
+    dir
+}
+
+fn planned_on_disk(dir: &Path) -> scryer_core::ScryModel {
+    scryer_core::read_planned_at(&scryer_core::ModelRef::ProjectLocal(dir.to_path_buf())).unwrap()
+}
+
+/// `resp-tt9ags` — a plan write keeps the change registry on disk
+/// authoritative, taking only the edit tagging from the client, so a stale copy
+/// never drops an open change or a sign-off.
+///
+/// The sequence is the one that loses work in upstream's desktop: read the
+/// plan, sign a change off, let the agent open another, then save the document
+/// that was read BEFORE either — with no base revision, which is the only shape
+/// the desktop's command has. The client's own edit must still land; only the
+/// registry is taken back.
+#[test]
+fn resp_tt9ags_a_plan_write_keeps_the_registry_on_disk_authoritative() {
+    let dir = ledger_project();
+    let serve = Serve::start(dir.path());
+    let path = dir.path().to_string_lossy().to_string();
+    let signed_change = planned_on_disk(dir.path()).changes[0].id.clone();
+
+    // What a client read before any of it happened.
+    let (status, body) = serve.post(
+        "read_planned",
+        &serde_json::json!({ "cwd": path }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    let read: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let before_revision = read["revision"].as_str().unwrap().to_string();
+    let mut stale: serde_json::Value =
+        serde_json::from_str(read["data"].as_str().unwrap()).unwrap();
+    assert!(
+        stale["changes"][0]["signedOff"].is_null(),
+        "the copy predates the sign-off"
+    );
+
+    // The developer signs the change off…
+    let (status, body) = serve.post(
+        "sign_off_change",
+        &serde_json::json!({ "cwd": path, "changeId": signed_change }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+
+    // …and the agent opens another one over MCP, which writes the plan file
+    // directly, exactly as a separate process would.
+    let r = scryer_core::ModelRef::ProjectLocal(dir.path().to_path_buf());
+    let agent_change = {
+        let _lock = scryer_core::lock_model(&r).unwrap();
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        let id = scryer_core::changes::open_change(&mut plan, "the agent's change", 1_700_000_100);
+        scryer_core::write_planned_at(&r, &plan).unwrap();
+        id
+    };
+
+    // Now the canvas flushes the document it read at the top, carrying an edit
+    // of its own and a stale registry, with no base revision to catch it.
+    stale["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "id": "node-2", "kind": "container", "name": "Canvas Edit",
+            "responsibilities": [], "properties": [],
+        }));
+    stale["changeMap"]["node:node-2"] = serde_json::json!(signed_change);
+    let (status, body) = serve.post(
+        "write_planned",
+        &serde_json::json!({ "cwd": path, "data": stale.to_string() }).to_string(),
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    let written: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let after_revision = written["revision"].as_str().unwrap();
+
+    let plan = planned_on_disk(dir.path());
+
+    // The sign-off survived the stale copy…
+    let signed = plan
+        .changes
+        .iter()
+        .find(|c| c.id == signed_change)
+        .expect("the signed-off change is still in the registry");
+    let signoff = signed
+        .signed_off
+        .as_ref()
+        .expect("its sign-off survived the write");
+    assert!(
+        signoff.entries.contains_key("resp:resp-1"),
+        "and still holds what it snapshotted: {:?}",
+        signoff.entries.keys().collect::<Vec<_>>()
+    );
+    // …re-stamped against the plan AS MERGED, so the developer's own save is
+    // still intent: the entry this write tagged to the change is snapshotted
+    // too, rather than waiting at the next fold as an agent's addition.
+    assert!(
+        signoff.entries.contains_key("node:node-2"),
+        "the sign-off was re-stamped over the merged plan: {:?}",
+        signoff.entries.keys().collect::<Vec<_>>()
+    );
+
+    // …and so did the change the agent opened while the client wasn't looking.
+    assert!(
+        plan.changes.iter().any(|c| c.id == agent_change),
+        "the agent's change survived a canvas save: {:?}",
+        plan.changes.iter().map(|c| &c.id).collect::<Vec<_>>()
+    );
+
+    // The client's OWN edit still landed — the registry is taken back, the
+    // document is not.
+    assert!(
+        plan.nodes.iter().any(|n| n.id == "node-2"),
+        "the canvas edit was written"
+    );
+    assert_eq!(
+        plan.change_map.get("node:node-2").map(String::as_str),
+        Some(signed_change.as_str()),
+        "and its tagging, which IS the client's to send, was kept"
+    );
+
+    // The revision moves forward; it never rolls back to what the client held.
+    assert_ne!(after_revision, before_revision);
+    let (_, body) = serve.post(
+        "read_planned",
+        &serde_json::json!({ "cwd": path }).to_string(),
+        None,
+    );
+    let now: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(now["revision"].as_str().unwrap(), after_revision);
+
+    // A body that will not parse is refused, not written through — the verbatim
+    // path that made the clobber possible is gone.
+    let (status, body) = serve.post(
+        "write_planned",
+        &serde_json::json!({ "cwd": path, "data": "{ not a model" }).to_string(),
+        None,
+    );
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("not a model document"), "{body}");
+    assert_eq!(
+        planned_on_disk(dir.path()).changes.len(),
+        plan.changes.len(),
+        "the refusal left the plan alone"
+    );
+}
