@@ -13382,6 +13382,40 @@
       "external": true,
       "technology": "Any process",
       "description": "Any application embedding the service - it mounts the router inside its own process or talks to the serve binary, and owns identity and audience."
+    },
+    {
+      "id": "node-5b6qhs",
+      "kind": "component",
+      "name": "Host Bridge",
+      "parentId": "node-2",
+      "description": "The API a mounting host drives the UI through: a navigation command, a selection event and a theme hook. Inert when no host is attached, so the desktop app is unchanged.",
+      "responsibilities": [
+        {
+          "id": "resp-qzkjwm",
+          "statement": "**When** a host names a node, claim, change or view, **navigate** to it exactly as if the user had selected it, expanding the tree and flashing a claim row.",
+          "lastTouchedAt": 1789176695
+        },
+        {
+          "id": "resp-xrrngm",
+          "statement": "**When** the selected node, group, special page or view changes, **emit** the selection to the attached host.",
+          "lastTouchedAt": 1789176695
+        },
+        {
+          "id": "resp-m447bf",
+          "statement": "**When** a host supplies a palette and type stack, **apply** them through the theme's own custom properties in place of the default theme, leaving layout and components untouched.",
+          "lastTouchedAt": 1789176695
+        },
+        {
+          "id": "resp-zxz2y8",
+          "statement": "**While** a host theme is applied, **persist** nothing, the host owning the preference.",
+          "lastTouchedAt": 1789176695
+        },
+        {
+          "id": "resp-9ev5dh",
+          "statement": "**While** no host is attached, **behave** exactly as the desktop app does.",
+          "lastTouchedAt": 1789176695
+        }
+      ]
     }
   ],
   "links": [
@@ -21913,6 +21947,12 @@
         "symbol": "get"
       }
     ],
+    "resp-9ev5dh": [
+      {
+        "pattern": "src/host/context.tsx",
+        "symbol": "HostBridgeProvider"
+      }
+    ],
     "resp-9jnw6k": [
       {
         "pattern": "crates/scryer-app/src/router/http.rs",
@@ -22039,6 +22079,12 @@
         "symbol": "get_health"
       }
     ],
+    "resp-m447bf": [
+      {
+        "pattern": "src/host/theme.ts",
+        "symbol": "applyHostTheme"
+      }
+    ],
     "resp-m7q1t5": [
       {
         "pattern": "crates/scryer-app/src/router/http.rs",
@@ -22067,6 +22113,16 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/misc.rs",
         "symbol": "close_change"
+      }
+    ],
+    "resp-qzkjwm": [
+      {
+        "pattern": "src/host/navigation.ts",
+        "symbol": "resolveNav"
+      },
+      {
+        "pattern": "src/host/wiring.ts",
+        "symbol": "useHostBridgeWiring"
       }
     ],
     "resp-ram7ds": [
@@ -22152,6 +22208,16 @@
         "symbol": "resolve_clj_ns"
       }
     ],
+    "resp-xrrngm": [
+      {
+        "pattern": "src/host/selection.ts",
+        "symbol": "hostSelection"
+      },
+      {
+        "pattern": "src/host/bridge.ts",
+        "symbol": "createHostBridge"
+      }
+    ],
     "resp-y40qy1": [
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
@@ -22173,6 +22239,12 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/misc.rs",
         "symbol": "close_change"
+      }
+    ],
+    "resp-zxz2y8": [
+      {
+        "pattern": "src/host/theme.ts",
+        "symbol": "clearHostTheme"
       }
     ]
   },
@@ -23853,6 +23925,12 @@
         "symbol": "slugs_are_unique_and_get_resolves_every_one"
       }
     ],
+    "resp-9ev5dh": [
+      {
+        "pattern": "tests/hostBridge.test.ts",
+        "symbol": "resp-9ev5dh — no host attached > resp-9ev5dh: behaves exactly as the desktop app does"
+      }
+    ],
     "resp-9jnw6k": [
       {
         "pattern": "crates/scryer-app/src/router/http.rs",
@@ -24003,6 +24081,12 @@
         "symbol": "get_health_aggregates_anchors_per_scope"
       }
     ],
+    "resp-m447bf": [
+      {
+        "pattern": "tests/hostBridge.test.ts",
+        "symbol": "resp-m447bf — a host's palette and type stack > resp-m447bf: leaves layout and components untouched"
+      }
+    ],
     "resp-m7q1t5": [
       {
         "pattern": "crates/scryer-app/src/router/http.rs",
@@ -24031,6 +24115,12 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
         "symbol": "close_change_discards_a_stranded_empty_ledger"
+      }
+    ],
+    "resp-qzkjwm": [
+      {
+        "pattern": "tests/hostBridge.test.ts",
+        "symbol": "resp-qzkjwm — navigating where a host names > resp-qzkjwm: navigates to a node, claim, change or view as if selected"
       }
     ],
     "resp-ram7ds": [
@@ -24105,6 +24195,12 @@
         "symbol": "clj_namespace_munging_resolves_to_the_file"
       }
     ],
+    "resp-xrrngm": [
+      {
+        "pattern": "tests/hostBridge.test.ts",
+        "symbol": "resp-xrrngm — emitting the selection > resp-xrrngm: emits when the node, group, special page or view changes"
+      }
+    ],
     "resp-y40qy1": [
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
@@ -24127,6 +24223,12 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
         "symbol": "close_change_discards_a_stranded_empty_ledger"
+      }
+    ],
+    "resp-zxz2y8": [
+      {
+        "pattern": "tests/hostBridge.test.ts",
+        "symbol": "resp-zxz2y8 — while a host theme is applied > resp-zxz2y8: persists nothing, the host owning the preference"
       }
     ]
   },
