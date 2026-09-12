@@ -13265,6 +13265,11 @@
           "id": "resp-dgxexx",
           "statement": "**When** the hook endpoint records a touch, **publish** it on the event stream resolved to the claims and nodes it reaches",
           "lastTouchedAt": 1789075978
+        },
+        {
+          "id": "resp-3hm9a7",
+          "statement": "**When** a touch is recorded, **emit** it as an event carrying its session and the claims and nodes it reaches",
+          "lastTouchedAt": 1789175663
         }
       ]
     },
@@ -13369,6 +13374,14 @@
         "Know nothing about who or why a mark exists; render what the host supplies.",
         "Keep the annotation slot in its own files; never spread render hooks through upstream's components."
       ]
+    },
+    {
+      "id": "node-6qznb6",
+      "kind": "system",
+      "name": "Host Application",
+      "external": true,
+      "technology": "Any process",
+      "description": "Any application embedding the service - it mounts the router inside its own process or talks to the serve binary, and owns identity and audience."
     }
   ],
   "links": [
@@ -17093,6 +17106,19 @@
       "src": "node-230",
       "dst": "node-3yfzg3",
       "label": "reads marks for cards"
+    },
+    {
+      "id": "link-node-6qznb6-node-1",
+      "src": "node-6qznb6",
+      "dst": "node-1",
+      "label": "drives the model"
+    },
+    {
+      "id": "link-node-6qznb6-node-yz4jd6",
+      "src": "node-6qznb6",
+      "dst": "node-yz4jd6",
+      "label": "posts commands, reads events",
+      "method": "HTTP + SSE"
     }
   ],
   "groups": [
@@ -17460,8 +17486,8 @@
       {
         "pattern": "src/ModelTree.tsx",
         "symbol": "TreeRow",
-        "line": 71,
-        "endLine": 83
+        "line": 72,
+        "endLine": 84
       }
     ],
     "node-23": [
@@ -18228,8 +18254,8 @@
       {
         "pattern": "crates/scryer-mcp/src/helpers.rs",
         "symbol": "BaselineCounts",
-        "line": 644,
-        "endLine": 648
+        "line": 654,
+        "endLine": 658
       }
     ],
     "node-72": [
@@ -19574,6 +19600,12 @@
       {
         "pattern": "src-tauri/src/mcp_setup.rs",
         "symbol": "write_claude_hooks"
+      }
+    ],
+    "resp-3hm9a7": [
+      {
+        "pattern": "crates/scryer-app/src/hooks.rs",
+        "symbol": "resolve"
       }
     ],
     "resp-3xf1p7": [
@@ -20972,8 +21004,8 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "retag",
-        "line": 450,
-        "endLine": 497
+        "line": 474,
+        "endLine": 521
       }
     ],
     "resp-697": [
@@ -22395,6 +22427,12 @@
       {
         "pattern": "src-tauri/src/mcp_setup.rs",
         "symbol": "hook_install_is_idempotent_and_preserves_foreign_hooks"
+      }
+    ],
+    "resp-3hm9a7": [
+      {
+        "pattern": "crates/scryer-app/src/hooks.rs",
+        "symbol": "a_recorded_touch_is_published_carrying_the_claims_and_nodes_it_reaches"
       }
     ],
     "resp-3xf1p7": [
