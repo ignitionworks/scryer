@@ -539,7 +539,7 @@ impl ScryerServer {
                 planned.source_map.insert(key.clone(), locs.clone());
             }
         }
-        if let Err(e) = scryer_core::write_planned_at(&model_ref, &planned) {
+        if let Err(e) = crate::helpers::write_planned(&model_ref, &planned) {
             return Ok(err(e));
         }
         if let Err(e) = scryer_core::write_model_at(&model_ref, &model) {

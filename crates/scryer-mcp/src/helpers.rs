@@ -263,6 +263,25 @@ pub(crate) fn record_event(model_ref: &ModelRef, ev: HistoryEvent) {
     let _ = append_event(model_ref, &ev.by_actor(env_actor().as_deref()));
 }
 
+/// THE MCP plan-write seam: every plan this server writes goes through here, so
+/// the plan events it appends name the actor this process writes as rather than
+/// the bare agent — the same `SCRYER_ACTOR` that already names the committed
+/// events [`record_event`] records.
+///
+/// This is what lets a change authored through the MCP seam have a KNOWN
+/// author: the countersign gate reads a change's author off the earliest plan
+/// event tagged to it, so an event stuck at "agent" leaves every agent-authored
+/// change authorless and the gate unable to bite.
+///
+/// Unset `SCRYER_ACTOR` is unattributed and lands as the agent, which is what a
+/// plain `scryer-mcp` invocation is.
+pub(crate) fn write_planned(
+    model_ref: &ModelRef,
+    model: &scryer_core::ScryModel,
+) -> Result<(), String> {
+    scryer_core::write_planned_as(model_ref, model, env_actor().as_deref())
+}
+
 pub(crate) fn resolve_model_ref(req_project: Option<&str>) -> Result<ModelRef, McpError> {
     let path = match req_project {
         Some(p) => std::path::PathBuf::from(p),
@@ -620,7 +639,7 @@ pub(crate) fn write_planned_tagged(
             }
         }
     }
-    scryer_core::write_planned_at(model_ref, model)?;
+    crate::helpers::write_planned(model_ref, model)?;
     Ok(warnings)
 }
 

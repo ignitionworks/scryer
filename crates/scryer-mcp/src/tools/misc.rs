@@ -190,7 +190,7 @@ impl ScryerServer {
             }
         }
 
-        if let Err(e) = scryer_core::write_planned_at(&model_ref, &model) {
+        if let Err(e) = crate::helpers::write_planned(&model_ref, &model) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
         // Persist the committed-side writes in the same lock so the single home
@@ -588,7 +588,7 @@ impl ScryerServer {
                     rationale,
                     scryer_core::drift::now_secs(),
                 );
-                if let Err(e) = scryer_core::write_planned_at(&model_ref, &plan) {
+                if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
                     return Ok(CallToolResult::error(vec![Content::text(e)]));
                 }
                 drop(_lock);
@@ -711,7 +711,7 @@ impl ScryerServer {
                 ))]));
             }
         };
-        if let Err(e) = scryer_core::write_planned_at(&model_ref, &plan) {
+        if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
         drop(_lock);
@@ -876,7 +876,7 @@ impl ScryerServer {
                 }
             };
         if !outcome.moved.is_empty() {
-            if let Err(e) = scryer_core::write_planned_at(&model_ref, &plan) {
+            if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
                 return Ok(CallToolResult::error(vec![Content::text(e)]));
             }
         }
