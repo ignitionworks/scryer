@@ -552,7 +552,7 @@ impl ScryerServer {
 
         // A full-state set is code→model generation: write the plan, then commit
         // it (planned and model land equal, so the plan diff is empty afterward).
-        if let Err(e) = scryer_core::write_planned_at(&model_ref, &model) {
+        if let Err(e) = crate::helpers::write_planned(&model_ref, &model) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
         if let Err(e) = scryer_core::write_model_at(&model_ref, &model) {
@@ -1088,7 +1088,7 @@ impl ScryerServer {
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         let planned = if gate.plan_dirty {
-            if let Err(e) = scryer_core::write_planned_at(&model_ref, &planned_gated) {
+            if let Err(e) = crate::helpers::write_planned(&model_ref, &planned_gated) {
                 return Ok(CallToolResult::error(vec![Content::text(e)]));
             }
             planned_gated
@@ -1389,7 +1389,7 @@ impl ScryerServer {
                 summaries.push(format!("Recorded attached test(s) for {} claim(s).", n));
                 anchor_notes.extend(normalized);
             }
-            if let Err(e) = scryer_core::write_planned_at(&model_ref, &planned_now) {
+            if let Err(e) = crate::helpers::write_planned(&model_ref, &planned_now) {
                 return Ok(CallToolResult::error(vec![Content::text(e)]));
             }
             if committed_dirty {
@@ -1997,7 +1997,7 @@ impl ScryerServer {
 
         // Write the plan first: if the committed write then fails, committed lags
         // the plan (recoverable pending work), never leads it (a phantom deletion).
-        if let Err(e) = scryer_core::write_planned_at(&model_ref, &model) {
+        if let Err(e) = crate::helpers::write_planned(&model_ref, &model) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
         if let Some(committed) = committed {
@@ -2156,7 +2156,7 @@ impl ScryerServer {
         let (rc, remc, dc) = fold_out_layer(&mut committed, &req.node_ids);
         let (relocated, removed, dropped) = (rp.max(rc), remp.max(remc), dp.max(dc));
 
-        if let Err(e) = scryer_core::write_planned_at(&model_ref, &planned) {
+        if let Err(e) = crate::helpers::write_planned(&model_ref, &planned) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
         if let Err(e) = scryer_core::write_model_at(&model_ref, &committed) {
@@ -4236,6 +4236,155 @@ mod tests {
         assert!(
             text.contains(&format!("COUNTERSIGNED {cid} by claude-session-7 on behalf of jesseh")),
             "the fold names the proxy it folded on: {text}"
+        );
+        assert!(committed_has(&model_ref, "resp-1"), "{text}");
+    }
+
+    // ---- resp-ag8ngf: the plan event names the PERSON, through the MCP seam.
+
+    /// `SCRYER_ACTOR` is process-global, so the tests that set it serialize on
+    /// this and restore the prior value — correct under `cargo test`'s threads
+    /// as well as nextest's process-per-test.
+    fn as_actor<T>(actor: Option<&str>, body: impl FnOnce() -> T) -> T {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let prior = std::env::var("SCRYER_ACTOR").ok();
+        match actor {
+            Some(a) => std::env::set_var("SCRYER_ACTOR", a),
+            None => std::env::remove_var("SCRYER_ACTOR"),
+        }
+        let out = body();
+        match prior {
+            Some(p) => std::env::set_var("SCRYER_ACTOR", p),
+            None => std::env::remove_var("SCRYER_ACTOR"),
+        }
+        out
+    }
+
+    /// A project opted in to countersigned folds, with `vt` as the code-backed
+    /// host. Ubiquitous statements only, so the evidence gate stays out of the
+    /// picture and the countersignature is the only thing under test.
+    fn countersign_project_for_mcp(model_ref: &ModelRef) -> Option<String> {
+        let mut committed = ScryModel::new();
+        committed.nodes.push(node("vt", Kind::Symbol, "verify_token", None));
+        committed.policy =
+            Some(scryer_core::changes::Policy { require_countersigned_folds: true });
+        scryer_core::write_model_at(model_ref, &committed).unwrap();
+        Some(model_ref.project_path().to_string_lossy().to_string())
+    }
+
+    /// Author one claim through the MCP authoring seam, under an open change.
+    fn author_one_claim(server: &ScryerServer, project: &Option<String>, stmt: &str) -> String {
+        let cid = opened(
+            &server
+                .open_change(Parameters(OpenChangeRequest {
+                    project: project.clone(),
+                    rationale: Some("verify tokens".into()),
+                    change_id: None,
+                }))
+                .unwrap(),
+        );
+        server
+            .update_nodes(Parameters(UpdateNodeRequest {
+                project: project.clone(),
+                nodes: vec![serde_json::from_value(serde_json::json!({
+                    "node_id": "vt",
+                    "responsibilities": [{ "id": "resp-1", "statement": stmt }]
+                }))
+                .unwrap()],
+            }))
+            .unwrap();
+        cid
+    }
+
+    /// The MCP seam names the ACTOR on the plan event, not the bare agent.
+    ///
+    /// Every authoring tool reaches the plan through `write_planned_tagged`,
+    /// which used to hard-code no actor — so a host that set `SCRYER_ACTOR`
+    /// still got `by: "agent"` on the one event that records WHO proposed the
+    /// claim. With none set the write is unattributed and reads as the agent,
+    /// which is what a plain `scryer-mcp` invocation is.
+    #[test]
+    fn resp_ag8ngf_an_mcp_plan_write_names_the_actor_from_the_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = countersign_project_for_mcp(&model_ref);
+
+        let cid = as_actor(Some("ada-fixture"), || {
+            author_one_claim(&ScryerServer::new(), &project, "Verifies the token")
+        });
+        assert_eq!(
+            author_of(&model_ref, &cid),
+            "ada-fixture",
+            "the person the host named authored the claim, so the plan event says so"
+        );
+
+        // Nobody named: unattributed, which lands as the agent — unchanged.
+        let dir2 = tempfile::tempdir().unwrap();
+        let model_ref2 = ModelRef::ProjectLocal(dir2.path().to_path_buf());
+        let project2 = countersign_project_for_mcp(&model_ref2);
+        let cid2 = as_actor(None, || {
+            author_one_claim(&ScryerServer::new(), &project2, "Verifies the token")
+        });
+        assert_eq!(author_of(&model_ref2, &cid2), "agent");
+    }
+
+    /// End to end, through the MCP tools: the gate now BITES for agent-authored
+    /// work. Ada opens a change, authors a claim and signs it off — all as
+    /// herself, through `SCRYER_ACTOR` — and the fold is refused, naming her as
+    /// the author she cannot be the sole signature for. A second actor's
+    /// countersignature folds it.
+    ///
+    /// This is the whole point of threading the actor: while every plan event
+    /// read `agent`, the author of an agent-authored change never matched its
+    /// signer, so the gate passed everything it exists to stop.
+    #[test]
+    fn resp_ag8ngf_a_change_ada_authored_and_signed_alone_is_refused_then_countersigned_folds() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = countersign_project_for_mcp(&model_ref);
+
+        let cid = as_actor(Some("ada-fixture"), || {
+            let server = ScryerServer::new();
+            let cid = author_one_claim(&server, &project, "Verifies the token");
+            let text = tool_text(
+                &server
+                    .sign_off(Parameters(SignOffRequest {
+                        project: project.clone(),
+                        change_id: Some(cid.clone()),
+                    }))
+                    .unwrap(),
+            );
+            assert!(text.contains("Signed by ada-fixture"), "{text}");
+
+            // Ada authored it and Ada is the only signature: refused.
+            let (is_error, text) = fold_change_raw(&server, dir.path(), &cid);
+            assert!(is_error, "the gate must bite for agent-authored work: {text}");
+            assert!(
+                text.contains("signed off only by its own author, ada-fixture"),
+                "{text}"
+            );
+            assert!(text.contains("other than its author (ada-fixture)"), "{text}");
+            cid
+        });
+        assert_eq!(author_of(&model_ref, &cid), "ada-fixture");
+        assert!(!committed_has(&model_ref, "resp-1"), "nothing folded");
+        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim is still pending");
+
+        // A second actor signs under their own identity: countersigned, folds.
+        let text = as_actor(Some("reviewer-bea"), || {
+            let server = ScryerServer::new();
+            server
+                .sign_off(Parameters(SignOffRequest {
+                    project: project.clone(),
+                    change_id: Some(cid.clone()),
+                }))
+                .unwrap();
+            fold_change(&server, dir.path(), &cid)
+        });
+        assert!(
+            text.contains(&format!("COUNTERSIGNED {cid} by reviewer-bea (authored by ada-fixture)")),
+            "{text}"
         );
         assert!(committed_has(&model_ref, "resp-1"), "{text}");
     }

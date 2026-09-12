@@ -1057,7 +1057,7 @@ impl ScryerServer {
             || staled_nodes > 0
         {
             enforce_readonly_directives(&mut planned, &prior_plan);
-            if let Err(e) = scryer_core::write_planned_at(&model_ref, &planned) {
+            if let Err(e) = crate::helpers::write_planned(&model_ref, &planned) {
                 return Ok(err(e));
             }
         }
