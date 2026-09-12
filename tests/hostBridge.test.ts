@@ -791,9 +791,12 @@ describe("resp-4cjjcp — laying out to the pane, not the window", () => {
 
   it("resp-4cjjcp: the aside and the project path answer to their own container", () => {
     // The rail: 300px beside a readable article, so it waits for a page
-    // container wide enough to hold both.
+    // container wide enough to hold both. 52rem puts the crossover at a
+    // ~1188px window (the container is the pane less the tree and the page
+    // gutters), which keeps the rail on a 1280px laptop and still leaves the
+    // article ~31rem.
     const rail = read("page/DetailRail.tsx");
-    expect(rail).toContain('className="ml-auto hidden w-[300px] shrink-0 @min-[60rem]:block"');
+    expect(rail).toContain('className="ml-auto hidden w-[300px] shrink-0 @min-[52rem]:block"');
     expect(read("NodePage.tsx")).toContain("@container ${PAGE_COL} flex gap-8");
 
     // The path: the same width the viewport `sm:` breakpoint used, now asked
