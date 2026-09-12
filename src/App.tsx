@@ -770,7 +770,7 @@ function Workspace({
   const plan = planCounts(planDiff, model, committed);
 
   return (
-    <div className="relative flex h-screen w-screen flex-col bg-[var(--surface-canvas)]">
+    <div className="relative flex h-full w-full flex-col bg-[var(--surface-canvas)]">
       {mcpSetup.needsSetup && !mcpSetup.dismissed && (
         <div className="absolute right-3 top-12 z-30 w-[300px]">
           <McpSetupPrompt setup={mcpSetup} onDone={launchSettings.reload} dismissable />

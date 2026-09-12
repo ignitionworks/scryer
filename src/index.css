@@ -9,6 +9,16 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The app fills its PARENT, not the window: mounted in a host's pane it must
+   lay out to the box it was given. The roots are `h-full w-full`, so the chain
+   above them needs a height — in the desktop app that chain is the document,
+   and a host sizes its own mount point. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
 /* Tailwind v4's Preflight defers to the browser default cursor for buttons
    (the arrow), unlike v3 which set `cursor: pointer`. Restore the pointer for
    every enabled button/role=button so individual components don't each have to

@@ -446,7 +446,7 @@ function NodePageBody(props: PageProps & { node: Node }) {
             </div>
           </div>
         ) : (
-          <div className={`${PAGE_COL} flex gap-8 pb-[50px] pt-[18px]`}>
+          <div className={`@container ${PAGE_COL} flex gap-8 pb-[50px] pt-[18px]`}>
             <article
               className="min-w-0 max-w-[900px] flex-1"
               onContextMenu={(e) => openMenu(e, [copyIdItem(node.id, copyId)])}

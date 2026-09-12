@@ -242,7 +242,7 @@ function Centered({ children }: { children: React.ReactNode }) {
     // The window is frameless and TopBar isn't mounted yet on these screens, so
     // this strip is the only titlebar: without it the window can't be moved or
     // closed before a project is open — which is the first thing a user sees.
-    <div className="flex h-screen w-screen flex-col bg-[var(--surface-canvas)]">
+    <div className="flex h-full w-full flex-col bg-[var(--surface-canvas)]">
       <div
         data-tauri-drag-region
         className="flex h-9 shrink-0 items-center justify-end px-2 select-none"

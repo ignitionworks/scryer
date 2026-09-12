@@ -81,117 +81,124 @@ export function TopBar({
     { id: "settings", label: "Settings", onSelect: onOpenSettings },
   ];
 
+  // Three zones — identity | search | view — with the search dead-center (the
+  // command-center idiom): equal flex wings on either side keep it centered
+  // regardless of how long the project path runs.
+  //
+  // The bar is a size-query container, so what it shows follows the width it
+  // was GIVEN — in a host's pane as much as in a window. The menu is
+  // deliberately OUTSIDE it: a size container is a containment context, and it
+  // would become the containing block for a `fixed` overlay, putting the menu
+  // at the wrong end of the screen.
   return (
-    // Three zones — identity | search | view — with the search dead-center
-    // (the command-center idiom): equal flex wings on either side keep it
-    // centered regardless of how long the project path runs.
-    <div
-      data-tauri-drag-region
-      className="flex h-9 shrink-0 items-center border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none"
-    >
-      {/* Box-centered, with a 1px optical nudge on the path below. NOT
-          items-baseline: the button's exported baseline is its first child's —
-          the logo image, i.e. its bottom edge — which drags the path ~3px low. */}
-      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center">
-        <button
-          type="button"
-          onClick={(e) => {
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            setMenu({ x: r.left, y: r.bottom + 2 });
-          }}
-          title={projectPath ?? undefined}
-          className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]"
-        >
-          <img src="/logo.png" alt="scryer" className="h-3.5 w-3.5 shrink-0 rounded" />
-          <span className="truncate">{projectName}</span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-[var(--text-ghost)]" />
-        </button>
-
-        {projectPath && (
-          <span
-            data-tauri-drag-region
-            title={projectPath}
-            // translate-y-px: 11px mono centered next to 12px sans sits ~1px
-            // high by box math; the nudge lands the two baselines together.
-            className="ml-2 hidden min-w-0 max-w-[340px] translate-y-px truncate font-mono text-2xs text-[var(--text-ghost)] sm:block"
-          >
-            {projectPath}
-          </span>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={onOpenSearch}
-        title="Search the model (Ctrl+K)"
-        className="flex h-7 w-[280px] max-w-[38vw] shrink-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-canvas)] px-3 text-xs text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] cursor-text"
+    <>
+      <div
+        data-tauri-drag-region
+        className="@container flex h-9 shrink-0 items-center border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none"
       >
-        <Search className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">Search the model</span>
-        <span className="ml-auto shrink-0 rounded border border-[var(--border-strong)] px-1 font-mono text-2xs text-[var(--text-tertiary)]">
-          {SEARCH_KEY}
-        </span>
-      </button>
+        {/* Box-centered, with a 1px optical nudge on the path below. NOT
+            items-baseline: the button's exported baseline is its first child's —
+            the logo image, i.e. its bottom edge — which drags the path ~3px low. */}
+        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center">
+          <button
+            type="button"
+            onClick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setMenu({ x: r.left, y: r.bottom + 2 });
+            }}
+            title={projectPath ?? undefined}
+            className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]"
+          >
+            <img src="/logo.png" alt="scryer" className="h-3.5 w-3.5 shrink-0 rounded" />
+            <span className="truncate">{projectName}</span>
+            <ChevronDown className="h-3 w-3 shrink-0 text-[var(--text-ghost)]" />
+          </button>
 
-      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center justify-end">
-        {/* Wiki / Map / Inbox — three destinations, one joined control, exactly
-            one lit. The inbox is a wiki page underneath, but to the user it is
-            its own place: lighting Wiki too read as two selections, and Wiki
-            then "went back" to the inbox. Its cell carries the unread badge;
-            while a hook session is live the badge pulses. */}
-        <div className="ml-2 flex items-stretch overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]">
-          {([
-            { id: "wiki", label: "Wiki", Icon: FileText, title: "Wiki view (Ctrl+Space to switch)" },
-            { id: "diagram", label: "Map", Icon: Network, title: "Map view (Ctrl+Space to switch)" },
-            ...(onOpenInbox
-              ? [{
-                  id: "inbox",
-                  label: "Inbox",
-                  Icon: Inbox,
-                  title:
-                    inboxUnread > 0
-                      ? `Inbox — ${inboxUnread} unread item${inboxUnread === 1 ? "" : "s"} awaiting your verdict${inboxLive ? " (session live)" : ""}`
-                      : `Inbox — nothing unread${inboxLive ? " (session live)" : ""}`,
-                }]
-              : []),
-          ] as const).map(({ id, label, Icon, title }) => {
-            const lit = inboxOpen ? id === "inbox" : id === view;
-            return (
-              <button
-                key={id}
-                type="button"
-                data-cam={id === "inbox" ? "inbox" : `view-${id}`}
-                title={title}
-                aria-pressed={lit}
-                onClick={() => (id === "inbox" ? onOpenInbox?.() : onSetView(id as WorkspaceView))}
-                className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium transition-colors ${
-                  lit
-                    ? "bg-[var(--surface-active)] text-[var(--text)]"
-                    : "text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-                {id === "inbox" && inboxUnread > 0 && (
-                  <span
-                    className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 font-mono text-2xs font-semibold tabular-nums ${
-                      inboxLive
-                        ? "animate-pulse bg-violet-600 text-white dark:bg-violet-500"
-                        : "bg-orange-600 text-white dark:bg-orange-500"
-                    }`}
-                  >
-                    {inboxUnread > 99 ? "99+" : inboxUnread}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          {projectPath && (
+            <span
+              data-tauri-drag-region
+              title={projectPath}
+              // translate-y-px: 11px mono centered next to 12px sans sits ~1px
+              // high by box math; the nudge lands the two baselines together.
+              className="ml-2 hidden min-w-0 max-w-[340px] translate-y-px truncate font-mono text-2xs text-[var(--text-ghost)] @min-[40rem]:block"
+            >
+              {projectPath}
+            </span>
+          )}
         </div>
 
-        <ThemeToggle />
-        <WindowControls />
-      </div>
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          title="Search the model (Ctrl+K)"
+          className="flex h-7 w-[280px] max-w-[38vw] shrink-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-canvas)] px-3 text-xs text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] cursor-text"
+        >
+          <Search className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">Search the model</span>
+          <span className="ml-auto shrink-0 rounded border border-[var(--border-strong)] px-1 font-mono text-2xs text-[var(--text-tertiary)]">
+            {SEARCH_KEY}
+          </span>
+        </button>
 
+        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center justify-end">
+          {/* Wiki / Map / Inbox — three destinations, one joined control, exactly
+              one lit. The inbox is a wiki page underneath, but to the user it is
+              its own place: lighting Wiki too read as two selections, and Wiki
+              then "went back" to the inbox. Its cell carries the unread badge;
+              while a hook session is live the badge pulses. */}
+          <div className="ml-2 flex items-stretch overflow-hidden rounded-md border border-[var(--border)] divide-x divide-[var(--border)]">
+            {([
+              { id: "wiki", label: "Wiki", Icon: FileText, title: "Wiki view (Ctrl+Space to switch)" },
+              { id: "diagram", label: "Map", Icon: Network, title: "Map view (Ctrl+Space to switch)" },
+              ...(onOpenInbox
+                ? [{
+                    id: "inbox",
+                    label: "Inbox",
+                    Icon: Inbox,
+                    title:
+                      inboxUnread > 0
+                        ? `Inbox — ${inboxUnread} unread item${inboxUnread === 1 ? "" : "s"} awaiting your verdict${inboxLive ? " (session live)" : ""}`
+                        : `Inbox — nothing unread${inboxLive ? " (session live)" : ""}`,
+                  }]
+                : []),
+            ] as const).map(({ id, label, Icon, title }) => {
+              const lit = inboxOpen ? id === "inbox" : id === view;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  data-cam={id === "inbox" ? "inbox" : `view-${id}`}
+                  title={title}
+                  aria-pressed={lit}
+                  onClick={() => (id === "inbox" ? onOpenInbox?.() : onSetView(id as WorkspaceView))}
+                  className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium transition-colors ${
+                    lit
+                      ? "bg-[var(--surface-active)] text-[var(--text)]"
+                      : "text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                  {id === "inbox" && inboxUnread > 0 && (
+                    <span
+                      className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 font-mono text-2xs font-semibold tabular-nums ${
+                        inboxLive
+                          ? "animate-pulse bg-violet-600 text-white dark:bg-violet-500"
+                          : "bg-orange-600 text-white dark:bg-orange-500"
+                      }`}
+                    >
+                      {inboxUnread > 99 ? "99+" : inboxUnread}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <ThemeToggle />
+          <WindowControls />
+        </div>
+      </div>
       {menu && (
         <ContextMenu
           x={menu.x}
@@ -201,7 +208,7 @@ export function TopBar({
           onClose={() => setMenu(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 
