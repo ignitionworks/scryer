@@ -17418,7 +17418,17 @@
     {
       "id": "chg-k99xvz",
       "rationale": "sign_off_change reports a count for a change that is about to close as abandoned because every tag it carries names an element that is not a pending plan entry; refuse such a sign-off and say why instead",
-      "createdAt": 1789182796
+      "createdAt": 1789182796,
+      "signedOff": {
+        "at": 1789183040,
+        "entries": {
+          "resp:resp-q2kvek": {
+            "hash": "5532b0f5a1234aef",
+            "statement": "**If** a change to be signed off has no live plan entry, every tag it carries naming an element that is not pending, **then** **refuse** the sign-off saying the change would close as abandoned, rather than returning a count",
+            "host": "node-rqqgcp"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
