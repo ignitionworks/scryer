@@ -13219,43 +13219,6 @@
       ]
     },
     {
-      "id": "node-rqqgcp",
-      "kind": "component",
-      "name": "Command Surface",
-      "parentId": "node-yz4jd6",
-      "description": "The thirty-nine commands the desktop invokes, written once as plain functions with no window or shell behind them.",
-      "responsibilities": [
-        {
-          "id": "resp-9r46dt",
-          "statement": "**When** a host names a command and its arguments, **dispatch** it to the function behind that command and **return** its result",
-          "lastTouchedAt": 1789075612
-        },
-        {
-          "id": "resp-wtzj6y",
-          "statement": "**If** a named command does not exist, **then** refuse the call naming the commands that do",
-          "concern": "validation",
-          "lastTouchedAt": 1789075612
-        },
-        {
-          "id": "resp-1xakm0",
-          "statement": "**When** a plan write names a base revision that is not current, **refuse** it with the current revision",
-          "concern": "failure-handling",
-          "lastTouchedAt": 1789075612
-        },
-        {
-          "id": "resp-bs0y4b",
-          "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained file the export script builds, from the committed model or the plan as asked, and **return** it",
-          "lastTouchedAt": 1789179403
-        },
-        {
-          "id": "resp-tt9ags",
-          "statement": "**When** a plan is written, **keep** the change registry on disk authoritative, taking only the edit tagging from the client, so a stale copy never drops an open change or a sign-off",
-          "concern": "persistence",
-          "lastTouchedAt": 1789181113
-        }
-      ]
-    },
-    {
       "id": "node-b6m3p0",
       "kind": "component",
       "name": "Event Router",
@@ -13425,6 +13388,55 @@
           "id": "resp-9ev5dh",
           "statement": "**While** no host is attached, **behave** exactly as the desktop app does.",
           "lastTouchedAt": 1789176695
+        }
+      ]
+    },
+    {
+      "id": "node-rqqgcp",
+      "kind": "component",
+      "name": "Command Surface",
+      "parentId": "node-yz4jd6",
+      "description": "The forty commands the desktop invokes, written once as plain functions with no window or shell behind them.",
+      "responsibilities": [
+        {
+          "id": "resp-9r46dt",
+          "statement": "**When** a host names a command and its arguments, **dispatch** it to the function behind that command and **return** its result",
+          "lastTouchedAt": 1789075612
+        },
+        {
+          "id": "resp-wtzj6y",
+          "statement": "**If** a named command does not exist, **then** refuse the call naming the commands that do",
+          "concern": "validation",
+          "lastTouchedAt": 1789075612
+        },
+        {
+          "id": "resp-1xakm0",
+          "statement": "**When** a plan write names a base revision that is not current, **refuse** it with the current revision",
+          "concern": "failure-handling",
+          "lastTouchedAt": 1789075612
+        },
+        {
+          "id": "resp-tt9ags",
+          "statement": "**When** a plan is written, **keep** the change registry on disk authoritative, taking only the edit tagging from the client, so a stale copy never drops an open change or a sign-off",
+          "concern": "persistence",
+          "lastTouchedAt": 1789181113
+        },
+        {
+          "id": "resp-bs0y4b",
+          "statement": "**When** a host asks for an HTML export of a project, **produce** the self-contained diagram file, from the committed model or the plan as asked, and **return** it, wherever the engine runs",
+          "lastTouchedAt": 1789182859
+        },
+        {
+          "id": "resp-exprfs",
+          "statement": "**If** an export cannot be produced, **then** **refuse** it naming what was found and what is missing, never a stack trace",
+          "concern": "failure-handling",
+          "lastTouchedAt": 1789182859
+        },
+        {
+          "id": "resp-9yasmq",
+          "statement": "**When** any command reads the plan to modify and rewrite it, **carry** the change registry and change map from the plan on disk through to the write, even when the plan is seeded from the committed model",
+          "concern": "persistence",
+          "lastTouchedAt": 1789182857
         }
       ]
     }
@@ -21982,6 +21994,16 @@
         "symbol": "TreeRowMarks"
       }
     ],
+    "resp-9yasmq": [
+      {
+        "pattern": "crates/scryer-core/src/storage.rs",
+        "symbol": "carry_change_state_at"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "write_planned"
+      }
+    ],
     "resp-a44pxh": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -21998,6 +22020,21 @@
       {
         "pattern": "crates/scryer-app/src/commands/export.rs",
         "symbol": "export_html"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "render"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "escape_template_literal"
+      },
+      {
+        "pattern": "crates/xtask/src/main.rs",
+        "symbol": "export_template"
+      },
+      {
+        "pattern": "crates/scryer-app/assets/export-viewer.html"
       }
     ],
     "resp-by5pbn": [
@@ -22034,6 +22071,16 @@
       {
         "pattern": "src/inbox.ts",
         "symbol": "buildInboxCards"
+      }
+    ],
+    "resp-exprfs": [
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "script_from"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "configured_script"
       }
     ],
     "resp-ezr6t4": [
@@ -23972,6 +24019,12 @@
         "symbol": "separates the chips beside a node from the wash over it"
       }
     ],
+    "resp-9yasmq": [
+      {
+        "pattern": "crates/scryer-app/tests/serve.rs",
+        "symbol": "resp_9yasmq_the_ledger_survives_a_plan_seeded_from_the_committed_model"
+      }
+    ],
     "resp-a44pxh": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -23992,6 +24045,18 @@
       {
         "pattern": "crates/scryer-app/tests/serve.rs",
         "symbol": "resp_bs0y4b_exports_the_self_contained_file_from_the_layer_asked_for"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "commands::export::tests::a_hostile_model_survives_both_quotings_intact"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "commands::export::tests::a_template_without_exactly_one_slot_refuses"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "commands::export::tests::the_shipped_viewer_carries_exactly_one_model_slot"
       }
     ],
     "resp-by5pbn": [
@@ -24040,6 +24105,12 @@
       {
         "pattern": "tests/inbox.test.ts",
         "symbol": "leaves untested claims out — they are a standing list, not a verdict"
+      }
+    ],
+    "resp-exprfs": [
+      {
+        "pattern": "crates/scryer-app/src/commands/export.rs",
+        "symbol": "commands::export::tests::resp_exprfs_an_export_that_cannot_be_produced_names_what_is_missing"
       }
     ],
     "resp-ezr6t4": [
