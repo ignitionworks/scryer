@@ -11,6 +11,7 @@ import { entryChanges, type SignOff } from "../ledger";
 import { relativeTime } from "../history";
 import { BTN, BTN_ICON, LINK, WordDiffText } from "../pagekit";
 import { SpecialBody, SpecialHeader, timeLabel } from "./shell";
+import { changeElementId } from "../host/navigation";
 
 // --- changes (the whole plan diff) -------------------------------------------
 //
@@ -579,7 +580,8 @@ function ChangeSection({
   // that wait for a verdict in the Inbox. They still block the close.
   const inInbox = Math.max(0, tagged - entries.length);
   return (
-    <section>
+    // Anchored so the host bridge can pin the page to one change.
+    <section id={id ? changeElementId(id) : undefined}>
       <div className="sticky top-0 z-10 flex min-h-10 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-1.5">
         <span
           className={`min-w-0 flex-1 truncate text-sm font-medium ${id ? "text-[var(--text)]" : "text-[var(--text-muted)]"}`}

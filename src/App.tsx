@@ -67,6 +67,7 @@ import {
   type ScryModel,
 } from "./viewmodel";
 import type { Editor } from "./editor";
+import { HostBridgeProvider, useHostBridge, useHostBridgeWiring, type HostBridgeRef } from "./host";
 
 /** Whether a keydown landed inside an editable field (input, textarea, or an
  *  in-place contentEditable). Global shortcuts that overlap with text entry
@@ -77,7 +78,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
 }
 
-export default function App() {
+export default function App({
+  hostBridge,
+}: {
+  /** A mounting host's handle on the UI — a callback or a ref, handed the
+   *  host bridge on mount. The desktop app passes nothing, so no bridge is
+   *  built and every host path below is dead code. */
+  hostBridge?: HostBridgeRef;
+} = {}) {
   useEffect(() => {
     // A dev refresh reloads the webview but not the Rust backend, leaving any
     // in-flight agent session alive and still editing the model. Cancel it on
@@ -87,11 +95,13 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ToastProvider>
-        <AgentFailureProvider>
-          <AppBody />
-        </AgentFailureProvider>
-      </ToastProvider>
+      <HostBridgeProvider hostBridge={hostBridge}>
+        <ToastProvider>
+          <AgentFailureProvider>
+            <AppBody />
+          </AgentFailureProvider>
+        </ToastProvider>
+      </HostBridgeProvider>
     </ErrorBoundary>
   );
 }
@@ -712,6 +722,21 @@ function Workspace({
     },
     [setWorkspaceView],
   );
+
+  // The host bridge's only foothold in the app: it borrows the four callbacks
+  // above so a host's navigation lands exactly where a click would, and hears
+  // the selection back. Null without a host, and then this does nothing.
+  const hostBridge = useHostBridge();
+  useHostBridgeWiring({
+    bridge: hostBridge,
+    model,
+    selected,
+    view,
+    selectNode,
+    selectGroup,
+    openSpecial,
+    showView,
+  });
 
   // The status-bar counters, shared with the special pages so the number and
   // the list can never disagree.

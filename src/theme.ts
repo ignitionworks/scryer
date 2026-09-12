@@ -196,17 +196,24 @@ export function applyColorMode(mode: ColorMode): void {
 
   apply(isDarkActive(mode));
 
-  // Sync Tauri webview theme — forces the webview's prefers-color-scheme to match.
-  // For "system", reset to null so it follows the OS automatically.
-  const win = getCurrentWindow();
+  // Follow the OS while on "system". Registered before the webview sync, so a
+  // host mounting this UI outside Tauri still tracks the system scheme.
   if (mode === "system") {
-    win.setTheme(null).catch(() => {});
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => apply(e.matches);
     mql.addEventListener("change", handler);
     _systemDarkListener = () => mql.removeEventListener("change", handler);
-  } else {
-    win.setTheme(mode === "dark" ? "dark" : "light").catch(() => {});
+  }
+
+  // Sync Tauri webview theme — forces the webview's prefers-color-scheme to match.
+  // For "system", reset to null so it follows the OS automatically. There is no
+  // webview to tell outside the desktop app; the class above is the whole job.
+  try {
+    getCurrentWindow()
+      .setTheme(mode === "system" ? null : mode === "dark" ? "dark" : "light")
+      .catch(() => {});
+  } catch {
+    /* not running in a Tauri webview */
   }
 }
 
