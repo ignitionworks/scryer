@@ -355,7 +355,16 @@ pub fn write_planned_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
         }
     }
     let json = serde_json::to_string_pretty(&stamped).map_err(|e| e.to_string())?;
-    write_planned_raw_at(r, &json)
+    write_planned_raw_at(r, &json)?;
+    // The agent's seam: every authoring tool reaches the plan through here, so
+    // the write leaves its trace in the history without one of them knowing.
+    // No actor to name at this depth — the write reads as the agent's, which is
+    // what an MCP write is; a host that knows better re-stamps its own events.
+    // Nothing is appended when the claims did not move.
+    if let Some(prior) = prior.as_ref() {
+        crate::history::append_plan_events(r, prior, &stamped, None);
+    }
+    Ok(())
 }
 
 /// Seed the planned file from the committed model when absent, so the plan starts

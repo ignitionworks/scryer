@@ -116,6 +116,11 @@ pub fn write_planned(
         }
     }
 
+    // What the plan claimed before this save — the other half of the plan-event
+    // diff below. Read under the lock, before anything is merged into it, so
+    // the diff is the CLIENT's edit and not the registry carry.
+    let before = scryer_core::read_planned_at(&r).ok();
+
     // Refused rather than written through: a body that will not parse is one
     // whose registry cannot be merged, and writing it verbatim is exactly the
     // clobber this exists to prevent.
@@ -149,6 +154,14 @@ pub fn write_planned(
 
     let json = serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?;
     scryer_core::write_planned_raw_at(&r, &json)?;
+    // This command writes the draft RAW, so it misses the append that
+    // `write_planned_at` does for the agent's authoring tools — it does its own
+    // here, naming the actor who saved. Still inside the lock, and still before
+    // `model-changed` fires, so a host that re-reads the history on that event
+    // already sees these. A save that changed no claim appends nothing.
+    if let Some(before) = before {
+        scryer_core::history::append_plan_events(&r, &before, &plan, actor);
+    }
     Ok(PlannedWrite {
         revision: revision(&r),
     })
@@ -445,6 +458,84 @@ mod tests {
         close_change(&state, &path, &another, None).unwrap();
         let log = scryer_core::history::read_history(&r);
         assert_eq!(log.last().unwrap().by, "agent");
+    }
+
+    /// A plan write that changes what the plan CLAIMS leaves its trace: one
+    /// plan event per touched node, naming the actor who saved, the change the
+    /// edits are tagged to, and each claim added, reworded or removed as a row.
+    /// A save that changes no claim appends nothing.
+    #[test]
+    fn resp_ag8ngf_a_plan_write_appends_a_plan_event_per_touched_node() {
+        let (_dir, state, path) = project();
+        let r = state.model_ref(&path).unwrap();
+
+        // Tag the edit to a change, so the event can name it.
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        let cid = scryer_core::changes::open_change(&mut plan, "the change", 100);
+        scryer_core::write_planned_at(&r, &plan).unwrap();
+
+        let read = read_planned(&state, &path).unwrap();
+        let mut plan: scryer_core::ScryModel = serde_json::from_str(&read.data).unwrap();
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(
+                serde_json::json!({ "id": "resp-1", "statement": "**When** asked, **answer**" }),
+            )
+            .unwrap(),
+        );
+        plan.change_map.insert("resp:resp-1".to_string(), cid.clone());
+        let body = serde_json::to_string(&plan).unwrap();
+
+        let before = scryer_core::history::read_history(&r).len();
+        let write =
+            write_planned(&state, &path, &body, Some(&read.revision), Some("jesseh")).unwrap();
+
+        let log = scryer_core::history::read_history(&r);
+        let appended: Vec<_> = log.iter().skip(before).collect();
+        assert_eq!(appended.len(), 1, "one node touched, one event");
+        let ev = appended[0];
+        assert_eq!(ev.kind, scryer_core::history::EventKind::Plan, "its own kind, not a fold");
+        assert_eq!(ev.node_id, "node-1");
+        assert_eq!(ev.by, "jesseh", "the actor who saved");
+        assert_eq!(ev.driver, cid, "the change the edits are tagged to");
+        assert_eq!(ev.change_id.as_deref(), Some(cid.as_str()));
+        assert_eq!(ev.rows.len(), 1);
+        assert_eq!(ev.rows[0].marker, "+");
+        assert_eq!(ev.rows[0].text, "**When** asked, **answer**");
+
+        // Writing the same plan back changes no claim: nothing is appended.
+        let n = scryer_core::history::read_history(&r).len();
+        write_planned(&state, &path, &body, Some(&write.revision), Some("jesseh")).unwrap();
+        assert_eq!(
+            scryer_core::history::read_history(&r).len(),
+            n,
+            "a write that changes nothing appends nothing"
+        );
+    }
+
+    /// The agent reaches the plan through `write_planned_at`, never through
+    /// this command — and its writes are recorded too, unattributed (there is
+    /// no actor at that depth), so one timeline holds both hands' proposals.
+    #[test]
+    fn resp_ag8ngf_the_agents_own_plan_write_is_recorded_too() {
+        let (_dir, state, path) = project();
+        let r = state.model_ref(&path).unwrap();
+
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(
+                serde_json::json!({ "id": "resp-9", "statement": "**Retry** once" }),
+            )
+            .unwrap(),
+        );
+        let before = scryer_core::history::read_history(&r).len();
+        scryer_core::write_planned_at(&r, &plan).unwrap();
+
+        let log = scryer_core::history::read_history(&r);
+        let appended: Vec<_> = log.iter().skip(before).collect();
+        assert_eq!(appended.len(), 1);
+        assert_eq!(appended[0].kind, scryer_core::history::EventKind::Plan);
+        assert_eq!(appended[0].by, "agent", "no actor at the core seam");
+        assert_eq!(appended[0].rows[0].text, "**Retry** once");
     }
 
     /// The plan round-trips through the surface, and the read carries the
