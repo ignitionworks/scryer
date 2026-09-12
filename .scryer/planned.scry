@@ -13355,9 +13355,9 @@
         },
         {
           "id": "resp-ag8ngf",
-          "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor, the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
+          "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor of the write — the person when the write names one, at the canvas or through the MCP seam from `SCRYER_ACTOR`, and the agent only when none is named — the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
           "concern": "oversight",
-          "lastTouchedAt": 1789204961
+          "lastTouchedAt": 1789210103
         }
       ]
     },
@@ -17455,6 +17455,21 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-r0aqsf",
+      "rationale": "260912-plan-event-actor: a plan write through the MCP seam (write_planned_at) records its plan event as the agent even when SCRYER_ACTOR names the person, because the seam passes None; so a change an agent authors on a person's behalf has no known author and the countersign gate — which derives the author from the earliest plan event — can never bite. Thread the authoring actor through write_planned_at to append_plan_events so a named actor reaches the plan event, and an unattributed write still reads as the agent.",
+      "createdAt": 1789210073,
+      "signedOff": {
+        "at": 1789210107,
+        "entries": {
+          "resp:resp-ag8ngf": {
+            "hash": "bd8b277992f8e263",
+            "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor of the write — the person when the write names one, at the canvas or through the MCP seam from `SCRYER_ACTOR`, and the agent only when none is named — the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
+            "host": "node-rqqgcp"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
@@ -17463,6 +17478,7 @@
     "resp:resp-912": "chg-frz54y",
     "resp:resp-913": "chg-frz54y",
     "resp:resp-a44pxh": "chg-frz54y",
+    "resp:resp-ag8ngf": "chg-r0aqsf",
     "resp:resp-kc1r12": "chg-j88eqf"
   }
 }
