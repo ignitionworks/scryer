@@ -545,6 +545,44 @@ pub struct Gc {
     pub closed: Vec<ChangeMeta>,
 }
 
+/// The tags a change carries that name nothing pending — the keys [`gc`] would
+/// prune, in the order they are stored.
+///
+/// A tag goes dead two ways: its element folded into committed, or it was
+/// edited back to its committed form. A key that was never canonical (see
+/// [`element_key`]) is dead on arrival for the same reason — the diff has no
+/// entry by that name. Returned rather than counted so a caller can SAY which
+/// tags are dead; a malformed key is invisible otherwise, and reads exactly
+/// like a ledger that vanished on its own.
+pub fn dead_tags(committed: &ScryModel, planned: &ScryModel, change_id: &str) -> Vec<String> {
+    let valid: HashSet<String> = diff(committed, planned)
+        .changes
+        .iter()
+        .map(key_for)
+        .collect();
+    planned
+        .change_map
+        .iter()
+        .filter(|(key, value)| value.as_str() == change_id && !valid.contains(key.as_str()))
+        .map(|(key, _)| key.clone())
+        .collect()
+}
+
+/// Whether [`gc`] would close this change as abandoned on the next plan write:
+/// it carries tags, and every one of them is dead.
+///
+/// A change carrying NO tags is not abandoned — it was just opened and its work
+/// is not written yet — which is why this asks for one live tag rather than for
+/// any tag at all.
+pub fn would_abandon(committed: &ScryModel, planned: &ScryModel, change_id: &str) -> bool {
+    let tagged = planned
+        .change_map
+        .iter()
+        .filter(|(_, value)| value.as_str() == change_id)
+        .count();
+    tagged > 0 && dead_tags(committed, planned, change_id).len() == tagged
+}
+
 /// Enforce the ledger invariant: every `change_map` key corresponds to a
 /// current plan-diff entry. A key goes stale two ways — its element folded
 /// into committed (implemented) or was edited back to its committed form

@@ -729,3 +729,130 @@ fn resp_9yasmq_the_ledger_survives_a_plan_seeded_from_the_committed_model() {
         "and the client's own tag is still filed"
     );
 }
+
+/// `resp-q2kvek` — a change whose every tag is dead is refused a sign-off,
+/// saying it would close as abandoned, rather than answered with a count.
+///
+/// The sequence is the one the acceptance session hit: a plan equal to the
+/// committed model, one change, and a tag naming an element that is not
+/// pending. The ledger GC closes such a change on the next plan write, so the
+/// old `200 {count}` was a true number about a change that was disappearing —
+/// and the caller read it as a ledger vanishing on its own.
+#[test]
+fn resp_q2kvek_signing_off_a_change_with_no_live_entry_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = scryer_core::ModelRef::ProjectLocal(dir.path().to_path_buf());
+    let node = serde_json::json!({
+        "id": "node-1", "kind": "system", "name": "Acme",
+        "responsibilities": [{ "id": "resp-1", "statement": "**Do** a thing" }],
+    });
+    let mut committed = scryer_core::ScryModel::new();
+    committed
+        .nodes
+        .push(serde_json::from_value(node.clone()).unwrap());
+    scryer_core::write_model_at(&r, &committed).unwrap();
+
+    // Written RAW: the authoring path's own GC would prune a dead tag on the
+    // way in, and the state under test is a plan that already carries one.
+    let plan = serde_json::json!({
+        "version": "0.3", "nodes": [node], "links": [], "groups": [],
+        "changes": [{ "id": "chg-1", "rationale": "A total line", "createdAt": 1_700_000_000 }],
+        // The claim is in COMMITTED as well, so the tag names nothing pending.
+        "changeMap": { "resp:resp-1": "chg-1" },
+    });
+    scryer_core::write_planned_raw_at(&r, &serde_json::to_string_pretty(&plan).unwrap()).unwrap();
+
+    let serve = Serve::start(dir.path());
+    let path = dir.path().to_string_lossy().to_string();
+    let sign_off = |id: &str| {
+        serve.post(
+            "sign_off_change",
+            &serde_json::json!({ "cwd": path, "changeId": id }).to_string(),
+            None,
+        )
+    };
+
+    let (status, body) = sign_off("chg-1");
+    assert_eq!(
+        status, 400,
+        "a refusal a caller can act on, not a failure: {body}"
+    );
+    assert!(body.contains("close it as abandoned"), "{body}");
+    // It names the dead tag, which is the only place the real cause shows —
+    // a claim that folded, or a key that was never canonical.
+    assert!(
+        body.contains("resp:resp-1"),
+        "the dead tag is named: {body}"
+    );
+
+    // And the ledger is exactly as it was: nothing signed, nothing closed,
+    // nothing pruned.
+    let after = planned_on_disk(dir.path());
+    assert_eq!(after.changes.len(), 1, "the change is still open");
+    assert!(
+        after.changes[0].signed_off.is_none(),
+        "and unsigned — the refusal wrote nothing"
+    );
+    assert_eq!(
+        after.change_map.get("resp:resp-1").map(String::as_str),
+        Some("chg-1"),
+        "its tag is still filed"
+    );
+    assert!(
+        !dir.path().join(".scryer/history.jsonl").exists()
+            || !std::fs::read_to_string(dir.path().join(".scryer/history.jsonl"))
+                .unwrap()
+                .contains("abandoned"),
+        "nothing was closed"
+    );
+
+    // One LIVE tag is enough — the refusal must not start catching a change
+    // that has work filed under it. Written raw again: the authoring path's GC
+    // would prune the dead tag on the way past, which is a different story.
+    {
+        let _lock = scryer_core::lock_model(&r).unwrap();
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "resp-2", "statement": "**Add** a thing the plan alone holds",
+            }))
+            .unwrap(),
+        );
+        plan.change_map
+            .insert("resp:resp-2".to_string(), "chg-1".to_string());
+        let json = serde_json::to_string_pretty(&plan).unwrap();
+        scryer_core::write_planned_raw_at(&r, &json).unwrap();
+    }
+    let (status, body) = sign_off("chg-1");
+    assert_eq!(status, 200, "one live tag is enough: {body}");
+    let signed = planned_on_disk(dir.path())
+        .changes
+        .iter()
+        .find(|c| c.id == "chg-1")
+        .and_then(|c| c.signed_off.clone())
+        .expect("it signed off");
+    assert!(
+        signed.entries.contains_key("resp:resp-2"),
+        "and snapshotted the live entry: {:?}",
+        signed.entries.keys().collect::<Vec<_>>()
+    );
+
+    // The refusal is about DEAD tags, not about tags. A change just opened, with
+    // no work filed under it yet, is not abandoned and signs off as before.
+    {
+        let _lock = scryer_core::lock_model(&r).unwrap();
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        scryer_core::changes::open_change(&mut plan, "opened, nothing filed yet", 1_700_000_100);
+        let json = serde_json::to_string_pretty(&plan).unwrap();
+        scryer_core::write_planned_raw_at(&r, &json).unwrap();
+    }
+    let fresh = planned_on_disk(dir.path())
+        .changes
+        .iter()
+        .find(|c| c.id != "chg-1")
+        .expect("the second change")
+        .id
+        .clone();
+    let (status, body) = sign_off(&fresh);
+    assert_eq!(status, 200, "an untagged change is not abandoned: {body}");
+}
