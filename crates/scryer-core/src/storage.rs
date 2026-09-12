@@ -334,10 +334,27 @@ pub fn read_planned_at(r: &ModelRef) -> Result<ScryModel, String> {
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
+/// Write the planned (draft) model with no actor named — the write reads as the
+/// agent's. Delegates to [`write_planned_as`]; see it for what the write does.
+///
+/// A caller that KNOWS who drove the write calls `write_planned_as` instead: an
+/// unattributed write is a real answer here, not a missing one, so it stays the
+/// plain spelling (mirrors [`changes::sign_off`] over `changes::sign_off_as`).
+pub fn write_planned_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
+    write_planned_as(r, model, None)
+}
+
 /// Write the planned (draft) model, stamping fossilization dates against the
 /// prior planned version (mirrors [`write_model_at`]). Hold the model lock across
 /// the read-modify-write, exactly as for the committed model.
-pub fn write_planned_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
+///
+/// `actor` names WHO drove the write, for the plan events this appends. `None`
+/// is unattributed and lands as the agent.
+pub fn write_planned_as(
+    r: &ModelRef,
+    model: &ScryModel,
+    actor: Option<&str>,
+) -> Result<(), String> {
     let prior = read_planned_at(r).ok();
     let mut stamped = model.clone();
     stamp_touches(&mut stamped, prior.as_ref(), drift::now_secs());
@@ -357,12 +374,14 @@ pub fn write_planned_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&stamped).map_err(|e| e.to_string())?;
     write_planned_raw_at(r, &json)?;
     // The agent's seam: every authoring tool reaches the plan through here, so
-    // the write leaves its trace in the history without one of them knowing.
-    // No actor to name at this depth — the write reads as the agent's, which is
-    // what an MCP write is; a host that knows better re-stamps its own events.
-    // Nothing is appended when the claims did not move.
+    // the write leaves its trace in the history without one of them knowing —
+    // naming whoever drove it. The MCP seam passes its `SCRYER_ACTOR`, so an
+    // agent writing on a developer's behalf records the PERSON; a caller with
+    // nobody to name passes `None` and the write reads as the agent's, which is
+    // what a plain `scryer-mcp` invocation is. Nothing is appended when the
+    // claims did not move.
     if let Some(prior) = prior.as_ref() {
-        crate::history::append_plan_events(r, prior, &stamped, None);
+        crate::history::append_plan_events(r, prior, &stamped, actor);
     }
     Ok(())
 }
@@ -637,6 +656,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
         (dir, r)
+    }
+
+    /// resp-ag8ngf — the plan event names the ACTOR OF THE WRITE, not just the
+    /// agent. The core seam carries whoever drove it: a caller that knows the
+    /// person (the MCP seam, from `SCRYER_ACTOR`) names them, and a caller with
+    /// nobody to name still lands as the agent, which is the behaviour every
+    /// existing `write_planned_at` caller keeps.
+    #[test]
+    fn resp_ag8ngf_the_writes_actor_names_the_plan_event() {
+        let (_dir, r) = temp_ref();
+        // Seed the draft: the first write has no prior, so it appends nothing.
+        write_planned_at(&r, &one_resp_model("does X")).unwrap();
+        assert!(crate::history::read_history(&r).is_empty(), "the seeding write is silent");
+
+        // A named actor lands on the event.
+        write_planned_as(&r, &one_resp_model("does Y"), Some("ada-fixture")).unwrap();
+        let log = crate::history::read_history(&r);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].kind, crate::history::EventKind::Plan);
+        assert_eq!(log[0].by, "ada-fixture", "the write's actor names its plan event");
+
+        // No actor named: unattributed, which reads as the agent — unchanged.
+        write_planned_at(&r, &one_resp_model("does Z")).unwrap();
+        let log = crate::history::read_history(&r);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[1].by, "agent", "an unattributed write still reads as the agent");
     }
 
     /// Deleting a model must clear the draft and every derived fingerprint, not
