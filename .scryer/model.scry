@@ -9784,7 +9784,6 @@
         {
           "id": "resp-csjk7a",
           "statement": "**When** a change is signed off by a named actor, **record** the actor beside the snapshot",
-          "concern": "oversight",
           "lastTouchedAt": 1789075627
         }
       ]
@@ -12774,19 +12773,16 @@
         {
           "id": "resp-900",
           "statement": "**When** a testable claim on a code-backed host is folded with no attached test or no current passing verdict, **leave** it in the plan and **report** the missing fact with the test files to run",
-          "concern": "verification",
           "lastTouchedAt": 1788500889
         },
         {
           "id": "resp-912",
           "statement": "**When** a folded claim was reworded or added after its change's sign-off, **flag** it vagrant with its origin and approved text, **leave** it in the plan, and **report** it as awaiting the developer's verdict",
-          "concern": "oversight",
           "lastTouchedAt": 1788500906
         },
         {
           "id": "resp-913",
           "statement": "**When** a signed-off claim was dropped from the plan, **restore** it as pending intent and **note** that the agent proposed dropping it",
-          "concern": "oversight",
           "lastTouchedAt": 1788500906
         }
       ]
@@ -12828,7 +12824,6 @@
         {
           "id": "resp-a44pxh",
           "statement": "**When** a change is signed off, **snapshot** every tagged entry's content hash and, for claims, the approved statement",
-          "concern": "oversight",
           "lastTouchedAt": 1788500915
         }
       ]

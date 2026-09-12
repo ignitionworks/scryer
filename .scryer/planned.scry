@@ -10507,8 +10507,13 @@
         {
           "id": "resp-csjk7a",
           "statement": "**When** a change is signed off by a named actor, **record** the actor beside the snapshot",
-          "concern": "oversight",
           "lastTouchedAt": 1789073903
+        },
+        {
+          "id": "resp-31qtx9",
+          "statement": "**Carry** a project-level policy on whether a fold requires a countersignature by a team member other than the author, defaulting to off so a solo user and upstream are unaffected.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789208170
         }
       ]
     },
@@ -12902,9 +12907,14 @@
       "responsibilities": [
         {
           "id": "resp-a44pxh",
-          "statement": "**When** a change is signed off, **snapshot** every tagged entry's content hash and, for claims, the approved statement",
+          "statement": "**When** a change is signed off, **snapshot** every tagged entry's content hash and, for claims, the approved statement.",
+          "lastTouchedAt": 1789208170
+        },
+        {
+          "id": "resp-k4yw29",
+          "statement": "**When** a sign-off is made for one person by another actor, **record** both the signing actor and the person it is on behalf of, so a proxy signature counts as a different signer yet is never read as the person's own.",
           "concern": "oversight",
-          "lastTouchedAt": 1788498398
+          "lastTouchedAt": 1789208170
         }
       ]
     },
@@ -13003,21 +13013,24 @@
       "responsibilities": [
         {
           "id": "resp-900",
-          "statement": "**When** a testable claim on a code-backed host is folded with no attached test or no current passing verdict, **leave** it in the plan and **report** the missing fact with the test files to run",
-          "concern": "verification",
-          "lastTouchedAt": 1788500702
+          "statement": "**When** a testable claim on a code-backed host is folded with no attached test or no current passing verdict, **leave** it in the plan and **report** it.",
+          "lastTouchedAt": 1789208170
         },
         {
           "id": "resp-912",
-          "statement": "**When** a folded claim was reworded or added after its change's sign-off, **flag** it vagrant with its origin and approved text, **leave** it in the plan, and **report** it as awaiting the developer's verdict",
-          "concern": "oversight",
-          "lastTouchedAt": 1788500702
+          "statement": "**When** a folded claim was reworded or added after its change's sign-off, **flag** it vagrant with its origin and approved text, **leave** it in the plan, and **report** it as awaiting the developer's verdict.",
+          "lastTouchedAt": 1789208170
         },
         {
           "id": "resp-913",
-          "statement": "**When** a signed-off claim was dropped from the plan, **restore** it as pending intent and **note** that the agent proposed dropping it",
+          "statement": "**When** a signed-off claim was dropped from the plan, **restore** it as pending intent and **note** that the agent proposed dropping it.",
+          "lastTouchedAt": 1789208170
+        },
+        {
+          "id": "resp-6zv79y",
+          "statement": "**When** the project requires countersigned folds and the change carries no sign-off by an actor other than its author, **refuse** the fold, naming that a team member other than the author must sign; **while** the project does not require it, **fold** as before.",
           "concern": "oversight",
-          "lastTouchedAt": 1788500702
+          "lastTouchedAt": 1789208170
         }
       ]
     },
@@ -17397,10 +17410,62 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-frz54y",
+      "rationale": "260912-countersigned-folds: an opt-in project policy that a fold be countersigned. Off by default so the fork stays generic and a solo user and upstream are unaffected; when on, the fold gate refuses a change whose only sign-off is by its own author or which has none, naming that a second team member must sign. A sign-off made for one person by another actor records both the signer and the person it is on behalf of, so a proxy signature is never read as the person's own and the gate checks a different actor id while the ledger stays honest about which were proxies.",
+      "createdAt": 1789208159,
+      "signedOff": {
+        "at": 1789208174,
+        "entries": {
+          "resp:resp-31qtx9": {
+            "hash": "d606751073d6998b",
+            "statement": "**Carry** a project-level policy on whether a fold requires a countersignature by a team member other than the author, defaulting to off so a solo user and upstream are unaffected.",
+            "host": "node-555"
+          },
+          "resp:resp-6zv79y": {
+            "hash": "678fd8fa707f4d45",
+            "statement": "**When** the project requires countersigned folds and the change carries no sign-off by an actor other than its author, **refuse** the fold, naming that a team member other than the author must sign; **while** the project does not require it, **fold** as before.",
+            "host": "node-a7nw7w"
+          },
+          "resp:resp-900": {
+            "hash": "c3d360e6147695ad",
+            "statement": "**When** a testable claim on a code-backed host is folded with no attached test or no current passing verdict, **leave** it in the plan and **report** it.",
+            "host": "node-a7nw7w"
+          },
+          "resp:resp-912": {
+            "hash": "5529d54dba70a943",
+            "statement": "**When** a folded claim was reworded or added after its change's sign-off, **flag** it vagrant with its origin and approved text, **leave** it in the plan, and **report** it as awaiting the developer's verdict.",
+            "host": "node-a7nw7w"
+          },
+          "resp:resp-913": {
+            "hash": "6122011c162fa5d5",
+            "statement": "**When** a signed-off claim was dropped from the plan, **restore** it as pending intent and **note** that the agent proposed dropping it.",
+            "host": "node-a7nw7w"
+          },
+          "resp:resp-a44pxh": {
+            "hash": "3b19875a07fbf051",
+            "statement": "**When** a change is signed off, **snapshot** every tagged entry's content hash and, for claims, the approved statement.",
+            "host": "node-nqr50k"
+          },
+          "resp:resp-k4yw29": {
+            "hash": "b35a375a84d95f1b",
+            "statement": "**When** a sign-off is made for one person by another actor, **record** both the signing actor and the person it is on behalf of, so a proxy signature counts as a different signer yet is never read as the person's own.",
+            "host": "node-nqr50k"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
+    "resp:resp-31qtx9": "chg-frz54y",
     "resp:resp-683": "chg-qxjsaq",
+    "resp:resp-6zv79y": "chg-frz54y",
+    "resp:resp-900": "chg-frz54y",
+    "resp:resp-912": "chg-frz54y",
+    "resp:resp-913": "chg-frz54y",
+    "resp:resp-a44pxh": "chg-frz54y",
+    "resp:resp-k4yw29": "chg-frz54y",
     "resp:resp-kc1r12": "chg-j88eqf"
   }
 }
