@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* The committed export-viewer artifact is a BUILT copy of this very UI, so
+   Tailwind's automatic source detection would scan it for class names and fold
+   them back into the stylesheet — bloating the app's CSS, and making the
+   artifact's own rebuild depend on the last one it produced (it never settles).
+   It is generated output, not source. */
+@source not "../crates/scryer-app/assets";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Tailwind v4's Preflight defers to the browser default cursor for buttons

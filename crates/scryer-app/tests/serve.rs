@@ -40,6 +40,9 @@ impl Serve {
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            // The export answers from the viewer built into the binary. A
+            // developer's opt-in must not decide what these tests exercise.
+            .env_remove("SCRYER_EXPORT_SCRIPT")
             .spawn()
             .expect("scryer-serve starts");
 
@@ -386,6 +389,28 @@ fn resp_bs0y4b_exports_the_self_contained_file_from_the_layer_asked_for() {
     assert!(
         committed.contains("<script type=\"module\" crossorigin>"),
         "the bundle is inlined, not linked"
+    );
+
+    // Wherever the engine runs: this came from the viewer built INTO the
+    // binary, not from a bundler run against a checkout. Put the sentinel back
+    // where the model went and the file is the shipped artifact, byte for byte.
+    let raw = scryer_core::read_model_raw_at(&scryer_core::ModelRef::ProjectLocal(
+        dir.path().to_path_buf(),
+    ))
+    .unwrap();
+    let restored = committed.replacen(
+        &serde_json::to_string(&raw).unwrap(),
+        &format!("\"{}\"", scryer_app::commands::export::SENTINEL),
+        1,
+    );
+    assert_eq!(
+        restored,
+        include_str!("../assets/export-viewer.html"),
+        "the export is the shipped viewer with this project's model in its slot"
+    );
+    assert!(
+        !committed.contains(scryer_app::commands::export::SENTINEL),
+        "and the slot really was filled"
     );
     assert!(committed.len() > 100_000, "the viewer came with it");
 

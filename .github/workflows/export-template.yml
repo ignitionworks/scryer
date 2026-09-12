@@ -1,0 +1,48 @@
+name: Export viewer is current
+
+# `crates/scryer-app/assets/export-viewer.html` is BUILT output that lives in
+# git: the engine's export_html substitutes a project's model into it, so a host
+# needs neither Node nor a checkout. A stale artifact fails silently — the
+# export keeps working and keeps shipping an old viewer — so a rebuild is
+# compared against the committed copy whenever the UI it is built from changes.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - export-viewer/**
+      - scripts/export-html.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - crates/scryer-app/assets/export-viewer.html
+      - crates/xtask/**
+  pull_request:
+    paths:
+      - src/**
+      - export-viewer/**
+      - scripts/export-html.mjs
+      - package.json
+      - pnpm-lock.yaml
+      - crates/scryer-app/assets/export-viewer.html
+      - crates/xtask/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      # Fails with the two sizes and how to fix it when the committed artifact
+      # is not what a rebuild produces.
+      - run: cargo run -p xtask -- export-template --check
