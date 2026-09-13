@@ -10514,6 +10514,12 @@
           "statement": "**Carry** a project-level policy on whether a fold requires a countersignature by a team member other than the author, defaulting to off so a solo user and upstream are unaffected.",
           "concern": "oversight",
           "lastTouchedAt": 1789208170
+        },
+        {
+          "id": "resp-gc5m1s",
+          "statement": "**When** a plan write names an actor other than the one who signed a change off, **mark** that sign-off stale rather than re-stamping it, so an approval never silently covers text its signer has not seen; **while** the write's actor is the signer, or either is unnamed, **re-stamp** as before.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789317113
         }
       ]
     },
@@ -12915,6 +12921,12 @@
           "statement": "**When** a sign-off is made for one person by another actor, **record** both the signing actor and the person it is on behalf of, so a proxy signature counts as a different signer yet is never read as the person's own.",
           "concern": "oversight",
           "lastTouchedAt": 1789208170
+        },
+        {
+          "id": "resp-7xts3y",
+          "statement": "**When** a sign-off is recorded, **append** a history event naming the actor who signed and, for a proxy signature, the person it was given for, so a reader of the timeline tells \"signed by X for Y\" from \"signed by Y\".",
+          "concern": "oversight",
+          "lastTouchedAt": 1789317113
         }
       ]
     },
@@ -13031,6 +13043,11 @@
           "statement": "**When** the project requires countersigned folds and the change carries no sign-off by an actor other than its author, **refuse** the fold, naming that a team member other than the author must sign; **while** the project does not require it, **fold** as before.",
           "concern": "oversight",
           "lastTouchedAt": 1789208170
+        },
+        {
+          "id": "resp-48sw0j",
+          "statement": "**If** a signed-off entry the plan no longer tags stands in the committed model at its snapshot, or a later signed-off change's snapshot covers the same element, **then** treat it as folded rather than dropped and leave the plan's text untouched.",
+          "lastTouchedAt": 1789317113
         }
       ]
     },
@@ -13497,6 +13514,11 @@
           "id": "resp-svcshp",
           "statement": "**When** a host supplies the engine service's transport, **speak** the shapes the service answers with for read_planned and write_planned, remembering the revision per project, so the app is unchanged; sending the base revision stays off unless the host turns it on.",
           "lastTouchedAt": 1789181739
+        },
+        {
+          "id": "resp-rw7xhr",
+          "statement": "**While** mounted in a host's pane, **confine** every full-surface overlay to the mount root the bridge provides rather than the window, so a guest never covers its host's chrome.",
+          "lastTouchedAt": 1789317113
         }
       ]
     }
@@ -17455,14 +17477,23 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-gre758",
+      "rationale": "Fork round 2: four generic fixes — the fold gate reads a folded-and-superseded claim as folded rather than dropped; a plan write by someone other than the signer makes the sign-off stale instead of re-stamping it; a guest's full-surface overlays stay inside the pane's mount root; and a proxy sign-off is recorded so a reader can tell 'signed by X for Y' from 'signed by Y'.",
+      "createdAt": 1789317099
     }
   ],
   "changeMap": {
+    "resp:resp-48sw0j": "chg-gre758",
     "resp:resp-683": "chg-qxjsaq",
+    "resp:resp-7xts3y": "chg-gre758",
     "resp:resp-900": "chg-frz54y",
     "resp:resp-912": "chg-frz54y",
     "resp:resp-913": "chg-frz54y",
     "resp:resp-a44pxh": "chg-frz54y",
-    "resp:resp-kc1r12": "chg-j88eqf"
+    "resp:resp-gc5m1s": "chg-gre758",
+    "resp:resp-kc1r12": "chg-j88eqf",
+    "resp:resp-rw7xhr": "chg-gre758"
   }
 }
