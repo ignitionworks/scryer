@@ -4937,6 +4937,11 @@
           "id": "resp-h4rf4g",
           "statement": "**While** a change's sign-off is stale, **show** it as needing re-signing beside the signature, naming who moved the plan.",
           "lastTouchedAt": 1789318478
+        },
+        {
+          "id": "resp-wsbj76",
+          "statement": "**When** a pending link entry is listed, **name** both of its ends — source, destination, then the label — so a reader never sees a bare verb.",
+          "lastTouchedAt": 1789334070
         }
       ]
     },
@@ -7266,6 +7271,11 @@
           "id": "resp-733",
           "statement": "**When** the test-results cache changes on disk, **emit** a test-results event so verdict badges refresh live",
           "lastTouchedAt": 1786957053
+        },
+        {
+          "id": "resp-874gz9",
+          "statement": "**When** the canvas signs a change off, **record** the approval in the durable history the way the service does, so the desktop and the service leave the same trace.",
+          "lastTouchedAt": 1789334070
         }
       ]
     },
@@ -13477,6 +13487,11 @@
           "id": "resp-c88gf7",
           "statement": "**While** no host supplies marks, **render** nothing",
           "lastTouchedAt": 1789073833
+        },
+        {
+          "id": "resp-shsme2",
+          "statement": "**When** a host's highlight carries a label and no image, **render** the label in the pill, never colour alone.",
+          "lastTouchedAt": 1789334070
         }
       ],
       "directives": [
@@ -17493,14 +17508,22 @@
           }
         }
       }
+    },
+    {
+      "id": "chg-amak8b",
+      "rationale": "Fork round 3: a label-only highlight renders its word rather than an empty wash; a pending link entry names both its ends; and the desktop canvas records a sign-off in history the way the service does.",
+      "createdAt": 1789334069
     }
   ],
   "changeMap": {
     "resp:resp-683": "chg-qxjsaq",
+    "resp:resp-874gz9": "chg-amak8b",
     "resp:resp-900": "chg-frz54y",
     "resp:resp-912": "chg-frz54y",
     "resp:resp-913": "chg-frz54y",
     "resp:resp-a44pxh": "chg-frz54y",
-    "resp:resp-kc1r12": "chg-j88eqf"
+    "resp:resp-kc1r12": "chg-j88eqf",
+    "resp:resp-shsme2": "chg-amak8b",
+    "resp:resp-wsbj76": "chg-amak8b"
   }
 }
