@@ -4927,6 +4927,11 @@
           "id": "resp-283",
           "statement": "**Partition** the pending plan queue by change ledger, and render each entry's own and owned diffs",
           "lastTouchedAt": 1784883905
+        },
+        {
+          "id": "resp-z5zzvj",
+          "statement": "**When** a change's sign-off names who signed it and, for a proxy signature, the person it was given for, **show** both, so a reader tells \"signed off by X for Y\" from \"signed off by Y\".",
+          "lastTouchedAt": 1789317216
         }
       ]
     },
@@ -17481,7 +17486,39 @@
     {
       "id": "chg-gre758",
       "rationale": "Fork round 2: four generic fixes — the fold gate reads a folded-and-superseded claim as folded rather than dropped; a plan write by someone other than the signer makes the sign-off stale instead of re-stamping it; a guest's full-surface overlays stay inside the pane's mount root; and a proxy sign-off is recorded so a reader can tell 'signed by X for Y' from 'signed by Y'.",
-      "createdAt": 1789317099
+      "createdAt": 1789317099,
+      "signedOff": {
+        "at": 1789317223,
+        "by": "HAPI",
+        "onBehalfOf": "jesseh",
+        "entries": {
+          "resp:resp-48sw0j": {
+            "hash": "781ea5112b994783",
+            "statement": "**If** a signed-off entry the plan no longer tags stands in the committed model at its snapshot, or a later signed-off change's snapshot covers the same element, **then** treat it as folded rather than dropped and leave the plan's text untouched.",
+            "host": "node-a7nw7w"
+          },
+          "resp:resp-7xts3y": {
+            "hash": "69482886e420fc05",
+            "statement": "**When** a sign-off is recorded, **append** a history event naming the actor who signed and, for a proxy signature, the person it was given for, so a reader of the timeline tells \"signed by X for Y\" from \"signed by Y\".",
+            "host": "node-nqr50k"
+          },
+          "resp:resp-gc5m1s": {
+            "hash": "9f9e137659a5c0e2",
+            "statement": "**When** a plan write names an actor other than the one who signed a change off, **mark** that sign-off stale rather than re-stamping it, so an approval never silently covers text its signer has not seen; **while** the write's actor is the signer, or either is unnamed, **re-stamp** as before.",
+            "host": "node-555"
+          },
+          "resp:resp-rw7xhr": {
+            "hash": "2a547cf606a88550",
+            "statement": "**While** mounted in a host's pane, **confine** every full-surface overlay to the mount root the bridge provides rather than the window, so a guest never covers its host's chrome.",
+            "host": "node-5b6qhs"
+          },
+          "resp:resp-z5zzvj": {
+            "hash": "5fffc0a4f909d3da",
+            "statement": "**When** a change's sign-off names who signed it and, for a proxy signature, the person it was given for, **show** both, so a reader tells \"signed off by X for Y\" from \"signed off by Y\".",
+            "host": "node-263"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
@@ -17494,6 +17531,7 @@
     "resp:resp-a44pxh": "chg-frz54y",
     "resp:resp-gc5m1s": "chg-gre758",
     "resp:resp-kc1r12": "chg-j88eqf",
-    "resp:resp-rw7xhr": "chg-gre758"
+    "resp:resp-rw7xhr": "chg-gre758",
+    "resp:resp-z5zzvj": "chg-gre758"
   }
 }
