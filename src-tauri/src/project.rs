@@ -181,6 +181,15 @@ pub(crate) fn sign_off_change(ref_str: String, change_id: String) -> Result<usiz
     let mut plan = scryer_core::read_planned_seeded_at(&model_ref)?;
     let n = scryer_core::changes::sign_off(&mut plan, &change_id, scryer_core::drift::now_secs())?;
     scryer_core::write_planned_at(&model_ref, &plan)?;
+    // The approval's own trace on the timeline, as the service records it. A
+    // sign-off changes no claim, so the plan-write path appends nothing and
+    // the one thing that happened here would otherwise leave no history —
+    // and the snapshot holding it goes with the change when the change
+    // closes. The canvas names no actor, so the event is unattributed; what
+    // it records is that the approval happened, and when.
+    if let Some(meta) = plan.changes.iter().find(|c| c.id == change_id) {
+        scryer_core::changes::record_signed_off(&model_ref, meta);
+    }
     Ok(n)
 }
 
@@ -269,6 +278,41 @@ mod tests {
         scryer_core::write_model_at(&r, &m).unwrap();
         let ref_str = r.to_ref_string();
         (dir, r, ref_str)
+    }
+
+
+    /// resp-874gz9 — a sign-off from the CANVAS leaves the same durable trace
+    /// the service's does. The desktop names no actor, so the event is
+    /// unattributed; what it records is that the approval happened, when, and
+    /// against which change's rationale. Without it the desktop and the
+    /// service disagree about whether an approval is a thing that happened.
+    #[test]
+    fn resp_874gz9_a_canvas_sign_off_records_the_approval_in_history() {
+        let (_dir, r, ref_str) = committed_project();
+        let mut plan = scryer_core::read_planned_seeded_at(&r).unwrap();
+        let cid = scryer_core::changes::open_change(&mut plan, "the rationale that outlives it", 1);
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(
+                serde_json::json!({ "id": "resp-2", "statement": "does the new thing" }),
+            )
+            .unwrap(),
+        );
+        scryer_core::changes::tag(&mut plan, &["resp:resp-2".to_string()], &cid);
+        scryer_core::write_planned_at(&r, &plan).unwrap();
+
+        assert_eq!(super::sign_off_change(ref_str, cid.clone()).unwrap(), 1);
+
+        let approvals: Vec<_> = scryer_core::history::read_history(&r)
+            .into_iter()
+            .filter(|e| e.driver == "signed off")
+            .collect();
+        assert_eq!(approvals.len(), 1, "the approval is on the timeline exactly once");
+        assert_eq!(approvals[0].change_id.as_deref(), Some(cid.as_str()));
+        assert_eq!(approvals[0].rows[0].text, "the rationale that outlives it");
+        assert!(
+            approvals[0].on_behalf_of.is_none(),
+            "the canvas signs for nobody else — an unattributed signature is not a proxy"
+        );
     }
 
     /// The canvas load heals a legacy shadow draft first: a plan that mirrors

@@ -6710,6 +6710,11 @@
           "id": "resp-733",
           "statement": "**When** the test-results cache changes on disk, **emit** a test-results event so verdict badges refresh live",
           "lastTouchedAt": 1786957346
+        },
+        {
+          "id": "resp-874gz9",
+          "statement": "**When** the canvas signs a change off, **record** the approval in the durable history the way the service does, so the desktop and the service leave the same trace.",
+          "lastTouchedAt": 1789335195
         }
       ]
     },
@@ -21917,6 +21922,12 @@
         "symbol": "restore_node_positions"
       }
     ],
+    "resp-874gz9": [
+      {
+        "pattern": "src-tauri/src/project.rs",
+        "symbol": "sign_off_change"
+      }
+    ],
     "resp-88": [
       {
         "pattern": "crates/scryer-mcp/src/helpers.rs",
@@ -24220,6 +24231,12 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/testing.rs",
         "symbol": "the_status_header_mentions_tests_only_when_red_or_stale"
+      }
+    ],
+    "resp-874gz9": [
+      {
+        "pattern": "src-tauri/src/project.rs",
+        "symbol": "resp_874gz9_a_canvas_sign_off_records_the_approval_in_history"
       }
     ],
     "resp-8n3sxq": [
