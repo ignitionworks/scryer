@@ -32,6 +32,11 @@ pub struct TsAliases {
 /// Vite's `tsconfig.app.json` or Nx's `tsconfig.base.json`, first declaration
 /// of a pattern wins); directories whose configs declare no aliases yield
 /// nothing.
+/// A `paths` block as declared: the config directory it was declared in, and
+/// each alias pattern with its replacement list. Both halves are needed to
+/// resolve an alias — the pattern maps the name, the directory anchors it.
+type PathsDecl = (PathBuf, Vec<(String, Vec<String>)>);
+
 pub fn discover_ts_aliases(project: &Path, all_files: &[PathBuf]) -> Vec<TsAliases> {
     let mut by_dir: BTreeMap<String, Vec<&PathBuf>> = BTreeMap::new();
     for path in all_files {
@@ -97,7 +102,7 @@ fn resolve_config(project: &Path, config_path: &Path) -> Option<TsAliases> {
 
     // First declaration along the chain wins (chain is child-first).
     let mut base_url: Option<(PathBuf, String)> = None;
-    let mut paths_decl: Option<(PathBuf, Vec<(String, Vec<String>)>)> = None;
+    let mut paths_decl: Option<PathsDecl> = None;
     for (config_dir, value) in &chain {
         let Some(options) = value.get("compilerOptions") else {
             continue;
@@ -334,10 +339,7 @@ mod tests {
   "list": [1, 2, ],
 }"#;
         let value: serde_json::Value = serde_json::from_str(&strip_jsonc(jsonc)).unwrap();
-        assert_eq!(
-            value["url"].as_str().unwrap(),
-            "http://x/*not-a-comment*/y"
-        );
+        assert_eq!(value["url"].as_str().unwrap(), "http://x/*not-a-comment*/y");
         assert_eq!(value["list"].as_array().unwrap().len(), 2);
     }
 
@@ -452,11 +454,7 @@ mod tests {
     #[test]
     fn extends_cycle_terminates() {
         let tmp = tempfile::tempdir().unwrap();
-        write(
-            tmp.path(),
-            "a.json",
-            r#"{ "extends": "./tsconfig.json" }"#,
-        );
+        write(tmp.path(), "a.json", r#"{ "extends": "./tsconfig.json" }"#);
         let cfg = write(
             tmp.path(),
             "tsconfig.json",

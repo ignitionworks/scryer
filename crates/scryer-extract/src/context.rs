@@ -14,8 +14,8 @@
 //! map, not the model.
 
 use crate::lang::{Def, FileParse};
-use crate::tsconfig::TsAliases;
 use crate::manifest::Container;
+use crate::tsconfig::TsAliases;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -129,6 +129,17 @@ pub struct Edge {
     pub dst: String,
 }
 
+/// Defined names per file: file path -> name -> the symbol keys that spell it.
+/// One file can define a name more than once (overloads, `impl` blocks), so
+/// the leaf is a list and the resolver decides.
+type FileNames<'a> = HashMap<&'a str, HashMap<&'a str, Vec<&'a str>>>;
+
+/// Defined names per QUALIFIER — a container, or a directory for languages
+/// where a package is a directory: qualifier -> name -> (file, symbol key).
+/// The file rides along because a qualified reference resolves to one file's
+/// definition, and the caller needs to say which.
+type QualifiedNames<'a> = HashMap<&'a str, HashMap<&'a str, Vec<(&'a str, &'a str)>>>;
+
 fn symbol_key(rel_path: &str, name: &str, start_line: u32) -> String {
     format!("{}#{}@{}", rel_path, name, start_line)
 }
@@ -178,8 +189,7 @@ fn extract_excerpt(lines: &[&str], start_line: u32, end_line: u32) -> (String, u
 
     let total = end - doc_start;
     let mut out = String::new();
-    let mut taken = 0usize;
-    for line in &lines[doc_start..end] {
+    for (taken, line) in lines[doc_start..end].iter().enumerate() {
         if taken >= EXCERPT_MAX_LINES || out.len() + line.len() + 1 > EXCERPT_MAX_BYTES {
             break;
         }
@@ -187,7 +197,6 @@ fn extract_excerpt(lines: &[&str], start_line: u32, end_line: u32) -> (String, u
             out.push('\n');
         }
         out.push_str(line);
-        taken += 1;
     }
     (out, total as u32)
 }
@@ -411,8 +420,8 @@ fn build_edges(
 ) -> (Vec<Edge>, Vec<Edge>) {
     let mut ranges_by_file: HashMap<&str, Vec<(u32, u32, &str)>> = HashMap::new();
     let mut container_of_file: HashMap<&str, &str> = HashMap::new();
-    let mut file_names: HashMap<&str, HashMap<&str, Vec<&str>>> = HashMap::new();
-    let mut cont_names: HashMap<&str, HashMap<&str, Vec<(&str, &str)>>> = HashMap::new();
+    let mut file_names: FileNames = HashMap::new();
+    let mut cont_names: QualifiedNames = HashMap::new();
 
     // Manifest map: a `use`/path head segment -> the container it names. Rust
     // source spells `scryer-extract` as `scryer_extract`, so normalize hyphens.
@@ -448,7 +457,7 @@ fn build_edges(
 
     // Package-dir index for Go qualified references: a Go package IS a
     // directory, so `pkg.Name` resolves among the defs of one directory.
-    let mut dir_names: HashMap<&str, HashMap<&str, Vec<(&str, &str)>>> = HashMap::new();
+    let mut dir_names: QualifiedNames = HashMap::new();
     for r in recs {
         let dir = r.file_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
         dir_names
@@ -743,9 +752,7 @@ fn build_edges(
                 let Some(&dst_file) = clj_alias_files.get(alias.as_str()) else {
                     continue; // unaliased qualifier, or an unresolved namespace
                 };
-                let Some(cands) = file_names
-                    .get(dst_file)
-                    .and_then(|m| m.get(name.as_str()))
+                let Some(cands) = file_names.get(dst_file).and_then(|m| m.get(name.as_str()))
                 else {
                     continue;
                 };
@@ -772,8 +779,7 @@ fn build_edges(
         // a local variable simply fails the binding join.
         if is_go {
             for pref in &f.parse.paths {
-                let (Some(qualifier), Some(name)) =
-                    (pref.segments.first(), pref.segments.get(1))
+                let (Some(qualifier), Some(name)) = (pref.segments.first(), pref.segments.get(1))
                 else {
                     continue;
                 };
@@ -943,7 +949,11 @@ fn find_module_file<'a>(base: &str, inventory: &HashSet<&'a str>) -> Option<&'a 
 /// container: `dir/<subpath>`, then under `dir/src/` (the dominant monorepo
 /// source layout); a spec with no subpath falls to the index-file candidates.
 /// `None` is fine — symbol names still resolve container-wide.
-fn find_package_file<'a>(dir: &str, subpath: &str, inventory: &HashSet<&'a str>) -> Option<&'a str> {
+fn find_package_file<'a>(
+    dir: &str,
+    subpath: &str,
+    inventory: &HashSet<&'a str>,
+) -> Option<&'a str> {
     let join = |a: &str, b: &str| {
         if a.is_empty() {
             b.to_string()
@@ -2515,7 +2525,6 @@ fn add_one(x: u32) -> u32 {
         );
     }
 
-
     // --- Clojure ---
 
     fn clj_container(dir: &str, name: &str, paths: &[&str]) -> Container {
@@ -2562,7 +2571,11 @@ fn add_one(x: u32) -> u32 {
         ];
         let containers = vec![clj_container("", "app", &["src"])];
         let ctx = build_context("proj", &containers, &files, &[]);
-        assert!(has_file_edge(&ctx, "src/app/core.clj", "src/app/user_store.clj"));
+        assert!(has_file_edge(
+            &ctx,
+            "src/app/core.clj",
+            "src/app/user_store.clj"
+        ));
         assert!(has_sym_edge(&ctx, "run", "save!"));
     }
 
@@ -2603,10 +2616,7 @@ fn add_one(x: u32) -> u32 {
         assert!(has_sym_edge(&ctx, "run", "query"));
         // `ring.core` is an external library: it resolves to no file, so the
         // alias is consumed and nothing is minted.
-        assert!(!ctx
-            .file_edges
-            .iter()
-            .any(|e| e.dst.contains("ring")));
+        assert!(!ctx.file_edges.iter().any(|e| e.dst.contains("ring")));
     }
 
     /// An unresolved alias must not fall back to bare-name coincidence: a
@@ -2676,17 +2686,17 @@ fn add_one(x: u32) -> u32 {
                     defs: vec![def("main", 3, 9)],
                     idents: vec![ident("db", 5)],
                     paths: vec![pathref(&["db", "Connect"], 5)],
-                    imports: vec![imp(
-                        "github.com/acme/proj/internal/db",
-                        &[("db", "db")],
-                        1,
-                    )],
+                    imports: vec![imp("github.com/acme/proj/internal/db", &[("db", "db")], 1)],
                 },
             },
         ];
         let containers = vec![go_container("", "proj", "github.com/acme/proj")];
         let ctx = build_context("proj", &containers, &files, &[]);
-        assert!(has_file_edge(&ctx, "cmd/api/main.go", "internal/db/store.go"));
+        assert!(has_file_edge(
+            &ctx,
+            "cmd/api/main.go",
+            "internal/db/store.go"
+        ));
         assert!(has_sym_edge(&ctx, "main", "Connect"));
     }
 

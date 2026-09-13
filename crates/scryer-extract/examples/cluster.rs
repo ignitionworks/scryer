@@ -33,9 +33,7 @@ fn main() {
         if scope.files.len() < 2 {
             continue;
         }
-        println!(
-            "================================================================"
-        );
+        println!("================================================================");
         println!(
             "CONTAINER '{}' (dir='{}')  {} files",
             container.name,
@@ -45,8 +43,7 @@ fn main() {
 
         // File index + symbol counts.
         let paths: Vec<&str> = scope.files.iter().map(|f| f.rel_path.as_str()).collect();
-        let index: HashMap<&str, usize> =
-            paths.iter().enumerate().map(|(i, p)| (*p, i)).collect();
+        let index: HashMap<&str, usize> = paths.iter().enumerate().map(|(i, p)| (*p, i)).collect();
         let sym_count: Vec<usize> = scope.files.iter().map(|f| f.symbols.len()).collect();
 
         // Weighted file-file graph. Cross-file dependencies live in
@@ -99,6 +96,10 @@ fn main() {
     eprintln!("\ntotal wall time: {:?}", t0.elapsed());
 }
 
+/// The file half of a symbol key. Kept beside the clustering experiment it
+/// belongs to even while no pass calls it — the key format is this example's
+/// to know, and re-deriving it at each use is how the two drift apart.
+#[allow(dead_code)]
 fn file_of(key: &str) -> Option<&str> {
     key.split('#').next()
 }
@@ -184,10 +185,7 @@ fn louvain(n: usize, weights: &HashMap<(usize, usize), f64>) -> Vec<usize> {
     let mut assign: Vec<usize> = (0..n).collect();
 
     loop {
-        let m2: f64 = adj
-            .iter()
-            .map(|nb| nb.values().sum::<f64>())
-            .sum::<f64>()
+        let m2: f64 = adj.iter().map(|nb| nb.values().sum::<f64>()).sum::<f64>()
             + self_w.iter().sum::<f64>() * 2.0;
         if m2 <= 0.0 {
             break;
@@ -213,8 +211,7 @@ fn louvain(n: usize, weights: &HashMap<(usize, usize), f64>) -> Vec<usize> {
                         *to_comm.entry(community[j]).or_default() += w;
                     }
                 }
-                let base = to_comm.get(&ci).copied().unwrap_or(0.0)
-                    - comm_tot[ci] * k[i] / m2;
+                let base = to_comm.get(&ci).copied().unwrap_or(0.0) - comm_tot[ci] * k[i] / m2;
                 let mut best = (ci, 0.0f64);
                 let mut cands: Vec<(usize, f64)> = to_comm.into_iter().collect();
                 cands.sort_by_key(|&(c, _)| c); // deterministic
@@ -248,9 +245,8 @@ fn louvain(n: usize, weights: &HashMap<(usize, usize), f64>) -> Vec<usize> {
         let nc = renum.len();
 
         // propagate labels back to original nodes
-        for orig in 0..n {
-            let sn_id = assign[orig];
-            assign[orig] = renum[&community[sn_id]];
+        for label in assign.iter_mut().take(n) {
+            *label = renum[&community[*label]];
         }
         node_label.clone_from(&assign);
 
@@ -307,7 +303,12 @@ mod tests {
     /// siblings land together, root-level files form their own bucket.
     #[test]
     fn cluster_by_dir_groups_below_the_source_root() {
-        let paths = ["crate/src/tools/x.rs", "crate/src/tools/y.rs", "crate/src/a.rs", "crate/src/b.rs"];
+        let paths = [
+            "crate/src/tools/x.rs",
+            "crate/src/tools/y.rs",
+            "crate/src/a.rs",
+            "crate/src/b.rs",
+        ];
         let mut groups = cluster_by_dir(&paths, "crate");
         for g in &mut groups {
             g.sort();

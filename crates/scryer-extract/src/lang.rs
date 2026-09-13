@@ -294,15 +294,29 @@ fn parse_vue_sfc(path: &Path, source: &str, parser: &mut Parser) -> Option<FileP
     let script = vue_script_in_place(source);
     let (mut idents, mut imports) = (Vec::new(), Vec::new());
     if script.trim().is_empty() {
-        return Some(FileParse { defs: vec![def], test_blocks: Vec::new(), idents, paths: Vec::new(), imports });
+        return Some(FileParse {
+            defs: vec![def],
+            test_blocks: Vec::new(),
+            idents,
+            paths: Vec::new(),
+            imports,
+        });
     }
-    parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()).ok()?;
+    parser
+        .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+        .ok()?;
     let tree = parser.parse(&script, None)?;
     let root = tree.root_node();
     let bytes = script.as_bytes();
     collect_idents(root, bytes, &mut idents);
     collect_ts_imports(root, bytes, &mut imports);
-    Some(FileParse { defs: vec![def], test_blocks: Vec::new(), idents, paths: Vec::new(), imports })
+    Some(FileParse {
+        defs: vec![def],
+        test_blocks: Vec::new(),
+        idents,
+        paths: Vec::new(),
+        imports,
+    })
 }
 
 /// The SFC's component name: its file stem in PascalCase (`user-card` and
@@ -343,13 +357,18 @@ fn vue_script_in_place(source: &str) -> String {
         let open = cursor + open_rel;
         // The tag ends at the first `>` after `<script`; a `/>` self-closing
         // tag (`<script src="…" />`) carries no inline content.
-        let Some(tag_end_rel) = lower[open..].find('>') else { break };
+        let Some(tag_end_rel) = lower[open..].find('>') else {
+            break;
+        };
         let content_start = open + tag_end_rel + 1;
         let self_closing = lower[open..content_start].ends_with("/>");
-        let Some(close_rel) = lower[content_start..].find("</script") else { break };
+        let Some(close_rel) = lower[content_start..].find("</script") else {
+            break;
+        };
         let content_end = content_start + close_rel;
         if !self_closing {
-            out[content_start..content_end].copy_from_slice(&source.as_bytes()[content_start..content_end]);
+            out[content_start..content_end]
+                .copy_from_slice(&source.as_bytes()[content_start..content_end]);
         }
         cursor = content_end + "</script".len();
     }
@@ -727,7 +746,9 @@ fn collect_go_imports(node: Node, bytes: &[u8], out: &mut Vec<ImportRef>) {
                 None => spec.rsplit('/').next().map(|s| s.to_string()),
             };
             out.push(ImportRef {
-                names: binding.map(|b| vec![ImportedSym::same(&b)]).unwrap_or_default(),
+                names: binding
+                    .map(|b| vec![ImportedSym::same(&b)])
+                    .unwrap_or_default(),
                 spec,
                 line: n.start_position().row as u32 + 1,
                 alias: None,
@@ -794,7 +815,13 @@ fn collect_c(root: Node, bytes: &[u8], defs: &mut Vec<Def>) {
         match n.kind() {
             "function_definition" => {
                 if let Some(declarator) = n.child_by_field_name("declarator") {
-                    push_def(defs, c_declarator_name(declarator, bytes), n, Vec::new(), false);
+                    push_def(
+                        defs,
+                        c_declarator_name(declarator, bytes),
+                        n,
+                        Vec::new(),
+                        false,
+                    );
                 }
                 continue; // never descend into bodies: locals are not symbols
             }
@@ -802,7 +829,13 @@ fn collect_c(root: Node, bytes: &[u8], defs: &mut Vec<Def>) {
             // a named underlying struct is picked up by the descent.
             "type_definition" => {
                 if let Some(declarator) = n.child_by_field_name("declarator") {
-                    push_def(defs, c_declarator_name(declarator, bytes), n, Vec::new(), false);
+                    push_def(
+                        defs,
+                        c_declarator_name(declarator, bytes),
+                        n,
+                        Vec::new(),
+                        false,
+                    );
                 }
             }
             "struct_specifier" | "union_specifier" | "class_specifier" => {
@@ -1255,7 +1288,10 @@ fn push_clj_ns_spec(node: Node, bytes: &[u8], prefix: &str, line: u32, out: &mut
         return;
     };
     // Prefix list: the head names a package and every sibling is its own spec.
-    if kids.get(1).is_some_and(|k| matches!(k.kind(), "vec_lit" | "list_lit")) {
+    if kids
+        .get(1)
+        .is_some_and(|k| matches!(k.kind(), "vec_lit" | "list_lit"))
+    {
         let nested = qualify(&ns);
         for spec in &kids[1..] {
             push_clj_ns_spec(*spec, bytes, &nested, line, out);
@@ -1295,16 +1331,14 @@ fn push_clj_ns_spec(node: Node, bytes: &[u8], prefix: &str, line: u32, out: &mut
             }
             // `:rename {orig new}` — `new` is the local binding, `orig` the
             // name in the source namespace, exactly ImportedSym's split.
-            ":rename" => {
-                if value.kind() == "map_lit" {
-                    let pairs = clj_payload(value);
-                    for pair in pairs.chunks(2) {
-                        if let [from, to] = pair {
-                            if let (Some(name), Some(local)) =
-                                (clj_sym_name(*from, bytes), clj_sym_name(*to, bytes))
-                            {
-                                names.push(ImportedSym { name, local });
-                            }
+            ":rename" if value.kind() == "map_lit" => {
+                let pairs = clj_payload(value);
+                for pair in pairs.chunks(2) {
+                    if let [from, to] = pair {
+                        if let (Some(name), Some(local)) =
+                            (clj_sym_name(*from, bytes), clj_sym_name(*to, bytes))
+                        {
+                            names.push(ImportedSym { name, local });
                         }
                     }
                 }
@@ -1420,7 +1454,9 @@ fn collect_clj_string_named_forms(root: Node, bytes: &[u8], out: &mut Vec<Def>) 
 /// Parse Clojure/EDN source, for callers that walk the tree themselves.
 fn parse_clj(source: &str) -> Option<tree_sitter::Tree> {
     let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_clojure::LANGUAGE.into()).ok()?;
+    parser
+        .set_language(&tree_sitter_clojure::LANGUAGE.into())
+        .ok()?;
     parser.parse(source, None)
 }
 
@@ -1829,7 +1865,8 @@ fn ts_import_clause_names(clause: Node, bytes: &[u8], names: &mut Vec<ImportedSy
                 for item in named_children(child) {
                     if item.kind() == "import_specifier" {
                         if let Some(name) = field_text(item, "name", bytes) {
-                            let local = field_text(item, "alias", bytes).unwrap_or_else(|| name.clone());
+                            let local =
+                                field_text(item, "alias", bytes).unwrap_or_else(|| name.clone());
                             names.push(ImportedSym { name, local });
                         }
                     }
@@ -1872,9 +1909,11 @@ fn collect_string_named_calls(root: Node, bytes: &[u8], out: &mut Vec<Def>) {
 /// its quotes trimmed. Computed strings (templates with interpolation,
 /// concatenations) don't reduce to a stable name and yield `None`.
 fn first_string_arg(call: Node, bytes: &[u8]) -> Option<String> {
-    let args = call
-        .child_by_field_name("arguments")
-        .or_else(|| named_children(call).into_iter().find(|n| n.kind().contains("argument")))?;
+    let args = call.child_by_field_name("arguments").or_else(|| {
+        named_children(call)
+            .into_iter()
+            .find(|n| n.kind().contains("argument"))
+    })?;
     let first = named_children(args).into_iter().next()?;
     if !first.kind().contains("string") {
         return None;
@@ -2007,8 +2046,14 @@ mod tests {
             block("rejects an unsigned webhook").map(|d| (d.start_line, d.end_line)),
             Some((2, 4)),
         );
-        assert_eq!(block("webhook verify").map(|d| (d.start_line, d.end_line)), Some((1, 6)));
-        assert!(block("echoes hub.challenge").is_some(), "member-call runners count too");
+        assert_eq!(
+            block("webhook verify").map(|d| (d.start_line, d.end_line)),
+            Some((1, 6))
+        );
+        assert!(
+            block("echoes hub.challenge").is_some(),
+            "member-call runners count too"
+        );
         // String-named blocks stay out of `defs` — link resolution never sees them.
         assert!(!names(&p).contains(&"rejects an unsigned webhook"));
     }
@@ -2334,7 +2379,11 @@ func main() {
             &[("database", "database")]
         ));
         // Default binding: the path's last segment.
-        assert!(has_import(&p, "github.com/acme/proj/pkg/api", &[("api", "api")]));
+        assert!(has_import(
+            &p,
+            "github.com/acme/proj/pkg/api",
+            &[("api", "api")]
+        ));
         assert!(has_import(&p, "fmt", &[("fmt", "fmt")]));
         // Blank import binds nothing.
         assert!(has_import(&p, "github.com/lib/pq", &[]));
@@ -2488,14 +2537,8 @@ async function f(p: string) { return import(p); }
     fn ts_import_lines_attributed() {
         let src = "import { a } from \"./x\";\n\nconst y = require(\"./z\");\n";
         let p = parse_file(Path::new("f.ts"), src).unwrap();
-        assert_eq!(
-            p.imports.iter().find(|i| i.spec == "./x").unwrap().line,
-            1
-        );
-        assert_eq!(
-            p.imports.iter().find(|i| i.spec == "./z").unwrap().line,
-            3
-        );
+        assert_eq!(p.imports.iter().find(|i| i.spec == "./x").unwrap().line, 1);
+        assert_eq!(p.imports.iter().find(|i| i.spec == "./z").unwrap().line, 3);
     }
 
     /// Extensions whose real declared imports are followed read `full`;
@@ -2692,7 +2735,10 @@ async function f(p: string) { return import(p); }
         let p = clj_parse();
         let time = p.imports.iter().find(|i| i.spec == "java.time").unwrap();
         assert_eq!(
-            time.names.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+            time.names
+                .iter()
+                .map(|n| n.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Instant", "Duration"]
         );
         let util = p.imports.iter().find(|i| i.spec == "java.util").unwrap();
