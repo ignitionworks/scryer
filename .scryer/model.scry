@@ -4481,6 +4481,11 @@
           "id": "resp-283",
           "statement": "**Partition** the pending plan queue by change ledger, and render each entry's own and owned diffs",
           "lastTouchedAt": 1784883905
+        },
+        {
+          "id": "resp-z5zzvj",
+          "statement": "**When** a change's sign-off names who signed it and, for a proxy signature, the person it was given for, **show** both, so a reader tells \"signed off by X for Y\" from \"signed off by Y\".",
+          "lastTouchedAt": 1789318269
         }
       ]
     },
@@ -12854,6 +12859,12 @@
           "statement": "**When** a sign-off is made for one person by another actor, **record** both the signing actor and the person it is on behalf of, so a proxy signature counts as a different signer yet is never read as the person's own.",
           "concern": "oversight",
           "lastTouchedAt": 1789209160
+        },
+        {
+          "id": "resp-7xts3y",
+          "statement": "**When** a sign-off is recorded, **append** a history event naming the actor who signed and, for a proxy signature, the person it was given for, so a reader of the timeline tells \"signed by X for Y\" from \"signed by Y\".",
+          "concern": "oversight",
+          "lastTouchedAt": 1789318263
         }
       ]
     },
@@ -21818,6 +21829,16 @@
         "symbol": "AppBody"
       }
     ],
+    "resp-7xts3y": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "record_signed_off"
+      },
+      {
+        "pattern": "crates/scryer-core/src/history.rs",
+        "symbol": "HistoryEvent"
+      }
+    ],
     "resp-7zjwrk": [
       {
         "pattern": "crates/scryer-mcp/src/tools/misc.rs",
@@ -22541,6 +22562,20 @@
       {
         "pattern": "crates/scryer-core/src/history.rs",
         "symbol": "by_actor"
+      }
+    ],
+    "resp-z5zzvj": [
+      {
+        "pattern": "src/ledger.ts",
+        "symbol": "signatureLabel"
+      },
+      {
+        "pattern": "src/ledger.ts",
+        "symbol": "SignOff"
+      },
+      {
+        "pattern": "src/special/ChangesPage.tsx",
+        "symbol": "ChangesPage"
       }
     ],
     "resp-z9kn5w": [
@@ -24115,6 +24150,16 @@
         "symbol": "resp-7pgwkq — opening a project > resp-7pgwkq: opening a project is not navigating within one"
       }
     ],
+    "resp-7xts3y": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "resp_7xts3y_a_sign_off_records_who_signed_and_who_for"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_7xts3y_an_mcp_proxy_sign_off_records_the_signer_and_the_person"
+      }
+    ],
     "resp-8": [
       {
         "pattern": "crates/xtask/tests/cli.rs",
@@ -24749,6 +24794,20 @@
       {
         "pattern": "crates/scryer-app/src/commands/project.rs",
         "symbol": "a_write_naming_an_actor_records_it_and_one_without_stays_unattributed"
+      }
+    ],
+    "resp-z5zzvj": [
+      {
+        "pattern": "tests/signature.test.ts",
+        "symbol": "resp-z5zzvj: reads a proxy signature apart from the person's own"
+      },
+      {
+        "pattern": "tests/signature.test.ts",
+        "symbol": "resp-z5zzvj: says nothing when nobody was named, and nothing about no signature"
+      },
+      {
+        "pattern": "tests/signature.test.ts",
+        "symbol": "resp-z5zzvj: the Changes page shows the signature, badge and tooltip"
       }
     ],
     "resp-z9kn5w": [

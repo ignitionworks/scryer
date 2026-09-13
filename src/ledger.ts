@@ -29,12 +29,34 @@ export interface ChangeMeta {
   signedOff?: SignOff;
 }
 
-/** One sign-off snapshot: when it was stamped, and each tagged entry's
- *  signed content, keyed by {@link elementKey}. */
+/** One sign-off snapshot: when it was stamped, who by, and each tagged entry's
+ *  signed content, keyed by {@link elementKey}. Mirrors Rust
+ *  `changes::SignOff`; every field but `at` and `entries` is absent on a
+ *  signature that has nothing to say about it. */
 export interface SignOff {
   /** Unix seconds. */
   at: number;
+  /** WHO gave the go-ahead, when the signature named an actor. Absent on an
+   *  unattributed one, and on every plan written before the field existed. */
+  by?: string;
+  /** The PERSON {@link SignOff.by} signed FOR, when they signed as that
+   *  person's proxy — a host's agent approving on a developer's say-so records
+   *  the agent in `by` and the developer here. Both names or neither: a reader
+   *  shown only one cannot tell "X signed for Y" from "Y signed". */
+  onBehalfOf?: string;
+  /** The plan moved on under someone else's hand since this signature, so the
+   *  snapshot is no longer what the plan holds and the signer has not seen the
+   *  difference. Only a write by an actor other than the signer sets it. */
+  stale?: boolean;
   entries: Record<string, SignedEntry>;
+}
+
+/** How a sign-off reads to a person: "jesseh", or "claude-session-7 for
+ *  jesseh" when it was given as a proxy. `null` when nobody is named — an
+ *  unattributed signature says only that one was given. */
+export function signatureLabel(signedOff: SignOff | undefined): string | null {
+  if (!signedOff?.by) return null;
+  return signedOff.onBehalfOf ? `${signedOff.by} for ${signedOff.onBehalfOf}` : signedOff.by;
 }
 
 /** What a sign-off remembered about one entry. */

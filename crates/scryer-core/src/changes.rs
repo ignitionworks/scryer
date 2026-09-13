@@ -795,6 +795,26 @@ pub fn close_change(r: &ModelRef, change_id: &str) -> Result<ChangeMeta, String>
 /// answer). `driver` says how it closed: "folded" (its entries reached
 /// committed) or "abandoned" (they were reverted). Best-effort like every
 /// history append: a log failure must never abort the model operation.
+/// Append a sign-off's durable record to the history log: an approval is a
+/// decision, and a decision with no trace is one nobody can audit after the
+/// change closes and takes its snapshot with it.
+///
+/// Names WHO signed, and — when the signature was given as someone's proxy —
+/// who FOR. Both, because the two cases are different facts: an agent a host
+/// runs for a developer signing on their say-so is not the developer signing,
+/// and a reader who cannot tell them apart cannot tell whether a person ever
+/// looked. Best-effort like every history append: a log failure must never
+/// abort the sign-off it describes.
+pub fn record_signed_off(r: &ModelRef, meta: &ChangeMeta) {
+    let Some(snap) = meta.signed_off.as_ref() else { return };
+    let ev = HistoryEvent::new(snap.at, EventKind::Change, "", "signed off")
+        .with_change(&meta.id)
+        .with_rows(vec![EventRow::new("✓", meta.rationale.clone())])
+        .by_actor(snap.by.as_deref())
+        .for_person(snap.on_behalf_of.as_deref());
+    let _ = append_event(r, &ev);
+}
+
 pub fn record_closed(r: &ModelRef, meta: &ChangeMeta, driver: &str) {
     let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", driver)
         .with_change(&meta.id)
@@ -885,6 +905,70 @@ mod tests {
         assert!(!requires_countersigned_folds(&legacy));
     }
 
+
+
+    /// resp-7xts3y — a sign-off leaves its own record on the timeline, naming
+    /// the actor who signed and, when they signed as someone's proxy, the
+    /// person it was for. Both names or the record lies: with only `by` an
+    /// agent's proxy signature reads as the agent's own opinion, and with only
+    /// the person it reads as though they looked at it themselves.
+    ///
+    /// It has to be its own event. A plan write records what the plan CLAIMS,
+    /// and a sign-off changes no claim — so the approval would otherwise leave
+    /// no trace at all, and the snapshot that holds it goes with the change
+    /// when the change closes.
+    #[test]
+    fn resp_7xts3y_a_sign_off_records_who_signed_and_who_for() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let signed_off = |r: &ModelRef| -> Vec<crate::history::HistoryEvent> {
+            read_history(r).into_iter().filter(|e| e.driver == "signed off").collect()
+        };
+
+        let mut plan = model_with_resps(&[("r1", "exists")]);
+        let cid = open_change(&mut plan, "the rationale that outlives the change", 100);
+        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+
+        // A host's agent signs for the developer.
+        sign_off_for(&mut plan, &cid, 200, Some("claude-session-7"), Some("jesseh")).unwrap();
+        record_signed_off(&r, &plan.changes[0]);
+        let log = signed_off(&r);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].by, "claude-session-7", "the signer");
+        assert_eq!(log[0].on_behalf_of.as_deref(), Some("jesseh"), "the person it was for");
+        assert_eq!(log[0].change_id.as_deref(), Some(cid.as_str()));
+        assert_eq!(log[0].at, 200, "stamped when the signature was, not when it was logged");
+        assert_eq!(log[0].rows[0].text, "the rationale that outlives the change");
+
+        // A direct sign-off is nobody's proxy, and says so by saying nothing.
+        let mut direct = model_with_resps(&[("r1", "exists")]);
+        let dir2 = tempdir().unwrap();
+        let r2 = ModelRef::ProjectLocal(dir2.path().to_path_buf());
+        let cid2 = open_change(&mut direct, "signed by the developer themselves", 100);
+        tag(&mut direct, &[element_key(ElementKind::Responsibility, None, "r1")], &cid2);
+        sign_off_as(&mut direct, &cid2, 200, Some("jesseh")).unwrap();
+        record_signed_off(&r2, &direct.changes[0]);
+        let log = signed_off(&r2);
+        assert_eq!(log[0].by, "jesseh");
+        assert!(log[0].on_behalf_of.is_none(), "not a proxy, so there is nobody to name");
+        let raw = std::fs::read_to_string(r2.history_path()).unwrap();
+        assert!(!raw.contains("onBehalfOf"), "a direct sign-off writes no key at all: {raw}");
+
+        // A change nobody signed records nothing — there is no decision yet.
+        let dir3 = tempdir().unwrap();
+        let r3 = ModelRef::ProjectLocal(dir3.path().to_path_buf());
+        let mut unsigned = model_with_resps(&[("r1", "exists")]);
+        let _ = open_change(&mut unsigned, "not approved yet", 100);
+        record_signed_off(&r3, &unsigned.changes[0]);
+        assert!(signed_off(&r3).is_empty());
+
+        // An event written before the field existed still loads.
+        let legacy: crate::history::HistoryEvent = serde_json::from_str(
+            r#"{"at":1,"driver":"signed off","kind":"change","nodeId":""}"#,
+        )
+        .unwrap();
+        assert!(legacy.on_behalf_of.is_none());
+    }
 
     /// resp-gc5m1s — a plan write re-stamps the signature it belongs to and
     /// stales the ones it does not. The signer's own edit is intent, exactly

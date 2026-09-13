@@ -33,9 +33,11 @@ pub enum EventKind {
     Move,
     /// A node first entered the committed model (`fill_container`).
     Born,
-    /// A plan change closed — its last pending entry folded (or was reverted).
-    /// The one event kind that spans nodes: `node_id` is empty, `change_id`
-    /// names the change, and the rows carry its rationale.
+    /// Something happened to a plan change as a WHOLE: it was signed off, or
+    /// it closed — its last pending entry folded, or was reverted. The one
+    /// event kind that spans nodes: `node_id` is empty, `change_id` names the
+    /// change, the rows carry its rationale, and `driver` says which ("signed
+    /// off", "folded", "abandoned").
     Change,
     /// A plan WRITE changed what the plan claims — a canvas save or an agent's
     /// authoring tool. The only kind that is not a fold or a structural move:
@@ -92,6 +94,13 @@ pub struct HistoryEvent {
     /// "which change introduced this claim?" gets answered after the fold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change_id: Option<String>,
+    /// The PERSON [`HistoryEvent::by`] acted for, when it acted as their proxy
+    /// — an agent a host runs on a developer's behalf. Two names, never one:
+    /// with only `by` the record reads as the agent's own act, and with only
+    /// this it reads as the person's. Absent on everything nobody proxied, and
+    /// on every event written before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_behalf_of: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rows: Vec<EventRow>,
 }
@@ -105,6 +114,7 @@ impl HistoryEvent {
             kind,
             node_id: node_id.into(),
             change_id: None,
+            on_behalf_of: None,
             rows: Vec::new(),
         }
     }
@@ -127,6 +137,15 @@ impl HistoryEvent {
         if let Some(a) = actor.map(str::trim).filter(|a| !a.is_empty()) {
             self.by = a.to_string();
         }
+        self
+    }
+
+    /// Name the PERSON the actor acted for, when it acted as their proxy.
+    /// `None` is a direct act and records nothing — "on behalf of" says
+    /// nothing without an actor to qualify.
+    pub fn for_person(mut self, person: Option<&str>) -> Self {
+        self.on_behalf_of =
+            person.map(str::trim).filter(|p| !p.is_empty()).map(str::to_string);
         self
     }
 }

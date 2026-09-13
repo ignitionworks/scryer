@@ -7,7 +7,7 @@ import type { Change, ElementChange, ModelDiff } from "../planDiff";
 import { CHANGE_COLOR, type ChangeKind, collectPlanEntries, type LinkChange, MARK_META, type PlanEntry } from "../changeMarks";
 import { DIFF_ANCHOR, DIFF_TINT, DiffRow } from "../diffkit";
 import { ANCHOR_CALM, StatementText } from "../markup";
-import { entryChanges, type SignOff } from "../ledger";
+import { entryChanges, signatureLabel, type SignOff } from "../ledger";
 import { relativeTime } from "../history";
 import { BTN, BTN_ICON, LINK, WordDiffText } from "../pagekit";
 import { SpecialBody, SpecialHeader, timeLabel } from "./shell";
@@ -597,9 +597,23 @@ function ChangeSection({
         {signedOff && (
           <span
             className="inline-flex shrink-0 items-center gap-1 text-xs text-violet-700 dark:text-violet-400"
-            title={`Signed off ${new Date(signedOff.at * 1000).toLocaleString()}. Anything the agent rewords or adds afterwards lands in the Inbox as a proposal.`}
+            title={[
+              `Signed off ${new Date(signedOff.at * 1000).toLocaleString()}`,
+              // A proxy signature is a different fact from the person's own,
+              // and the difference is exactly what a reader needs: an agent
+              // approving on someone's say-so is not that someone approving.
+              signedOff.onBehalfOf && signedOff.by
+                ? ` by ${signedOff.by}, as ${signedOff.onBehalfOf}'s proxy`
+                : signedOff.by
+                  ? ` by ${signedOff.by}`
+                  : "",
+              ". Anything the agent rewords or adds afterwards lands in the Inbox as a proposal.",
+            ].join("")}
           >
             <Check className="h-3 w-3" /> Signed off {relativeTime(signedOff.at)}
+            {signatureLabel(signedOff) && (
+              <span className="text-[var(--text-muted)]">by {signatureLabel(signedOff)}</span>
+            )}
           </span>
         )}
         {id && onSignOff && (

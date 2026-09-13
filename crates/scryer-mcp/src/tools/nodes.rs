@@ -4357,18 +4357,26 @@ mod tests {
     /// this and restore the prior value — correct under `cargo test`'s threads
     /// as well as nextest's process-per-test.
     fn as_actor<T>(actor: Option<&str>, body: impl FnOnce() -> T) -> T {
+        as_actor_for(actor, None, body)
+    }
+
+    /// [`as_actor`], plus the PERSON the actor is signing for
+    /// (`SCRYER_ON_BEHALF_OF`). One lock covers both variables: they are read
+    /// as a pair, and two locks would let a test holding one race a test
+    /// holding the other.
+    fn as_actor_for<T>(actor: Option<&str>, person: Option<&str>, body: impl FnOnce() -> T) -> T {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let prior = std::env::var("SCRYER_ACTOR").ok();
-        match actor {
-            Some(a) => std::env::set_var("SCRYER_ACTOR", a),
-            None => std::env::remove_var("SCRYER_ACTOR"),
-        }
+        let set = |k: &str, v: Option<&str>| match v {
+            Some(a) => std::env::set_var(k, a),
+            None => std::env::remove_var(k),
+        };
+        let prior = (std::env::var("SCRYER_ACTOR").ok(), std::env::var("SCRYER_ON_BEHALF_OF").ok());
+        set("SCRYER_ACTOR", actor);
+        set("SCRYER_ON_BEHALF_OF", person);
         let out = body();
-        match prior {
-            Some(p) => std::env::set_var("SCRYER_ACTOR", p),
-            None => std::env::remove_var("SCRYER_ACTOR"),
-        }
+        set("SCRYER_ACTOR", prior.0.as_deref());
+        set("SCRYER_ON_BEHALF_OF", prior.1.as_deref());
         out
     }
 
@@ -4406,6 +4414,81 @@ mod tests {
             }))
             .unwrap();
         cid
+    }
+
+
+    /// resp-7xts3y, through the seam a host actually signs at: the MCP tool
+    /// reads both facts from the environment — WHO is signing, and who FOR —
+    /// and the timeline ends up carrying both. A reader who only had `by`
+    /// would see an agent approving a developer's plan on its own authority.
+    #[test]
+    fn resp_7xts3y_an_mcp_proxy_sign_off_records_the_signer_and_the_person() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = countersign_project_for_mcp(&model_ref);
+        let server = ScryerServer::new();
+        let cid = as_actor(Some("ada-fixture"), || {
+            author_one_claim(&server, &project, "Verifies the token")
+        });
+
+        // The host runs its agent for jesseh, and the agent signs.
+        let text = as_actor_for(Some("claude-session-7"), Some("jesseh"), || {
+            tool_text(
+                &server
+                    .sign_off(Parameters(SignOffRequest {
+                        project: project.clone(),
+                        change_id: Some(cid.clone()),
+                    }))
+                    .unwrap(),
+            )
+        });
+        assert!(text.contains("Signed by claude-session-7 on behalf of jesseh"), "{text}");
+
+        let approval = scryer_core::history::read_history(&model_ref)
+            .into_iter()
+            .find(|e| e.driver == "signed off")
+            .expect("the approval is on the timeline");
+        assert_eq!(approval.by, "claude-session-7", "the actor that signed");
+        assert_eq!(
+            approval.on_behalf_of.as_deref(),
+            Some("jesseh"),
+            "and the person it signed for — without this it reads as the agent's own call"
+        );
+        assert_eq!(approval.change_id.as_deref(), Some(cid.as_str()));
+
+        // The ledger carries the same pair, so the two never disagree.
+        let snap = scryer_core::read_planned_at(&model_ref)
+            .unwrap()
+            .changes
+            .iter()
+            .find(|c| c.id == cid)
+            .and_then(|c| c.signed_off.clone())
+            .expect("signed off");
+        assert_eq!(snap.by.as_deref(), Some("claude-session-7"));
+        assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"));
+
+        // A developer signing for themselves names nobody else, anywhere.
+        let dir2 = tempfile::tempdir().unwrap();
+        let model_ref2 = ModelRef::ProjectLocal(dir2.path().to_path_buf());
+        let project2 = countersign_project_for_mcp(&model_ref2);
+        let server2 = ScryerServer::new();
+        let cid2 = as_actor(Some("ada-fixture"), || {
+            author_one_claim(&server2, &project2, "Verifies the token")
+        });
+        as_actor_for(Some("jesseh"), None, || {
+            server2
+                .sign_off(Parameters(SignOffRequest {
+                    project: project2.clone(),
+                    change_id: Some(cid2.clone()),
+                }))
+                .unwrap()
+        });
+        let direct = scryer_core::history::read_history(&model_ref2)
+            .into_iter()
+            .find(|e| e.driver == "signed off")
+            .unwrap();
+        assert_eq!(direct.by, "jesseh");
+        assert!(direct.on_behalf_of.is_none(), "their own signature is nobody's proxy");
     }
 
     /// The MCP seam names the ACTOR on the plan event, not the bare agent.

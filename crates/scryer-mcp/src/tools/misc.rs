@@ -714,6 +714,13 @@ impl ScryerServer {
         if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
+        // The approval's own trace on the timeline. A plan write only records
+        // what the plan CLAIMS, and a sign-off changes no claim — so without
+        // this the one thing that happened here leaves no history at all, and
+        // "who approved this, and was it a proxy?" dies with the change.
+        if let Some(meta) = plan.changes.iter().find(|c| c.id == target) {
+            scryer_core::changes::record_signed_off(&model_ref, meta);
+        }
         drop(_lock);
         // The session keeps working on the change it just signed off.
         self.set_session_change(Some((model_ref.project_path().to_path_buf(), target.clone())));

@@ -212,6 +212,11 @@ pub fn sign_off_change(
         actor,
     )?;
     scryer_core::write_planned_at(&r, &plan)?;
+    // The approval's own trace on the timeline, naming who gave it — the one
+    // record that outlives the change and the snapshot it closes with.
+    if let Some(meta) = plan.changes.iter().find(|c| c.id == change_id) {
+        scryer_core::changes::record_signed_off(&r, meta);
+    }
     Ok(n)
 }
 
