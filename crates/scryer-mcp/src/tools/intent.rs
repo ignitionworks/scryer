@@ -619,7 +619,7 @@ impl ScryerServer {
                 reused_groups.join(", ")
             ));
         }
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
@@ -1179,7 +1179,7 @@ impl ScryerServer {
             }
         }
         drop(_lock);
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
@@ -1221,7 +1221,7 @@ impl ScryerServer {
         let mut msg = format!(
             "Reconciled — drift anchor advanced to now{commit_note}. Only code changes after this point will surface in get_drift."
         );
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))

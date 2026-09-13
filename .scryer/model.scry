@@ -91,6 +91,11 @@
           "id": "resp-32",
           "statement": "**Discover and authenticate** against a running desktop app instance for a linked project.",
           "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-de0hs1",
+          "statement": "**When** a model answer is given — orient, read_model, get_pending, get_health and the plan writes — **name** the resolved project path it answered from, and **when** that path was defaulted from the process's working directory rather than named by the caller, **say** so.",
+          "lastTouchedAt": 1789334815
         }
       ]
     },
@@ -22249,6 +22254,20 @@
         "symbol": "sign_off_as"
       }
     ],
+    "resp-de0hs1": [
+      {
+        "pattern": "crates/scryer-mcp/src/helpers.rs",
+        "symbol": "ResolvedProject"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/helpers.rs",
+        "symbol": "resolve_model_ref"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/helpers.rs",
+        "symbol": "status_header_named"
+      }
+    ],
     "resp-dgxexx": [
       {
         "pattern": "crates/scryer-app/src/hooks.rs",
@@ -24501,6 +24520,12 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "sign_off_records_the_actor_who_gave_the_go_ahead"
+      }
+    ],
+    "resp-de0hs1": [
+      {
+        "pattern": "crates/scryer-mcp/src/tools/read.rs",
+        "symbol": "resp_de0hs1_an_answer_names_the_project_it_answered_from"
       }
     ],
     "resp-dgxexx": [

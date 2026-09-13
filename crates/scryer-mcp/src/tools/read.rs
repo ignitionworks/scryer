@@ -402,7 +402,8 @@ impl ScryerServer {
 
         // No node: the architecture overview (always small — symbols excluded).
         let Some(node_id) = req.node.as_deref() else {
-            let payload = overview_payload(&model);
+            let mut payload = overview_payload(&model);
+            model_ref.stamp(&mut payload);
             return Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
             )]));
@@ -413,6 +414,7 @@ impl ScryerServer {
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         strip_fields_compact(&mut payload);
+        model_ref.stamp(&mut payload);
         let detail = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
         if detail.len() <= DETAIL_LIMIT {
             return Ok(CallToolResult::success(vec![Content::text(detail)]));
@@ -442,12 +444,13 @@ impl ScryerServer {
             node_id,
             detail.len() / 1024
         );
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "view": "overview",
             "node": node_id,
             "note": note,
             "children": children,
         });
+        model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
         )]))
@@ -952,6 +955,7 @@ impl ScryerServer {
             "state": status_header(&model_ref),
         });
         strip_fields_compact(&mut payload);
+        model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
         )]))
@@ -1330,6 +1334,7 @@ impl ScryerServer {
         if let Some(current) = self.session_change(&model_ref) {
             payload["currentChange"] = serde_json::Value::String(current);
         }
+        model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
         )]))
@@ -1561,6 +1566,8 @@ impl ScryerServer {
                              with get_pending (the model→code work queue) and read_model. Do \
                              NOT conclude the model is empty.",
                     });
+                    let mut payload = payload;
+                    model_ref.stamp(&mut payload);
                     return Ok(CallToolResult::success(vec![Content::text(
                         serde_json::to_string(&payload)
                             .unwrap_or_else(|_| "{}".to_string()),
@@ -1898,6 +1905,8 @@ impl ScryerServer {
             }
         };
 
+        let mut payload = payload;
+        model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
         )]))
@@ -2738,6 +2747,125 @@ mod tests {
     /// System > Container (boundary src/**) > Component > symbol, with the
     /// symbol's claim anchored in `src/auth.rs` — committed. Directives on the
     /// component and container prove the binding set rides along.
+
+    /// The process working directory is process-global, so the one test that
+    /// needs to BE somewhere serializes on this and puts it back. Correct
+    /// under nextest's process-per-test and under `cargo test`'s threads.
+    struct CwdGuard {
+        prior: std::path::PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CwdGuard {
+        fn to(dir: &std::path::Path) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let prior = std::env::current_dir().expect("a working directory");
+            std::env::set_current_dir(dir).expect("set cwd");
+            Self { prior, _guard }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
+
+    // ---- resp-de0hs1: an answer names the model it answered from. --------
+
+    /// resp-de0hs1 — every model answer names the project path it was about,
+    /// and says when that path was DEFAULTED from the process's working
+    /// directory rather than named by the caller.
+    ///
+    /// The incident this closes: a session whose process ran in a per-change
+    /// worktree, omitting `project` on every call, was answered truthfully
+    /// about that worktree's own `.scryer/` — nodes folded on main read as
+    /// "not found", health was real but weeks stale, and nothing in any answer
+    /// said which model was being read. The path was always knowable; no
+    /// answer said it out loud, so the session concluded the engine was
+    /// holding a stale copy. It was not: it was reading a different file.
+    #[test]
+    fn resp_de0hs1_an_answer_names_the_project_it_answered_from() {
+        let (server, dir, project, _model_ref) = locate_project();
+
+        // Named: the answer carries the path and claims nothing about guessing.
+        let named = result_json(
+            &server
+                .read_model(Parameters(ReadModelRequest {
+                    project: Some(project.clone()),
+                    node: None,
+                    layer: Layer::Committed,
+                }))
+                .unwrap(),
+        );
+        assert_eq!(named["project"].as_str(), Some(project.as_str()));
+        assert!(
+            named.get("projectDefaulted").is_none(),
+            "a caller who named the path is told nothing it did not already know: {named}"
+        );
+
+        // The same read with no `project`: the path is still named, and the
+        // answer says the process guessed it.
+        let _cwd = CwdGuard::to(dir.path());
+        let defaulted = result_json(
+            &server
+                .read_model(Parameters(ReadModelRequest {
+                    project: None,
+                    node: None,
+                    layer: Layer::Committed,
+                }))
+                .unwrap(),
+        );
+        assert!(defaulted["project"].as_str().is_some(), "{defaulted}");
+        assert_eq!(
+            defaulted["projectDefaulted"].as_bool(),
+            Some(true),
+            "the fallback is the whole point of the claim: {defaulted}"
+        );
+
+        // And the surfaces the claim names, all of them, in both modes.
+        for (name, v) in [
+            (
+                "get_pending",
+                result_json(
+                    &server
+                        .get_pending(Parameters(GetPendingRequest {
+                            project: Some(project.clone()),
+                            change: None,
+                        }))
+                        .unwrap(),
+                ),
+            ),
+            (
+                "orient",
+                result_json(
+                    &server
+                        .orient(Parameters(OrientRequest {
+                            project: Some(project.clone()),
+                            task: Some("anything".into()),
+                            files: None,
+                        }))
+                        .unwrap(),
+                ),
+            ),
+            (
+                "get_health",
+                result_json(
+                    &server
+                        .get_health(Parameters(GetHealthRequest {
+                            project: Some(project.clone()),
+                            node_id: None,
+                        }))
+                        .unwrap(),
+                ),
+            ),
+        ] {
+            assert_eq!(v["project"].as_str(), Some(project.as_str()), "{name} names the project");
+            assert!(v.get("projectDefaulted").is_none(), "{name} was named, not guessed");
+        }
+    }
+
     fn locate_project() -> (ScryerServer, tempfile::TempDir, String, ModelRef) {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());

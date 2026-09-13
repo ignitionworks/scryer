@@ -282,14 +282,86 @@ pub(crate) fn write_planned(
     scryer_core::write_planned_as(model_ref, model, env_actor().as_deref())
 }
 
-pub(crate) fn resolve_model_ref(req_project: Option<&str>) -> Result<ModelRef, McpError> {
-    let path = match req_project {
+pub(crate) fn resolve_model_ref(req_project: Option<&str>) -> Result<ResolvedProject, McpError> {
+    let named = req_project.map(str::trim).filter(|p| !p.is_empty());
+    let path = match named {
         Some(p) => std::path::PathBuf::from(p),
         None => std::env::current_dir().map_err(|e| {
             McpError::internal_error(format!("cannot read cwd: {}", e), None)
         })?,
     };
-    Ok(ModelRef::ProjectLocal(path))
+    Ok(ResolvedProject { model_ref: ModelRef::ProjectLocal(path), defaulted: named.is_none() })
+}
+
+/// WHICH model an answer is about, and how this process decided that.
+///
+/// A tool call that names `project` is unambiguous. One that does not falls
+/// back to the process's working directory — and a working directory is a
+/// fact about how the session was launched, not about what it meant. An agent
+/// running in a per-change worktree, or anywhere but the checkout it is
+/// reasoning about, then reads that directory's `.scryer/` and is answered
+/// truthfully about the wrong model: nodes folded elsewhere are "not found",
+/// and health is real but stale. Nothing is broken and nothing says so.
+///
+/// So the fallback is recorded rather than hidden, and every answer carries
+/// both facts ([`ResolvedProject::stamp`], [`ResolvedProject::note`]). The
+/// path was always knowable; what was missing was anyone saying it out loud.
+///
+/// Derefs to the [`ModelRef`], so the whole tool surface goes on passing
+/// `&model_ref` to core exactly as before.
+pub(crate) struct ResolvedProject {
+    model_ref: ModelRef,
+    /// The path came from the process's working directory: the call named none.
+    defaulted: bool,
+}
+
+impl std::ops::Deref for ResolvedProject {
+    type Target = ModelRef;
+    fn deref(&self) -> &ModelRef {
+        &self.model_ref
+    }
+}
+
+/// Reads as the [`ModelRef`] it wraps — the provenance is carried beside the
+/// path, never folded into how the path prints.
+impl std::fmt::Display for ResolvedProject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.model_ref.fmt(f)
+    }
+}
+
+impl ResolvedProject {
+    /// The resolved project path, as a reader should see it.
+    pub(crate) fn path(&self) -> String {
+        self.model_ref.project_path().to_string_lossy().to_string()
+    }
+
+    /// The phrase an answer carries: the path, and how it was arrived at. The
+    /// defaulted case names the remedy, because a session that did not know it
+    /// was guessing does not know what to do about it either.
+    pub(crate) fn note(&self) -> String {
+        if self.defaulted {
+            format!(
+                "project: {} (defaulted from this process's working directory — no `project` was \
+                 named; pass it to be sure which model you are reading)",
+                self.path()
+            )
+        } else {
+            format!("project: {}", self.path())
+        }
+    }
+
+    /// Stamp the same two facts onto a JSON answer, for the tools that speak
+    /// JSON rather than prose. Absent `projectDefaulted` means the caller
+    /// named the path, so an answer about the right model stays quiet.
+    pub(crate) fn stamp(&self, payload: &mut serde_json::Value) {
+        if let serde_json::Value::Object(o) = payload {
+            o.insert("project".into(), serde_json::Value::String(self.path()));
+            if self.defaulted {
+                o.insert("projectDefaulted".into(), serde_json::Value::Bool(true));
+            }
+        }
+    }
 }
 
 /// Error text for a failed model/plan read. A missing file means NO MODEL
@@ -831,6 +903,17 @@ pub(crate) fn status_header(model_ref: &ModelRef) -> Option<String> {
             c.pending, c.untested, b.drift_scopes, b.anchors_changed, b.anchors_broken
         ),
     })
+}
+
+/// [`status_header`] for a write response, naming WHICH model was written.
+///
+/// The loop state is only half of "where am I": a session that resolved the
+/// wrong project gets a perfectly accurate header about a model it did not
+/// mean to touch. So the write's own answer carries the path, and says when
+/// the path was guessed from the working directory rather than named.
+pub(crate) fn status_header_named(project: &ResolvedProject) -> Option<String> {
+    let head = status_header(project)?;
+    Some(format!("{head} · {}", project.note()))
 }
 
 /// Which claim-keyed anchor map a batch of entries writes: implementation

@@ -136,7 +136,7 @@ impl ScryerServer {
                 reused.join(", ")
             ));
         }
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
@@ -195,7 +195,7 @@ impl ScryerServer {
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
@@ -243,7 +243,7 @@ impl ScryerServer {
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))

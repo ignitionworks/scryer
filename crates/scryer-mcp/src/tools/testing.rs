@@ -143,7 +143,7 @@ impl ScryerServer {
             Ok(radius) => msg.push_str(&format!("\n{}", radius_lines(&radius))),
             Err(e) => msg.push_str(&format!("\n(blast radius unavailable: {e})")),
         }
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
@@ -295,7 +295,7 @@ impl ScryerServer {
                  for a fresh verdict, then probe again.",
             );
         }
-        if let Some(h) = status_header(&model_ref) {
+        if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
