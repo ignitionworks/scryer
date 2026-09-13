@@ -9,6 +9,11 @@ use crate::state::AcpState;
 /// set from `boundaryDir` (validated against the real container dirs), and falls
 /// back to matching the node name against the context's container facts (which
 /// covers the root container, whose empty dir carries no boundary glob).
+/// What one minting pass produced: the model revision it wrote, and the nodes
+/// it minted as (id, name, kind) — enough for the caller to report the work
+/// without reading the model back.
+type Minted = (String, Vec<(String, String, String)>);
+
 fn derive_container_dir(
     node: &scryer_core::Node,
     model: &scryer_core::ScryModel,
@@ -57,7 +62,10 @@ fn fmt_usage(u: &scryer_acp::Usage) -> String {
         u.input_tokens, u.output_tokens, u.cache_creation_input_tokens, u.cache_read_input_tokens,
     );
     if u.cost_usd > 0.0 {
-        format!("{fresh} fresh tokens ({breakdown}) · ≈${:.4} API-equiv", u.cost_usd)
+        format!(
+            "{fresh} fresh tokens ({breakdown}) · ≈${:.4} API-equiv",
+            u.cost_usd
+        )
     } else {
         // Codex reports no cost — just the token counts.
         format!("{fresh} fresh tokens ({breakdown})")
@@ -175,8 +183,16 @@ mod build_scheduling_tests {
     /// throttled just like a big payload, and permits never exceed the pool.
     #[test]
     fn permits_weigh_work_units_alongside_payload_size() {
-        assert_eq!(session_permits(60_000, 9_000, 4), 4, "heavy work units take the pool");
-        assert_eq!(session_permits(60_000, 4_000, 4), 2, "medium work units take two");
+        assert_eq!(
+            session_permits(60_000, 9_000, 4),
+            4,
+            "heavy work units take the pool"
+        );
+        assert_eq!(
+            session_permits(60_000, 4_000, 4),
+            2,
+            "medium work units take two"
+        );
         assert_eq!(session_permits(60_000, 100, 4), 1, "light stays at one");
         assert_eq!(session_permits(900_000, 9_000, 2), 2, "capped at the pool");
         assert_eq!(session_permits(0, 0, 1), 1, "never below one");
@@ -220,17 +236,25 @@ mod build_helper_tests {
             vec![serde_json::from_value(serde_json::json!({ "pattern": "api/**/*" })).unwrap()],
         );
 
-        let via_boundary = node(
-            serde_json::json!({ "id": "node-2", "kind": "container", "name": "Renamed API" }),
+        let via_boundary =
+            node(serde_json::json!({ "id": "node-2", "kind": "container", "name": "Renamed API" }));
+        assert_eq!(
+            derive_container_dir(&via_boundary, &model, &ctx).as_deref(),
+            Some("api")
         );
-        assert_eq!(derive_container_dir(&via_boundary, &model, &ctx).as_deref(), Some("api"));
 
         let via_name =
             node(serde_json::json!({ "id": "node-3", "kind": "container", "name": "api-svc" }));
-        assert_eq!(derive_container_dir(&via_name, &model, &ctx).as_deref(), Some("api"));
+        assert_eq!(
+            derive_container_dir(&via_name, &model, &ctx).as_deref(),
+            Some("api")
+        );
 
         let root = node(serde_json::json!({ "id": "node-4", "kind": "container", "name": "app" }));
-        assert_eq!(derive_container_dir(&root, &model, &ctx).as_deref(), Some(""));
+        assert_eq!(
+            derive_container_dir(&root, &model, &ctx).as_deref(),
+            Some("")
+        );
 
         let unknown =
             node(serde_json::json!({ "id": "node-5", "kind": "container", "name": "ghost" }));
@@ -267,7 +291,10 @@ mod build_helper_tests {
         assert!(line.contains("cache-read 9000"), "{line}");
         assert!(line.contains("≈$1.2300 API-equiv"), "{line}");
 
-        let no_cost = scryer_acp::Usage { cost_usd: 0.0, ..with_cost };
+        let no_cost = scryer_acp::Usage {
+            cost_usd: 0.0,
+            ..with_cost
+        };
         assert!(!fmt_usage(&no_cost).contains('$'), "Codex reports no cost");
     }
 
@@ -280,11 +307,14 @@ mod build_helper_tests {
         orch_log(&cwd, "build start");
         orch_log(&cwd, "✓ wave done");
 
-        let log =
-            std::fs::read_to_string(dir.path().join(".scryer/build-logs/build.log")).unwrap();
+        let log = std::fs::read_to_string(dir.path().join(".scryer/build-logs/build.log")).unwrap();
         let lines: Vec<&str> = log.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].starts_with('[') && lines[0].ends_with("build start"), "{}", lines[0]);
+        assert!(
+            lines[0].starts_with('[') && lines[0].ends_with("build start"),
+            "{}",
+            lines[0]
+        );
         assert!(lines[1].ends_with("✓ wave done"));
     }
 }
@@ -463,7 +493,7 @@ pub(crate) async fn start_model_build(
         // system + containers land on the canvas instantly, container coverage
         // holds by construction, and no session blocks any other.
         let minted = {
-            let mint = || -> Result<(String, Vec<(String, String, String)>), String> {
+            let mint = || -> Result<Minted, String> {
                 let _lock = scryer_core::lock_model(&model_ref)?;
                 let mut model = scryer_core::read_model_at(&model_ref)?;
                 let minted = scryer_core::seed::mint_initial_structure(
@@ -522,7 +552,7 @@ pub(crate) async fn start_model_build(
         }
         // Longest-processing-time-first reduces the tail when containers vary
         // substantially in size.
-        jobs.sort_by(|a, b| b.work_units.cmp(&a.work_units));
+        jobs.sort_by_key(|job| std::cmp::Reverse(job.work_units));
         let wave2_pool =
             session_pool_size(&jobs.iter().map(|job| job.payload_bytes).collect::<Vec<_>>());
         eprintln!(
@@ -594,14 +624,19 @@ pub(crate) async fn start_model_build(
                     );
                 }
                 let s_start = std::time::Instant::now();
-                let prompt = scryer_acp::prompt::enrich_system_prompt(
-                    &cwd,
-                    &system_id,
-                    &structure_json,
-                );
+                let prompt =
+                    scryer_acp::prompt::enrich_system_prompt(&cwd, &system_id, &structure_json);
                 let outcome = run_wave(
-                    &runtime, &agent_binary, &mode, &cwd, &model_name, &effort, &mcp_binary,
-                    prompt, "Model build: system and containers".to_string(), &app,
+                    &runtime,
+                    &agent_binary,
+                    &mode,
+                    &cwd,
+                    &model_name,
+                    &effort,
+                    &mcp_binary,
+                    prompt,
+                    "Model build: system and containers".to_string(),
+                    &app,
                 )
                 .await;
                 {
@@ -694,8 +729,16 @@ pub(crate) async fn start_model_build(
                         &evidence_json,
                     );
                     run_wave(
-                        &runtime, &agent_binary, &mode, &cwd, &model_name, &effort, &mcp_binary,
-                        w2, format!("Model build: {name}"), &app,
+                        &runtime,
+                        &agent_binary,
+                        &mode,
+                        &cwd,
+                        &model_name,
+                        &effort,
+                        &mcp_binary,
+                        w2,
+                        format!("Model build: {name}"),
+                        &app,
                     )
                     .await
                 };
@@ -804,7 +847,10 @@ pub(crate) async fn start_model_build(
             w.contains("disconnected") && (w.contains("(symbol)") || w.contains("(component)"))
         };
         let all_warnings = validate_completed(&completed_model);
-        let deferred = all_warnings.iter().filter(|w| is_sparse_code_disconnect(w)).count();
+        let deferred = all_warnings
+            .iter()
+            .filter(|w| is_sparse_code_disconnect(w))
+            .count();
         if deferred > 0 {
             emit_msg(format!(
                 "ℹ {deferred} code-level node(s) have no modeled relationship — left as-is (not a build error)."
@@ -819,7 +865,10 @@ pub(crate) async fn start_model_build(
                 "▶ Repairing {} model validation issue(s)…",
                 warnings.len()
             ));
-            orch_log(&cwd, &format!("validation warnings: {}", warnings.join(" | ")));
+            orch_log(
+                &cwd,
+                &format!("validation warnings: {}", warnings.join(" | ")),
+            );
             let warnings_json =
                 serde_json::to_string(&warnings).unwrap_or_else(|_| "[]".to_string());
             let repair_prompt = scryer_acp::prompt::repair_model_prompt(&cwd, &warnings_json);
@@ -895,16 +944,20 @@ pub(crate) async fn start_model_build(
         // every anchor so the check is content-addressed, not git-dependent.
         let _ = scryer_core::write_sync_state(
             &model_ref,
-            &scryer_core::drift::SyncState::anchored_now(
-                scryer_core::drift::head_commit(std::path::Path::new(&cwd)),
-            ),
+            &scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(
+                std::path::Path::new(&cwd),
+            )),
         );
         if let Err(e) = scryer_extract::anchors::write_baseline(&model_ref) {
             emit_msg(format!("⚠ Could not fingerprint anchors: {e}"));
         }
 
         let elapsed = build_start.elapsed().as_secs_f64();
-        let line = format!("complete: {:.1}s total, {}", elapsed, fmt_usage(&total_usage));
+        let line = format!(
+            "complete: {:.1}s total, {}",
+            elapsed,
+            fmt_usage(&total_usage)
+        );
         eprintln!("[build] {line}");
         orch_log(&cwd, &line);
 
@@ -986,9 +1039,9 @@ pub(crate) async fn start_drift_check(
         let write_anchor = || {
             let _ = scryer_core::write_sync_state(
                 &model_ref,
-                &scryer_core::drift::SyncState::anchored_now(
-                scryer_core::drift::head_commit(std::path::Path::new(&cwd)),
-            ),
+                &scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(
+                    std::path::Path::new(&cwd),
+                )),
             );
             let _ = scryer_extract::anchors::write_baseline(&model_ref);
         };
@@ -1054,9 +1107,8 @@ pub(crate) async fn start_drift_check(
             });
         }
         // Longest-processing-time-first reduces the tail when scopes vary in size.
-        jobs.sort_by(|a, b| b.payload_bytes.cmp(&a.payload_bytes));
-        let pool =
-            session_pool_size(&jobs.iter().map(|job| job.payload_bytes).collect::<Vec<_>>());
+        jobs.sort_by_key(|job| std::cmp::Reverse(job.payload_bytes));
+        let pool = session_pool_size(&jobs.iter().map(|job| job.payload_bytes).collect::<Vec<_>>());
         eprintln!(
             "[drift] {} scope(s), adaptive pool {}, {} payload bytes",
             jobs.len(),
@@ -1127,8 +1179,16 @@ pub(crate) async fn start_drift_check(
                 );
                 let d_start = std::time::Instant::now();
                 let outcome = run_wave(
-                    &runtime, &agent_binary, &mode, &cwd, &model_name, &effort, &mcp_binary,
-                    prompt, format!("Drift check: {node_name}"), &app,
+                    &runtime,
+                    &agent_binary,
+                    &mode,
+                    &cwd,
+                    &model_name,
+                    &effort,
+                    &mcp_binary,
+                    prompt,
+                    format!("Drift check: {node_name}"),
+                    &app,
                 )
                 .await;
                 {
@@ -1178,7 +1238,10 @@ pub(crate) async fn start_drift_check(
         // scope (findings already flagged by the scopes that completed persist).
         let failed_scopes = failures.lock().await.clone();
         if !failed_scopes.is_empty() {
-            orch_log(&cwd, &format!("✗ drift check failed: {}", failed_scopes.join(" | ")));
+            orch_log(
+                &cwd,
+                &format!("✗ drift check failed: {}", failed_scopes.join(" | ")),
+            );
             let _ = app.emit("build-active-node", Vec::<String>::new());
             let _ = app.emit(
                 "agent-event",
@@ -1188,7 +1251,10 @@ pub(crate) async fn start_drift_check(
             );
             return;
         }
-        let line = format!("drift complete: {:.1}s total", drift_start.elapsed().as_secs_f64());
+        let line = format!(
+            "drift complete: {:.1}s total",
+            drift_start.elapsed().as_secs_f64()
+        );
         eprintln!("[drift] {line}");
         orch_log(&cwd, &line);
 

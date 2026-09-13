@@ -35,10 +35,7 @@ struct FoldedVagrant {
 /// schedules its deletion). The chain must commit before the responsibility, per
 /// `commit_element`'s host-must-exist rule — a freshly minted symbol/component
 /// has no committed home until its rungs are folded first.
-fn fold_vagrant(
-    model_ref: &scryer_core::ModelRef,
-    resp_id: &str,
-) -> Result<FoldedVagrant, String> {
+fn fold_vagrant(model_ref: &scryer_core::ModelRef, resp_id: &str) -> Result<FoldedVagrant, String> {
     use scryer_core::diff::ElementKind;
 
     // Clear the vagrant flag in the plan and capture host + statement, so the
@@ -89,7 +86,12 @@ fn fold_vagrant(
     }
     scryer_core::commit_element(model_ref, ElementKind::Responsibility, None, resp_id)?;
 
-    Ok(FoldedVagrant { host_id, statement, source, chain })
+    Ok(FoldedVagrant {
+        host_id,
+        statement,
+        source,
+        chain,
+    })
 }
 
 /// Whether `resp_id` is a POST-SIGN-OFF amendment/addition awaiting a verdict
@@ -116,7 +118,9 @@ fn amendment_of(planned: &scryer_core::ScryModel, resp_id: &str) -> Option<(Stri
 fn restamp_signed_entry(planned: &mut scryer_core::ScryModel, resp_id: &str) {
     use scryer_core::diff::ElementKind;
     let key = scryer_core::changes::element_key(ElementKind::Responsibility, None, resp_id);
-    let Some(cid) = planned.change_map.get(&key).cloned() else { return };
+    let Some(cid) = planned.change_map.get(&key).cloned() else {
+        return;
+    };
     let entry = scryer_core::changes::entry_hash(planned, &key);
     if let Some(snap) = planned
         .changes
@@ -148,7 +152,10 @@ fn log_amendment(
     if let Some(a) = approved {
         rows.push(scryer_core::history::EventRow::new("−", a.to_string()));
     }
-    rows.push(scryer_core::history::EventRow::new("+", amended.to_string()));
+    rows.push(scryer_core::history::EventRow::new(
+        "+",
+        amended.to_string(),
+    ));
     let _ = scryer_core::history::append_event(
         model_ref,
         &scryer_core::history::HistoryEvent::new(
@@ -178,7 +185,12 @@ fn adopt_amendment(
             .nodes
             .iter_mut()
             .flat_map(|n| n.responsibilities.iter_mut())
-            .chain(planned.groups.iter_mut().flat_map(|g| g.responsibilities.iter_mut()))
+            .chain(
+                planned
+                    .groups
+                    .iter_mut()
+                    .flat_map(|g| g.responsibilities.iter_mut()),
+            )
             .find(|r| r.id == resp_id)
             .ok_or_else(|| format!("Responsibility '{resp_id}' not found in the plan"))?;
         r.vagrant = None;
@@ -187,7 +199,13 @@ fn adopt_amendment(
     };
     restamp_signed_entry(&mut planned, resp_id);
     scryer_core::write_planned_at(model_ref, &planned)?;
-    log_amendment(model_ref, host_id, "adopted amendment", approved.as_deref(), &amended);
+    log_amendment(
+        model_ref,
+        host_id,
+        "adopted amendment",
+        approved.as_deref(),
+        &amended,
+    );
 
     // Built AND verified → fold now; otherwise it waits for the agent's fold.
     let committed = scryer_core::read_model_at(model_ref).unwrap_or_default();
@@ -230,7 +248,8 @@ pub(crate) fn adopt_responsibility(cwd: String, resp_id: String) -> Result<(), S
     // to change the intent. Adopting it makes the text the intent; it folds
     // only if built and verified (see `adopt_amendment`).
     if let Some((host, _)) = amendment_of(&scryer_core::read_planned_at(&model_ref)?, &resp_id) {
-        let _ = scryer_core::refusals::update_refusals(&model_ref, &[], &[resp_id.clone()]);
+        let _ =
+            scryer_core::refusals::update_refusals(&model_ref, &[], std::slice::from_ref(&resp_id));
         adopt_amendment(&model_ref, &resp_id, &host)?;
         return Ok(());
     }
@@ -277,7 +296,8 @@ pub(crate) fn reject_responsibility(cwd: String, resp_id: String) -> Result<(), 
     // removes the claim from the plan.
     let mut planned = scryer_core::read_planned_seeded_at(&model_ref)?;
     if let Some((host, origin)) = amendment_of(&planned, &resp_id) {
-        let _ = scryer_core::refusals::update_refusals(&model_ref, &[], &[resp_id.clone()]);
+        let _ =
+            scryer_core::refusals::update_refusals(&model_ref, &[], std::slice::from_ref(&resp_id));
         let mut amended = String::new();
         let mut approved: Option<String> = None;
         let mut keep = false;
@@ -382,7 +402,9 @@ fn fold_vagrant_property(
         .map(|p| p.vagrant = None)
         .is_some();
     if !cleared {
-        return Err(format!("Property '{label}' on node '{node_id}' not found in the plan"));
+        return Err(format!(
+            "Property '{label}' on node '{node_id}' not found in the plan"
+        ));
     }
     // The property may have landed on a freshly minted data symbol; fold that
     // chain first so the host exists in committed before the property folds onto it.
@@ -399,7 +421,12 @@ fn fold_vagrant_property(
     }
     scryer_core::commit_element(model_ref, ElementKind::Property, Some(node_id), label)?;
 
-    Ok(FoldedVagrant { host_id: node_id.to_string(), statement: label.to_string(), source: None, chain })
+    Ok(FoldedVagrant {
+        host_id: node_id.to_string(),
+        statement: label.to_string(),
+        source: None,
+        chain,
+    })
 }
 
 /// Adopt a code-discovered (vagrant) property — the property-level twin of
@@ -423,7 +450,10 @@ pub(crate) fn adopt_property(cwd: String, node_id: String, label: String) -> Res
             &folded.host_id,
             "took code",
         )
-        .with_rows(vec![scryer_core::history::EventRow::new("+", folded.statement)]),
+        .with_rows(vec![scryer_core::history::EventRow::new(
+            "+",
+            folded.statement,
+        )]),
     );
     Ok(())
 }
@@ -460,7 +490,10 @@ pub(crate) fn reject_property(cwd: String, node_id: String, label: String) -> Re
             &folded.host_id,
             "rejected — marked for deletion",
         )
-        .with_rows(vec![scryer_core::history::EventRow::new("−", folded.statement)]),
+        .with_rows(vec![scryer_core::history::EventRow::new(
+            "−",
+            folded.statement,
+        )]),
     );
     Ok(())
 }
@@ -511,10 +544,14 @@ fn prune_nodes(model: &mut scryer_core::ScryModel, ids: &std::collections::HashS
         .filter(|n| ids.contains(&n.id))
         .flat_map(|n| n.responsibilities.iter().map(|r| r.id.clone()))
         .collect();
-    model.source_map.retain(|k, _| !resp_ids.contains(k) && !ids.contains(k));
+    model
+        .source_map
+        .retain(|k, _| !resp_ids.contains(k) && !ids.contains(k));
     model.boundaries.retain(|k, _| !ids.contains(k));
     model.nodes.retain(|n| !ids.contains(&n.id));
-    model.links.retain(|l| !ids.contains(&l.src) && !ids.contains(&l.dst));
+    model
+        .links
+        .retain(|l| !ids.contains(&l.src) && !ids.contains(&l.dst));
     for g in &mut model.groups {
         g.member_ids.retain(|m| !ids.contains(m));
     }
@@ -566,13 +603,21 @@ pub(crate) fn drop_responsibility(cwd: String, resp_id: String) -> Result<(), St
 
     let from_c = take_responsibility(&mut committed, &resp_id);
     let from_p = take_responsibility(&mut planned, &resp_id);
-    let (host_id, statement) =
-        from_c.or(from_p).ok_or_else(|| format!("Responsibility '{resp_id}' not found"))?;
+    let (host_id, statement) = from_c
+        .or(from_p)
+        .ok_or_else(|| format!("Responsibility '{resp_id}' not found"))?;
 
     scryer_core::write_model_at(&model_ref, &committed)?;
     scryer_core::write_planned_at(&model_ref, &planned)?;
     let _ = scryer_core::save_baseline_at(&model_ref, &committed);
-    log_take_model(&model_ref, &host_id, "dropped — removed from code", "−", statement, source);
+    log_take_model(
+        &model_ref,
+        &host_id,
+        "dropped — removed from code",
+        "−",
+        statement,
+        source,
+    );
     Ok(())
 }
 
@@ -650,7 +695,14 @@ pub(crate) fn reimplement_responsibility(cwd: String, resp_id: String) -> Result
     scryer_core::write_model_at(&model_ref, &committed)?;
     scryer_core::write_planned_at(&model_ref, &planned)?;
     let _ = scryer_core::save_baseline_at(&model_ref, &committed);
-    log_take_model(&model_ref, &host_id, "re-implement — code regressed", "+", statement, source);
+    log_take_model(
+        &model_ref,
+        &host_id,
+        "re-implement — code regressed",
+        "+",
+        statement,
+        source,
+    );
     Ok(())
 }
 
@@ -688,7 +740,14 @@ pub(crate) fn drop_property(cwd: String, node_id: String, label: String) -> Resu
     scryer_core::write_model_at(&model_ref, &committed)?;
     scryer_core::write_planned_at(&model_ref, &planned)?;
     let _ = scryer_core::save_baseline_at(&model_ref, &committed);
-    log_take_model(&model_ref, &node_id, "dropped — removed from code", "−", removed.label, None);
+    log_take_model(
+        &model_ref,
+        &node_id,
+        "dropped — removed from code",
+        "−",
+        removed.label,
+        None,
+    );
     Ok(())
 }
 
@@ -697,7 +756,11 @@ pub(crate) fn drop_property(cwd: String, node_id: String, label: String) -> Resu
 /// the diff reads it as an `Added` to-do. Property-level twin of
 /// [`reimplement_responsibility`].
 #[tauri::command]
-pub(crate) fn reimplement_property(cwd: String, node_id: String, label: String) -> Result<(), String> {
+pub(crate) fn reimplement_property(
+    cwd: String,
+    node_id: String,
+    label: String,
+) -> Result<(), String> {
     let model_ref = scryer_core::ModelRef::ProjectLocal(std::path::PathBuf::from(&cwd));
     // Serialize the whole read-modify-write against the agent's MCP writer.
     let _lock = scryer_core::lock_model(&model_ref)?;
@@ -731,7 +794,14 @@ pub(crate) fn reimplement_property(cwd: String, node_id: String, label: String) 
     scryer_core::write_model_at(&model_ref, &committed)?;
     scryer_core::write_planned_at(&model_ref, &planned)?;
     let _ = scryer_core::save_baseline_at(&model_ref, &committed);
-    log_take_model(&model_ref, &node_id, "re-implement — code regressed", "+", label, None);
+    log_take_model(
+        &model_ref,
+        &node_id,
+        "re-implement — code regressed",
+        "+",
+        label,
+        None,
+    );
     Ok(())
 }
 
@@ -747,7 +817,12 @@ fn reword_in_model(
         .nodes
         .iter_mut()
         .map(|n| (n.id.clone(), &mut n.responsibilities))
-        .chain(model.groups.iter_mut().map(|g| (g.id.clone(), &mut g.responsibilities)))
+        .chain(
+            model
+                .groups
+                .iter_mut()
+                .map(|g| (g.id.clone(), &mut g.responsibilities)),
+        )
         .find_map(|(hid, resps)| resps.iter_mut().find(|r| r.id == resp_id).map(|r| (hid, r)));
     let (host_id, r) = host?;
     r.statement = statement.to_string();
@@ -765,7 +840,11 @@ fn reword_in_model(
 /// reality, not a build to-do. `statement` is the accepted text (drift's proposal,
 /// possibly edited by the user).
 #[tauri::command]
-pub(crate) fn reword_responsibility(cwd: String, resp_id: String, statement: String) -> Result<(), String> {
+pub(crate) fn reword_responsibility(
+    cwd: String,
+    resp_id: String,
+    statement: String,
+) -> Result<(), String> {
     let statement = statement.trim().to_string();
     if statement.is_empty() {
         return Err("Reworded statement is empty".into());
@@ -780,7 +859,8 @@ pub(crate) fn reword_responsibility(cwd: String, resp_id: String, statement: Str
     // approved and the amended statement in the PLAN only — it is intent,
     // still pending, and folds through the agent's gate. Committed is untouched.
     if let Some((host, origin)) = amendment_of(&planned, &resp_id) {
-        let _ = scryer_core::refusals::update_refusals(&model_ref, &[], &[resp_id.clone()]);
+        let _ =
+            scryer_core::refusals::update_refusals(&model_ref, &[], std::slice::from_ref(&resp_id));
         let now = scryer_core::drift::now_secs();
         let mut approved: Option<String> = None;
         for resps in planned
@@ -800,7 +880,13 @@ pub(crate) fn reword_responsibility(cwd: String, resp_id: String, statement: Str
         }
         restamp_signed_entry(&mut planned, &resp_id);
         scryer_core::write_planned_at(&model_ref, &planned)?;
-        log_amendment(&model_ref, &host, &format!("reworded {origin}"), approved.as_deref(), &statement);
+        log_amendment(
+            &model_ref,
+            &host,
+            &format!("reworded {origin}"),
+            approved.as_deref(),
+            &statement,
+        );
         return Ok(());
     }
 
@@ -814,12 +900,21 @@ pub(crate) fn reword_responsibility(cwd: String, resp_id: String, statement: Str
     let now = scryer_core::drift::now_secs();
     let in_c = reword_in_model(&mut committed, &resp_id, &statement, now);
     let in_p = reword_in_model(&mut planned, &resp_id, &statement, now);
-    let host_id = in_c.or(in_p).ok_or_else(|| format!("Responsibility '{resp_id}' not found"))?;
+    let host_id = in_c
+        .or(in_p)
+        .ok_or_else(|| format!("Responsibility '{resp_id}' not found"))?;
 
     scryer_core::write_model_at(&model_ref, &committed)?;
     scryer_core::write_planned_at(&model_ref, &planned)?;
     let _ = scryer_core::save_baseline_at(&model_ref, &committed);
-    log_take_model(&model_ref, &host_id, "reworded — code diverged", "~", statement, source);
+    log_take_model(
+        &model_ref,
+        &host_id,
+        "reworded — code diverged",
+        "~",
+        statement,
+        source,
+    );
     Ok(())
 }
 
@@ -978,7 +1073,9 @@ mod verdict_tests {
     /// (anchored). Both layers identical to start.
     fn base_model() -> ScryModel {
         let mut m = ScryModel::new();
-        m.nodes.push(node(serde_json::json!({ "id": "node-1", "kind": "system", "name": "Acme" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "node-1", "kind": "system", "name": "Acme" }),
+        ));
         m.nodes.push(node(
             serde_json::json!({ "id": "node-2", "kind": "container", "name": "API", "parentId": "node-1" }),
         ));
@@ -991,7 +1088,10 @@ mod verdict_tests {
         m
     }
 
-    fn project(committed: &ScryModel, planned: &ScryModel) -> (tempfile::TempDir, ModelRef, String) {
+    fn project(
+        committed: &ScryModel,
+        planned: &ScryModel,
+    ) -> (tempfile::TempDir, ModelRef, String) {
         let dir = tempfile::tempdir().unwrap();
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
         scryer_core::write_model_at(&r, committed).unwrap();
@@ -1001,7 +1101,10 @@ mod verdict_tests {
     }
 
     fn find_resp<'a>(m: &'a ScryModel, id: &str) -> Option<&'a scryer_core::Responsibility> {
-        m.nodes.iter().flat_map(|n| &n.responsibilities).find(|r| r.id == id)
+        m.nodes
+            .iter()
+            .flat_map(|n| &n.responsibilities)
+            .find(|r| r.id == id)
     }
 
     /// A plan with a code-discovered claim on a freshly MINTED symbol: adopting
@@ -1021,7 +1124,11 @@ mod verdict_tests {
         super::adopt_responsibility(cwd, "resp-9".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        let host = committed.nodes.iter().find(|n| n.id == "node-9").expect("chain folded");
+        let host = committed
+            .nodes
+            .iter()
+            .find(|n| n.id == "node-9")
+            .expect("chain folded");
         assert_eq!(host.vagrant, None, "minted rung folds clean");
         let r9 = find_resp(&committed, "resp-9").expect("claim folded");
         assert_eq!(r9.vagrant, None, "adopted claim folds clean");
@@ -1045,10 +1152,19 @@ mod verdict_tests {
         super::reject_responsibility(cwd, "resp-9".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert!(find_resp(&committed, "resp-9").is_some(), "committed describes it");
+        assert!(
+            find_resp(&committed, "resp-9").is_some(),
+            "committed describes it"
+        );
         let planned = scryer_core::read_planned_at(&r).unwrap();
-        assert!(find_resp(&planned, "resp-9").is_none(), "plan schedules the deletion");
-        assert!(!planned.nodes.iter().any(|n| n.id == "node-9"), "minted chain leaves the plan");
+        assert!(
+            find_resp(&planned, "resp-9").is_none(),
+            "plan schedules the deletion"
+        );
+        assert!(
+            !planned.nodes.iter().any(|n| n.id == "node-9"),
+            "minted chain leaves the plan"
+        );
     }
 
     /// Adopting a code-discovered field folds it (vagrant cleared) into
@@ -1063,11 +1179,20 @@ mod verdict_tests {
         super::adopt_property(cwd, "node-3".into(), "phone".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        let p = committed.nodes[2].properties.iter().find(|p| p.label == "phone").unwrap();
+        let p = committed.nodes[2]
+            .properties
+            .iter()
+            .find(|p| p.label == "phone")
+            .unwrap();
         assert_eq!(p.vagrant, None);
         let planned = scryer_core::read_planned_at(&r).unwrap();
         assert_eq!(
-            planned.nodes[2].properties.iter().find(|p| p.label == "phone").unwrap().vagrant,
+            planned.nodes[2]
+                .properties
+                .iter()
+                .find(|p| p.label == "phone")
+                .unwrap()
+                .vagrant,
             None
         );
     }
@@ -1084,9 +1209,15 @@ mod verdict_tests {
         super::reject_property(cwd, "node-3".into(), "phone".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert!(committed.nodes[2].properties.iter().any(|p| p.label == "phone"));
+        assert!(committed.nodes[2]
+            .properties
+            .iter()
+            .any(|p| p.label == "phone"));
         let planned = scryer_core::read_planned_at(&r).unwrap();
-        assert!(!planned.nodes[2].properties.iter().any(|p| p.label == "phone"));
+        assert!(!planned.nodes[2]
+            .properties
+            .iter()
+            .any(|p| p.label == "phone"));
     }
 
     /// Dropping a stale claim removes it from BOTH layers and GCs its anchor.
@@ -1119,11 +1250,17 @@ mod verdict_tests {
         super::reimplement_responsibility(cwd, "resp-1".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert!(find_resp(&committed, "resp-1").is_none(), "committed only holds satisfied claims");
+        assert!(
+            find_resp(&committed, "resp-1").is_none(),
+            "committed only holds satisfied claims"
+        );
         let planned = scryer_core::read_planned_at(&r).unwrap();
         let todo = find_resp(&planned, "resp-1").expect("the plan keeps the to-do");
         assert_eq!(todo.stale, None, "clean to-do, not drift");
-        assert!(planned.source_map.contains_key("resp-1"), "to-do stays anchored");
+        assert!(
+            planned.source_map.contains_key("resp-1"),
+            "to-do stays anchored"
+        );
     }
 
     /// Dropping a stale field removes it from both layers entirely.
@@ -1138,8 +1275,14 @@ mod verdict_tests {
 
         let committed = scryer_core::read_model_at(&r).unwrap();
         let planned = scryer_core::read_planned_at(&r).unwrap();
-        assert!(!committed.nodes[2].properties.iter().any(|p| p.label == "phone"));
-        assert!(!planned.nodes[2].properties.iter().any(|p| p.label == "phone"));
+        assert!(!committed.nodes[2]
+            .properties
+            .iter()
+            .any(|p| p.label == "phone"));
+        assert!(!planned.nodes[2]
+            .properties
+            .iter()
+            .any(|p| p.label == "phone"));
     }
 
     /// Re-implementing a stale field removes it from committed while the plan
@@ -1154,9 +1297,16 @@ mod verdict_tests {
         super::reimplement_property(cwd, "node-3".into(), "phone".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert!(!committed.nodes[2].properties.iter().any(|p| p.label == "phone"));
+        assert!(!committed.nodes[2]
+            .properties
+            .iter()
+            .any(|p| p.label == "phone"));
         let planned = scryer_core::read_planned_at(&r).unwrap();
-        let p = planned.nodes[2].properties.iter().find(|p| p.label == "phone").unwrap();
+        let p = planned.nodes[2]
+            .properties
+            .iter()
+            .find(|p| p.label == "phone")
+            .unwrap();
         assert_eq!(p.stale, None);
     }
 
@@ -1172,7 +1322,10 @@ mod verdict_tests {
 
         super::reword_responsibility(cwd, "resp-1".into(), "does alpha, revised".into()).unwrap();
 
-        for m in [scryer_core::read_model_at(&r).unwrap(), scryer_core::read_planned_at(&r).unwrap()] {
+        for m in [
+            scryer_core::read_model_at(&r).unwrap(),
+            scryer_core::read_planned_at(&r).unwrap(),
+        ] {
             let r1 = find_resp(&m, "resp-1").unwrap();
             assert_eq!(r1.statement, "does alpha, revised");
             assert_eq!(r1.stale, None);
@@ -1194,19 +1347,32 @@ mod verdict_tests {
             )
             .unwrap(),
         );
-        committed
-            .boundaries
-            .insert("node-2".into(), vec![serde_json::from_value(serde_json::json!({ "pattern": "src/**/*" })).unwrap()]);
+        committed.boundaries.insert(
+            "node-2".into(),
+            vec![serde_json::from_value(serde_json::json!({ "pattern": "src/**/*" })).unwrap()],
+        );
         let planned = committed.clone();
         let (_dir, r, cwd) = project(&committed, &planned);
 
         super::drop_node(cwd, "node-2".into()).unwrap();
 
-        for m in [scryer_core::read_model_at(&r).unwrap(), scryer_core::read_planned_at(&r).unwrap()] {
-            assert!(!m.nodes.iter().any(|n| n.id == "node-2" || n.id == "node-3"), "subtree gone");
-            assert!(m.nodes.iter().any(|n| n.id == "node-4"), "outsiders survive");
+        for m in [
+            scryer_core::read_model_at(&r).unwrap(),
+            scryer_core::read_planned_at(&r).unwrap(),
+        ] {
+            assert!(
+                !m.nodes.iter().any(|n| n.id == "node-2" || n.id == "node-3"),
+                "subtree gone"
+            );
+            assert!(
+                m.nodes.iter().any(|n| n.id == "node-4"),
+                "outsiders survive"
+            );
             assert!(m.links.is_empty(), "links touching the subtree go with it");
-            assert!(!m.source_map.contains_key("resp-1"), "descendant anchors GC'd");
+            assert!(
+                !m.source_map.contains_key("resp-1"),
+                "descendant anchors GC'd"
+            );
             assert!(!m.boundaries.contains_key("node-2"));
         }
     }
@@ -1224,11 +1390,21 @@ mod verdict_tests {
         super::reimplement_node(cwd, "node-3".into()).unwrap();
 
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert!(!committed.nodes.iter().any(|n| n.id == "node-3"), "subtree leaves committed");
+        assert!(
+            !committed.nodes.iter().any(|n| n.id == "node-3"),
+            "subtree leaves committed"
+        );
         let planned = scryer_core::read_planned_at(&r).unwrap();
-        let kept = planned.nodes.iter().find(|n| n.id == "node-3").expect("plan keeps the to-do");
+        let kept = planned
+            .nodes
+            .iter()
+            .find(|n| n.id == "node-3")
+            .expect("plan keeps the to-do");
         assert_eq!(kept.stale, None);
-        assert_eq!(kept.responsibilities[0].stale, None, "claims read as clean pending work");
+        assert_eq!(
+            kept.responsibilities[0].stale, None,
+            "claims read as clean pending work"
+        );
     }
 }
 
@@ -1266,9 +1442,9 @@ mod plan_seed_tests {
         // whose box carries a boundary glob. NO planned.scry is written.
         let node = |v: serde_json::Value| serde_json::from_value::<scryer_core::Node>(v).unwrap();
         let mut model = ScryModel::new();
-        model
-            .nodes
-            .push(node(serde_json::json!({ "id": "node-1", "kind": "system", "name": "Acme" })));
+        model.nodes.push(node(
+            serde_json::json!({ "id": "node-1", "kind": "system", "name": "Acme" }),
+        ));
         let mut cont = node(serde_json::json!({
             "id": "node-2", "kind": "container", "name": "API", "parentId": "node-1"
         }));
@@ -1283,7 +1459,10 @@ mod plan_seed_tests {
             vec![serde_json::from_value(serde_json::json!({ "pattern": "api/**/*" })).unwrap()],
         );
         scryer_core::write_model_at(&r, &model).unwrap();
-        assert!(!r.planned_path().exists(), "precondition: no draft exists yet");
+        assert!(
+            !r.planned_path().exists(),
+            "precondition: no draft exists yet"
+        );
 
         // A canvas verdict with no prior draft (reword lands in both layers).
         let cwd = dir.path().to_string_lossy().to_string();
@@ -1299,9 +1478,18 @@ mod plan_seed_tests {
             .flat_map(|n| &n.responsibilities)
             .find(|x| x.id == "resp-1")
             .unwrap();
-        assert_eq!(r1.statement, "serves the public API", "the verdict landed in the plan");
-        assert!(plan.source_map.is_empty(), "draft must not shadow committed's source_map");
-        assert!(plan.boundaries.is_empty(), "draft must not shadow committed's boundaries");
+        assert_eq!(
+            r1.statement, "serves the public API",
+            "the verdict landed in the plan"
+        );
+        assert!(
+            plan.source_map.is_empty(),
+            "draft must not shadow committed's source_map"
+        );
+        assert!(
+            plan.boundaries.is_empty(),
+            "draft must not shadow committed's boundaries"
+        );
 
         // Committed keeps its anchors — nothing was moved or lost.
         let committed = scryer_core::read_model_at(&r).unwrap();
@@ -1316,10 +1504,13 @@ mod plan_seed_tests {
         let dir = tempfile::tempdir().unwrap();
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut committed = ScryModel::new();
-        committed.nodes.push(serde_json::from_value(serde_json::json!({
-            "id": "n1", "kind": "symbol", "name": "verify",
-            "responsibilities": [resp("r1", "Verifies the old thing")]
-        })).unwrap());
+        committed.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "n1", "kind": "symbol", "name": "verify",
+                "responsibilities": [resp("r1", "Verifies the old thing")]
+            }))
+            .unwrap(),
+        );
         scryer_core::write_model_at(&r, &committed).unwrap();
         scryer_core::ensure_planned_at(&r).unwrap();
         let mut planned = scryer_core::read_planned_at(&r).unwrap();
@@ -1341,7 +1532,12 @@ mod plan_seed_tests {
         scryer_core::changes::sign_off(&mut planned, &cid, 2).unwrap();
         if with_addition {
             // The addition was not in the sign-off: drop it from the snapshot.
-            planned.changes[0].signed_off.as_mut().unwrap().entries.remove("resp:r2");
+            planned.changes[0]
+                .signed_off
+                .as_mut()
+                .unwrap()
+                .entries
+                .remove("resp:r2");
         }
         // The agent's amendment, as the fold flags it.
         let r1 = &mut planned.nodes[0].responsibilities[0];
@@ -1371,9 +1567,14 @@ mod plan_seed_tests {
         adopt_responsibility(cwd, "r1".into()).unwrap();
         let p = plan_resp(&r, "r1").unwrap();
         assert_eq!(p.statement, "Verifies something else");
-        assert!(p.vagrant.is_none() && p.vagrant_origin.is_none() && p.approved_statement.is_none());
+        assert!(
+            p.vagrant.is_none() && p.vagrant_origin.is_none() && p.approved_statement.is_none()
+        );
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert_eq!(committed.nodes[0].responsibilities[0].statement, "Verifies the old thing", "not folded");
+        assert_eq!(
+            committed.nodes[0].responsibilities[0].statement, "Verifies the old thing",
+            "not folded"
+        );
         let planned = scryer_core::read_planned_at(&r).unwrap();
         let meta = &planned.changes[0];
         assert!(
@@ -1381,7 +1582,10 @@ mod plan_seed_tests {
             "adopted text is now the signed intent"
         );
         let ev = scryer_core::history::read_history(&r);
-        let e = ev.iter().find(|e| e.driver == "adopted amendment").expect("history row");
+        let e = ev
+            .iter()
+            .find(|e| e.driver == "adopted amendment")
+            .expect("history row");
         assert_eq!(e.rows[0].text, "Verifies the approved thing");
         assert_eq!(e.rows[1].text, "Verifies something else");
     }
@@ -1396,11 +1600,19 @@ mod plan_seed_tests {
         assert_eq!(p.statement, "Verifies the approved thing");
         assert!(p.vagrant.is_none() && p.vagrant_origin.is_none());
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert_eq!(committed.nodes[0].responsibilities[0].statement, "Verifies the old thing", "still pending work");
+        assert_eq!(
+            committed.nodes[0].responsibilities[0].statement, "Verifies the old thing",
+            "still pending work"
+        );
 
         reject_responsibility(cwd, "r2".into()).unwrap();
-        assert!(plan_resp(&r, "r2").is_none(), "nothing was approved, so nothing to restore");
-        assert!(scryer_core::history::read_history(&r).iter().any(|e| e.driver == "rejected addition"));
+        assert!(
+            plan_resp(&r, "r2").is_none(),
+            "nothing was approved, so nothing to restore"
+        );
+        assert!(scryer_core::history::read_history(&r)
+            .iter()
+            .any(|e| e.driver == "rejected addition"));
     }
 
     /// Rewording an amendment writes the developer's own text into the plan
@@ -1411,10 +1623,18 @@ mod plan_seed_tests {
         reword_responsibility(cwd, "r1".into(), "Verifies what the dev wants".into()).unwrap();
         let p = plan_resp(&r, "r1").unwrap();
         assert_eq!(p.statement, "Verifies what the dev wants");
-        assert!(p.vagrant.is_none() && p.vagrant_origin.is_none() && p.approved_statement.is_none());
+        assert!(
+            p.vagrant.is_none() && p.vagrant_origin.is_none() && p.approved_statement.is_none()
+        );
         let committed = scryer_core::read_model_at(&r).unwrap();
-        assert_eq!(committed.nodes[0].responsibilities[0].statement, "Verifies the old thing");
+        assert_eq!(
+            committed.nodes[0].responsibilities[0].statement,
+            "Verifies the old thing"
+        );
         let planned = scryer_core::read_planned_at(&r).unwrap();
-        assert!(scryer_core::changes::classify_against_signoff(&planned, &planned.changes[0]).is_empty());
+        assert!(
+            scryer_core::changes::classify_against_signoff(&planned, &planned.changes[0])
+                .is_empty()
+        );
     }
 }

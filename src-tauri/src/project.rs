@@ -47,8 +47,8 @@ pub(crate) fn watch_project(
             .is_some_and(|s| s.project() == project_path.as_path());
         if !already {
             *hook = None; // drop the old endpoint before starting the new one
-            // Touches stream to the canvas as "hook-touch" events — the live
-            // "a session is working here" signal.
+                          // Touches stream to the canvas as "hook-touch" events — the live
+                          // "a session is working here" signal.
             let touch_handle = app.clone();
             let on_touch = move |t: &hooks::Touch| {
                 let _ = touch_handle.emit("hook-touch", t);
@@ -78,42 +78,40 @@ pub(crate) fn watch_project(
     // event-driven design is what guarantees no pre-existing (older-code)
     // report is ever swept in.
     let report_dirs = crate::test_reports::report_dirs(project_path);
-    let debounce =
-        crate::test_reports::ReportDebounce::new(std::time::Duration::from_millis(800));
+    let debounce = crate::test_reports::ReportDebounce::new(std::time::Duration::from_millis(800));
     let project_root = project_path.clone();
-    let mut watcher =
-        recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            let Ok(event) = res else { return };
-            if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-                return;
+    let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        let Ok(event) = res else { return };
+        if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+            return;
+        }
+        for path in &event.paths {
+            // The test-status cache lives beside the model files; an agent
+            // ingesting a report mid-session must light the verdict badges
+            // without waiting for the session to end.
+            if path.file_name().is_some_and(|n| n == ".test-results.json") {
+                let _ = handle.emit("test-results-changed", ref_string.clone());
+                continue;
             }
-            for path in &event.paths {
-                // The test-status cache lives beside the model files; an agent
-                // ingesting a report mid-session must light the verdict badges
-                // without waiting for the session to end.
-                if path.file_name().is_some_and(|n| n == ".test-results.json") {
-                    let _ = handle.emit("test-results-changed", ref_string.clone());
-                    continue;
-                }
-                if path.extension().is_some_and(|e| e == "xml")
-                    && report_dirs.iter().any(|d| path.starts_with(d))
-                {
-                    debounce.schedule(project_root.clone(), path.clone());
-                    continue;
-                }
-                if path.extension().map_or(true, |e| e != "scry") {
-                    continue;
-                }
-                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                if stem.ends_with(".baseline") || stem.starts_with(".tmp") {
-                    continue;
-                }
-                let _ = handle.emit("model-changed", ref_string.clone());
+            if path.extension().is_some_and(|e| e == "xml")
+                && report_dirs.iter().any(|d| path.starts_with(d))
+            {
+                debounce.schedule(project_root.clone(), path.clone());
+                continue;
             }
-        })
-        .map_err(|e| e.to_string())?;
+            if path.extension().is_none_or(|e| e != "scry") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if stem.ends_with(".baseline") || stem.starts_with(".tmp") {
+                continue;
+            }
+            let _ = handle.emit("model-changed", ref_string.clone());
+        }
+    })
+    .map_err(|e| e.to_string())?;
 
     watcher
         .watch(&target_dir, RecursiveMode::NonRecursive)
@@ -280,7 +278,6 @@ mod tests {
         (dir, r, ref_str)
     }
 
-
     /// resp-874gz9 — a sign-off from the CANVAS leaves the same durable trace
     /// the service's does. The desktop names no actor, so the event is
     /// unattributed; what it records is that the approval happened, when, and
@@ -306,7 +303,11 @@ mod tests {
             .into_iter()
             .filter(|e| e.driver == "signed off")
             .collect();
-        assert_eq!(approvals.len(), 1, "the approval is on the timeline exactly once");
+        assert_eq!(
+            approvals.len(),
+            1,
+            "the approval is on the timeline exactly once"
+        );
         assert_eq!(approvals[0].change_id.as_deref(), Some(cid.as_str()));
         assert_eq!(approvals[0].rows[0].text, "the rationale that outlives it");
         assert!(
@@ -323,8 +324,7 @@ mod tests {
         let (_dir, r, ref_str) = committed_project();
         // A pre-seeding draft: identical content, committed's source_map shadowed.
         let committed = scryer_core::read_model_at(&r).unwrap();
-        scryer_core::write_planned_raw_at(&r, &serde_json::to_string(&committed).unwrap())
-            .unwrap();
+        scryer_core::write_planned_raw_at(&r, &serde_json::to_string(&committed).unwrap()).unwrap();
 
         let raw = super::read_planned(ref_str).unwrap();
         let plan: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -377,8 +377,7 @@ mod tests {
     #[test]
     fn a_new_project_gets_a_blank_model() {
         let dir = tempfile::tempdir().unwrap();
-        let ref_str =
-            super::create_blank_model(dir.path().to_string_lossy().to_string()).unwrap();
+        let ref_str = super::create_blank_model(dir.path().to_string_lossy().to_string()).unwrap();
         assert!(dir.path().join(".scryer/model.scry").exists());
         let r = ModelRef::parse(&ref_str).unwrap();
         assert!(scryer_core::read_model_at(&r).unwrap().nodes.is_empty());
@@ -394,12 +393,17 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         assert!(!super::is_legacy_model(project.clone()), "current schema");
 
-        std::fs::write(r.model_path(), r#"{ "version": "0.1", "nodes": [], "links": [] }"#)
-            .unwrap();
+        std::fs::write(
+            r.model_path(),
+            r#"{ "version": "0.1", "nodes": [], "links": [] }"#,
+        )
+        .unwrap();
         assert!(super::is_legacy_model(project));
 
         let empty = tempfile::tempdir().unwrap();
-        assert!(!super::is_legacy_model(empty.path().to_string_lossy().to_string()));
+        assert!(!super::is_legacy_model(
+            empty.path().to_string_lossy().to_string()
+        ));
     }
 
     /// Sign-off from the canvas snapshots the change; a later canvas save
@@ -411,14 +415,19 @@ mod tests {
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(
-            serde_json::from_value(serde_json::json!({ "id": "n1", "kind": "symbol", "name": "verify" }))
-                .unwrap(),
+            serde_json::from_value(
+                serde_json::json!({ "id": "n1", "kind": "symbol", "name": "verify" }),
+            )
+            .unwrap(),
         );
         scryer_core::write_model_at(&r, &m).unwrap();
         scryer_core::ensure_planned_at(&r).unwrap();
         let mut planned = scryer_core::read_planned_at(&r).unwrap();
         planned.nodes[0].responsibilities.push(
-            serde_json::from_value(serde_json::json!({ "id": "r1", "statement": "Verifies tokens" })).unwrap(),
+            serde_json::from_value(
+                serde_json::json!({ "id": "r1", "statement": "Verifies tokens" }),
+            )
+            .unwrap(),
         );
         let cid = scryer_core::changes::open_change(&mut planned, "verify", 1);
         scryer_core::changes::tag(&mut planned, &["resp:r1".to_string()], &cid);
@@ -436,11 +445,14 @@ mod tests {
         write_planned(ref_str.clone(), serde_json::to_string(&echo).unwrap()).unwrap();
         let planned = scryer_core::read_planned_at(&r).unwrap();
         assert!(
-            scryer_core::changes::classify_against_signoff(&planned, &planned.changes[0]).is_empty(),
+            scryer_core::changes::classify_against_signoff(&planned, &planned.changes[0])
+                .is_empty(),
             "a canvas edit is intent, never an amendment"
         );
         assert_eq!(
-            planned.changes[0].signed_off.as_ref().unwrap().entries["resp:r1"].statement.as_deref(),
+            planned.changes[0].signed_off.as_ref().unwrap().entries["resp:r1"]
+                .statement
+                .as_deref(),
             Some("Verifies tokens, the dev's way")
         );
 

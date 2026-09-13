@@ -85,7 +85,9 @@ fn prune_touches(log: &mut SessionLog, now: Instant) {
 fn fnv1a64(bytes: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
-    bytes.iter().fold(OFFSET, |h, b| (h ^ u64::from(*b)).wrapping_mul(PRIME))
+    bytes
+        .iter()
+        .fold(OFFSET, |h, b| (h ^ u64::from(*b)).wrapping_mul(PRIME))
 }
 
 /// Managed Tauri state: the endpoint for the currently open project, if any.
@@ -151,9 +153,7 @@ pub fn start(
     on_close_gate: impl Fn(&serde_json::Value) + Send + Sync + 'static,
 ) -> Result<HookServer, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let token = mint_token();
 
@@ -276,7 +276,9 @@ fn handle_request(
     let mut req_token = String::new();
     let mut content_length = 0usize;
     for line in lines {
-        let Some((name, value)) = line.split_once(':') else { continue };
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
         match name.trim().to_ascii_lowercase().as_str() {
             "x-scryer-token" => req_token = value.trim().to_string(),
             "content-length" => content_length = value.trim().parse().unwrap_or(0),
@@ -292,7 +294,11 @@ fn handle_request(
     }
 
     if req_token != token {
-        respond(&mut stream, 401, &serde_json::json!({ "error": "bad or missing x-scryer-token" }));
+        respond(
+            &mut stream,
+            401,
+            &serde_json::json!({ "error": "bad or missing x-scryer-token" }),
+        );
         return;
     }
 
@@ -314,7 +320,11 @@ fn handle_request(
         },
         ("GET", "/overlay") => {
             let Some(file) = param("file") else {
-                respond(&mut stream, 400, &serde_json::json!({ "error": "missing ?file=" }));
+                respond(
+                    &mut stream,
+                    400,
+                    &serde_json::json!({ "error": "missing ?file=" }),
+                );
                 return;
             };
             let file = relativize(project, &file);
@@ -357,12 +367,14 @@ fn handle_request(
         }
         ("POST", "/touch") => {
             let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
-                respond(&mut stream, 400, &serde_json::json!({ "error": "body must be JSON" }));
+                respond(
+                    &mut stream,
+                    400,
+                    &serde_json::json!({ "error": "body must be JSON" }),
+                );
                 return;
             };
-            let (Some(session), Some(file)) =
-                (v["session"].as_str(), v["file"].as_str())
-            else {
+            let (Some(session), Some(file)) = (v["session"].as_str(), v["file"].as_str()) else {
                 respond(
                     &mut stream,
                     400,
@@ -382,7 +394,11 @@ fn handle_request(
                 on_touch(&touch);
                 log.touches.push((now, touch));
             }
-            respond(&mut stream, 200, &serde_json::json!({ "recorded": log.touches.len() }));
+            respond(
+                &mut stream,
+                200,
+                &serde_json::json!({ "recorded": log.touches.len() }),
+            );
         }
         ("GET", "/close") => {
             let session = param("session").unwrap_or_default();
@@ -687,7 +703,10 @@ fn close_payload(project: &Path, touched: &[Touch]) -> serde_json::Value {
                 if committed_exact(key, file) {
                     continue; // fingerprint-checkable — handled in (1) or genuinely clean
                 }
-                if let Some(loc) = w.source_map[key].iter().find(|l| loc_matches(&l.pattern, file)) {
+                if let Some(loc) = w.source_map[key]
+                    .iter()
+                    .find(|l| loc_matches(&l.pattern, file))
+                {
                     let mut v = serde_json::json!({
                         "id": key,
                         "host": host_name_of(key),
@@ -755,9 +774,13 @@ mod tests {
         let (dir, _) = temp_project();
         let hits = Arc::new(AtomicUsize::new(0));
         let counter = hits.clone();
-        let server = start(dir.path(), move |_| {
-            counter.fetch_add(1, Ordering::SeqCst);
-        }, |_| {})
+        let server = start(
+            dir.path(),
+            move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+            },
+            |_| {},
+        )
         .unwrap();
         let disc: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(dir.path().join(".scryer/hook.json")).unwrap(),
@@ -805,12 +828,21 @@ mod tests {
     #[test]
     fn prune_drops_only_stale_touches() {
         let now = Instant::now();
-        let stale = now.checked_sub(TOUCH_TTL + Duration::from_secs(60)).unwrap();
+        let stale = now
+            .checked_sub(TOUCH_TTL + Duration::from_secs(60))
+            .unwrap();
         let fresh = now.checked_sub(Duration::from_secs(60)).unwrap();
-        let touch = |f: &str| Touch { session: "s".into(), file: f.into(), symbol: None };
+        let touch = |f: &str| Touch {
+            session: "s".into(),
+            file: f.into(),
+            symbol: None,
+        };
         let mut log = SessionLog {
             touches: vec![(stale, touch("old.rs")), (fresh, touch("fresh.rs"))],
-            gated: vec![(stale, "old-session".into()), (fresh, "live-session".into())],
+            gated: vec![
+                (stale, "old-session".into()),
+                (fresh, "live-session".into()),
+            ],
             overlays: Vec::new(),
         };
         prune_touches(&mut log, now);
@@ -825,7 +857,9 @@ mod tests {
     #[test]
     fn prune_drops_only_stale_overlay_marks() {
         let now = Instant::now();
-        let stale = now.checked_sub(TOUCH_TTL + Duration::from_secs(60)).unwrap();
+        let stale = now
+            .checked_sub(TOUCH_TTL + Duration::from_secs(60))
+            .unwrap();
         let fresh = now.checked_sub(Duration::from_secs(60)).unwrap();
         let mut log = SessionLog {
             touches: Vec::new(),
@@ -882,7 +916,13 @@ mod tests {
         (dir, String::new())
     }
 
-    fn request(port: u16, token: &str, method: &str, target: &str, body: &str) -> (u16, serde_json::Value) {
+    fn request(
+        port: u16,
+        token: &str,
+        method: &str,
+        target: &str,
+        body: &str,
+    ) -> (u16, serde_json::Value) {
         let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
         write!(
             s,
@@ -907,9 +947,13 @@ mod tests {
         let (dir, _) = temp_project();
         let touched_events = Arc::new(Mutex::new(0usize));
         let counter = touched_events.clone();
-        let server = start(dir.path(), move |_| {
-            *counter.lock().unwrap() += 1;
-        }, |_| {})
+        let server = start(
+            dir.path(),
+            move |_| {
+                *counter.lock().unwrap() += 1;
+            },
+            |_| {},
+        )
         .unwrap();
 
         // Discovery file advertises the live endpoint.
@@ -955,7 +999,11 @@ mod tests {
             "/touch",
             r#"{"session":"s1","file":"README.md"}"#,
         );
-        assert_eq!(*touched_events.lock().unwrap(), 2, "one notify per distinct touch");
+        assert_eq!(
+            *touched_events.lock().unwrap(),
+            2,
+            "one notify per distinct touch"
+        );
         let (_, v) = request(server.port, &token, "GET", "/close?session=s1", "");
         assert_eq!(v["touched"].as_array().unwrap().len(), 2, "deduped");
         assert!(v["needsReconcile"].as_array().unwrap().is_empty());
@@ -978,7 +1026,12 @@ mod tests {
 
     /// The overlay request for `src/auth.rs`, optionally naming a session —
     /// absolute path, percent-encoded the way the hook client sends it.
-    fn overlay_request(dir: &Path, port: u16, token: &str, session: Option<&str>) -> serde_json::Value {
+    fn overlay_request(
+        dir: &Path,
+        port: u16,
+        token: &str,
+        session: Option<&str>,
+    ) -> serde_json::Value {
         let abs = format!("{}/src/auth.rs", dir.display()).replace('/', "%2F");
         let target = match session {
             Some(s) => format!("/overlay?file={abs}&session={s}"),
@@ -1011,11 +1064,17 @@ mod tests {
 
         let again = overlay_request(dir.path(), server.port, &token, Some("s1"));
         assert!(
-            again["claims"].as_array().map_or(true, Vec::is_empty),
+            again["claims"].as_array().is_none_or(Vec::is_empty),
             "identical repeat must carry no claims: {again}"
         );
-        assert!(again.get("ownDirectives").is_none() && again.get("pending").is_none(), "{again}");
-        assert_eq!(again["file"], "src/auth.rs", "the empty overlay still names the file");
+        assert!(
+            again.get("ownDirectives").is_none() && again.get("pending").is_none(),
+            "{again}"
+        );
+        assert_eq!(
+            again["file"], "src/auth.rs",
+            "the empty overlay still names the file"
+        );
     }
 
     /// Silence means "same as last time", never "nothing here": once the model
@@ -1028,9 +1087,15 @@ mod tests {
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
 
         let first = overlay_request(dir.path(), server.port, &token, Some("s1"));
-        assert_eq!(first["claims"][0]["statement"], "serves requests", "{first}");
+        assert_eq!(
+            first["claims"][0]["statement"], "serves requests",
+            "{first}"
+        );
         let again = overlay_request(dir.path(), server.port, &token, Some("s1"));
-        assert!(again["claims"].as_array().map_or(true, Vec::is_empty), "{again}");
+        assert!(
+            again["claims"].as_array().is_none_or(Vec::is_empty),
+            "{again}"
+        );
 
         // Reword the claim in the committed model.
         let mut m = scryer_core::read_model_at(&r).unwrap();
@@ -1045,7 +1110,10 @@ mod tests {
         );
         // …and the new content is what is now deduped against.
         let again = overlay_request(dir.path(), server.port, &token, Some("s1"));
-        assert!(again["claims"].as_array().map_or(true, Vec::is_empty), "{again}");
+        assert!(
+            again["claims"].as_array().is_none_or(Vec::is_empty),
+            "{again}"
+        );
     }
 
     /// Dedupe is per session: what session A has seen says nothing about
@@ -1058,15 +1126,27 @@ mod tests {
         let a = overlay_request(dir.path(), server.port, &token, Some("a"));
         assert_eq!(a["claims"][0]["id"], "r-1", "{a}");
         let a_again = overlay_request(dir.path(), server.port, &token, Some("a"));
-        assert!(a_again["claims"].as_array().map_or(true, Vec::is_empty), "{a_again}");
+        assert!(
+            a_again["claims"].as_array().is_none_or(Vec::is_empty),
+            "{a_again}"
+        );
 
         let b = overlay_request(dir.path(), server.port, &token, Some("b"));
-        assert_eq!(b["claims"][0]["id"], "r-1", "session B is not gated by A: {b}");
+        assert_eq!(
+            b["claims"][0]["id"], "r-1",
+            "session B is not gated by A: {b}"
+        );
         let b_again = overlay_request(dir.path(), server.port, &token, Some("b"));
-        assert!(b_again["claims"].as_array().map_or(true, Vec::is_empty), "{b_again}");
+        assert!(
+            b_again["claims"].as_array().is_none_or(Vec::is_empty),
+            "{b_again}"
+        );
         // A's mark is still in place after B's requests.
         let a_third = overlay_request(dir.path(), server.port, &token, Some("a"));
-        assert!(a_third["claims"].as_array().map_or(true, Vec::is_empty), "{a_third}");
+        assert!(
+            a_third["claims"].as_array().is_none_or(Vec::is_empty),
+            "{a_third}"
+        );
     }
 
     /// No session named (Copilot sends none on some events) → today's behaviour:
@@ -1104,18 +1184,14 @@ mod tests {
         )
         .unwrap();
         let r = ModelRef::ProjectLocal(root.to_path_buf());
-        scryer_core::write_sync_state(
-            &r,
-            &scryer_core::drift::SyncState::anchored_now(None),
-        )
-        .unwrap();
+        scryer_core::write_sync_state(&r, &scryer_core::drift::SyncState::anchored_now(None))
+            .unwrap();
         scryer_extract::anchors::write_baseline(&r).unwrap();
 
         let server = start(root, |_| {}, |_| {}).unwrap();
-        let disc: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(root.join(".scryer/hook.json")).unwrap(),
-        )
-        .unwrap();
+        let disc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join(".scryer/hook.json")).unwrap())
+                .unwrap();
         let token = disc["token"].as_str().unwrap().to_string();
         let touch = r#"{"session":"s1","file":"src/auth.rs"}"#;
         request(server.port, &token, "POST", "/touch", touch);
@@ -1205,12 +1281,17 @@ mod tests {
         scryer_core::write_planned_at(&r, &plan).unwrap();
 
         let server = start(root, |_| {}, |_| {}).unwrap();
-        let disc: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(root.join(".scryer/hook.json")).unwrap(),
-        )
-        .unwrap();
+        let disc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join(".scryer/hook.json")).unwrap())
+                .unwrap();
         let token = disc["token"].as_str().unwrap().to_string();
-        request(server.port, &token, "POST", "/touch", r#"{"session":"s1","file":"src/new.rs"}"#);
+        request(
+            server.port,
+            &token,
+            "POST",
+            "/touch",
+            r#"{"session":"s1","file":"src/new.rs"}"#,
+        );
 
         let (_, v) = request(server.port, &token, "GET", "/close?session=s1", "");
         assert_eq!(v["needsReconcile"][0]["file"], "src/new.rs", "{v}");
@@ -1232,23 +1313,35 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/auth.rs"), "fn verify() { let ok = true; }\n").unwrap();
         let r = ModelRef::ProjectLocal(root.to_path_buf());
-        scryer_core::write_sync_state(&r, &scryer_core::drift::SyncState::anchored_now(None)).unwrap();
+        scryer_core::write_sync_state(&r, &scryer_core::drift::SyncState::anchored_now(None))
+            .unwrap();
         scryer_extract::anchors::write_baseline(&r).unwrap();
 
         let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
         let server = start(root, |_| {}, move |v| sink.lock().unwrap().push(v.clone())).unwrap();
         let disc: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(root.join(".scryer/hook.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(root.join(".scryer/hook.json")).unwrap())
+                .unwrap();
         let token = disc["token"].as_str().unwrap().to_string();
-        request(server.port, &token, "POST", "/touch", r#"{"session":"s9","file":"src/auth.rs"}"#);
+        request(
+            server.port,
+            &token,
+            "POST",
+            "/touch",
+            r#"{"session":"s9","file":"src/auth.rs"}"#,
+        );
 
         // Clean close: nothing owed, nothing reported.
         request(server.port, &token, "GET", "/close?session=s9", "");
         assert!(seen.lock().unwrap().is_empty());
 
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        std::fs::write(root.join("src/auth.rs"), "fn verify() { let ok = false; }\n").unwrap();
+        std::fs::write(
+            root.join("src/auth.rs"),
+            "fn verify() { let ok = false; }\n",
+        )
+        .unwrap();
         let (_, v) = request(server.port, &token, "GET", "/close?session=s9", "");
         assert!(!v["needsReconcile"].as_array().unwrap().is_empty(), "{v}");
         let seen = seen.lock().unwrap();

@@ -40,7 +40,10 @@ fn check_claude_approved(project_path: &str) -> bool {
         let path = PathBuf::from(project_path).join(".claude").join(filename);
         if let Ok(contents) = std::fs::read_to_string(&path) {
             if let Ok(root) = serde_json::from_str::<serde_json::Value>(&contents) {
-                if let Some(allow) = root.pointer("/permissions/allow").and_then(|v| v.as_array()) {
+                if let Some(allow) = root
+                    .pointer("/permissions/allow")
+                    .and_then(|v| v.as_array())
+                {
                     if allow.iter().any(|v| v.as_str() == Some(SCRYER_MCP_ALLOW)) {
                         return true;
                     }
@@ -85,7 +88,11 @@ const SCRYER_CODEX_HOOK_EVENTS: &[(&str, Option<&str>, u64)] = &[
 const SCRYER_COPILOT_HOOK_EVENTS: &[(&str, Option<&str>, u64)] = &[
     ("SessionStart", None, 10),
     ("PostToolUse", Some("view"), 10),
-    ("PostToolUse", Some("create|edit|str_replace_editor|apply_patch"), 10),
+    (
+        "PostToolUse",
+        Some("create|edit|str_replace_editor|apply_patch"),
+        10,
+    ),
     ("Stop", None, 15),
 ];
 
@@ -168,7 +175,9 @@ fn check_claude_statusline(project_path: &str) -> (bool, bool) {
 
 /// Check if Codex has scryer's session hooks installed for the project.
 fn check_codex_hooks(project_path: &str) -> bool {
-    let path = PathBuf::from(project_path).join(".codex").join("hooks.json");
+    let path = PathBuf::from(project_path)
+        .join(".codex")
+        .join("hooks.json");
     if let Ok(contents) = std::fs::read_to_string(&path) {
         if let Ok(root) = serde_json::from_str::<serde_json::Value>(&contents) {
             return root
@@ -217,10 +226,13 @@ fn check_copilot_hooks(project_path: &str) -> bool {
 
 /// Check if a project has .codex/config.toml with a scryer MCP entry.
 fn check_codex_toml(project_path: &str) -> bool {
-    let path = PathBuf::from(project_path).join(".codex").join("config.toml");
+    let path = PathBuf::from(project_path)
+        .join(".codex")
+        .join("config.toml");
     if let Ok(contents) = std::fs::read_to_string(&path) {
         if let Ok(doc) = contents.parse::<toml_edit::DocumentMut>() {
-            return doc.get("mcp_servers")
+            return doc
+                .get("mcp_servers")
                 .and_then(|t| t.as_table())
                 .map(|t| t.contains_key("scryer"))
                 .unwrap_or(false);
@@ -236,14 +248,34 @@ pub(crate) fn detect_ai_tools(project_path: Option<String>) -> serde_json::Value
     let has_copilot = which::which("copilot").is_ok();
 
     let claude_mcp = project_path.as_deref().map(check_mcp_json).unwrap_or(false);
-    let codex_mcp = project_path.as_deref().map(check_codex_toml).unwrap_or(false);
-    let copilot_mcp = project_path.as_deref().map(check_copilot_mcp).unwrap_or(false);
-    let claude_approved = project_path.as_deref().map(check_claude_approved).unwrap_or(false);
-    let claude_hooks = project_path.as_deref().map(check_claude_hooks).unwrap_or(false);
-    let codex_hooks = project_path.as_deref().map(check_codex_hooks).unwrap_or(false);
-    let copilot_hooks = project_path.as_deref().map(check_copilot_hooks).unwrap_or(false);
-    let (claude_statusline, claude_statusline_foreign) =
-        project_path.as_deref().map(check_claude_statusline).unwrap_or((false, false));
+    let codex_mcp = project_path
+        .as_deref()
+        .map(check_codex_toml)
+        .unwrap_or(false);
+    let copilot_mcp = project_path
+        .as_deref()
+        .map(check_copilot_mcp)
+        .unwrap_or(false);
+    let claude_approved = project_path
+        .as_deref()
+        .map(check_claude_approved)
+        .unwrap_or(false);
+    let claude_hooks = project_path
+        .as_deref()
+        .map(check_claude_hooks)
+        .unwrap_or(false);
+    let codex_hooks = project_path
+        .as_deref()
+        .map(check_codex_hooks)
+        .unwrap_or(false);
+    let copilot_hooks = project_path
+        .as_deref()
+        .map(check_copilot_hooks)
+        .unwrap_or(false);
+    let (claude_statusline, claude_statusline_foreign) = project_path
+        .as_deref()
+        .map(check_claude_statusline)
+        .unwrap_or((false, false));
 
     serde_json::json!({
         "claude": has_claude,
@@ -285,8 +317,7 @@ pub(crate) fn setup_mcp_integration(
 ) -> Result<String, String> {
     match action.as_str() {
         "mcp" => {
-            let binary_path = find_scryer_mcp()
-                .ok_or("scryer-mcp binary not found")?;
+            let binary_path = find_scryer_mcp().ok_or("scryer-mcp binary not found")?;
 
             let mcp_path = PathBuf::from(&project_path).join(".mcp.json");
             let mut mcp_root: serde_json::Value = if mcp_path.exists() {
@@ -305,14 +336,16 @@ pub(crate) fn setup_mcp_integration(
                 "args": [],
             });
 
-            std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_root).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                &mcp_path,
+                serde_json::to_string_pretty(&mcp_root).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
 
-            return Ok(mcp_path.to_string_lossy().to_string());
+            Ok(mcp_path.to_string_lossy().to_string())
         }
         "mcp_codex" => {
-            let binary_path = find_scryer_mcp()
-                .ok_or("scryer-mcp binary not found")?;
+            let binary_path = find_scryer_mcp().ok_or("scryer-mcp binary not found")?;
 
             let codex_dir = PathBuf::from(&project_path).join(".codex");
             let config_path = codex_dir.join("config.toml");
@@ -337,14 +370,15 @@ pub(crate) fn setup_mcp_integration(
             std::fs::create_dir_all(&codex_dir).map_err(|e| e.to_string())?;
             std::fs::write(&config_path, doc.to_string()).map_err(|e| e.to_string())?;
 
-            return Ok(config_path.to_string_lossy().to_string());
+            Ok(config_path.to_string_lossy().to_string())
         }
         "claude_approve" => {
             let claude_dir = PathBuf::from(&project_path).join(".claude");
             let settings_path = claude_dir.join("settings.local.json");
 
             let mut root: serde_json::Value = if settings_path.exists() {
-                let contents = std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
+                let contents =
+                    std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
                 serde_json::from_str(&contents).map_err(|e| {
                     format!(
                         "{} is not valid JSON ({e}); refusing to overwrite it — fix the file and retry.",
@@ -355,36 +389,46 @@ pub(crate) fn setup_mcp_integration(
                 serde_json::json!({})
             };
 
-            if !root.pointer("/permissions/allow").is_some_and(|v| v.is_array()) {
+            if !root
+                .pointer("/permissions/allow")
+                .is_some_and(|v| v.is_array())
+            {
                 root["permissions"] = serde_json::json!({ "allow": [] });
             }
 
-            let allow = root.pointer_mut("/permissions/allow").unwrap().as_array_mut().unwrap();
+            let allow = root
+                .pointer_mut("/permissions/allow")
+                .unwrap()
+                .as_array_mut()
+                .unwrap();
             if !allow.iter().any(|v| v.as_str() == Some(SCRYER_MCP_ALLOW)) {
                 allow.push(serde_json::json!(SCRYER_MCP_ALLOW));
             }
 
             std::fs::create_dir_all(&claude_dir).map_err(|e| e.to_string())?;
-            std::fs::write(&settings_path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                &settings_path,
+                serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
 
-            return Ok(settings_path.to_string_lossy().to_string());
+            Ok(settings_path.to_string_lossy().to_string())
         }
         "claude_hooks" => {
             let binary_path = find_scryer_mcp().ok_or("scryer-mcp binary not found")?;
-            return write_claude_hooks(&project_path, &binary_path);
+            write_claude_hooks(&project_path, &binary_path)
         }
         "codex_hooks" => {
             let binary_path = find_scryer_mcp().ok_or("scryer-mcp binary not found")?;
-            return write_codex_hooks(&project_path, &binary_path);
+            write_codex_hooks(&project_path, &binary_path)
         }
         "copilot_hooks" => {
             let binary_path = find_scryer_mcp().ok_or("scryer-mcp binary not found")?;
-            return write_copilot_hooks(&project_path, &binary_path);
+            write_copilot_hooks(&project_path, &binary_path)
         }
         "claude_statusline" => {
             let binary_path = find_scryer_mcp().ok_or("scryer-mcp binary not found")?;
-            return write_claude_statusline(&project_path, &binary_path);
+            write_claude_statusline(&project_path, &binary_path)
         }
         _ => Err(format!("Unknown action: {}", action)),
     }
@@ -550,7 +594,10 @@ fn write_scryer_hooks(
         if !entries.is_array() {
             *entries = serde_json::json!([]);
         }
-        entries.as_array_mut().unwrap().retain(|e| !is_scryer_hook_entry(e));
+        entries
+            .as_array_mut()
+            .unwrap()
+            .retain(|e| !is_scryer_hook_entry(e));
     }
     for (event, matcher, timeout) in events {
         let mut entry = serde_json::json!({
@@ -611,12 +658,17 @@ mod hook_install_tests {
         // Untouched sections and foreign hooks survive.
         assert_eq!(root["permissions"]["allow"][0], "mcp__scryer");
         let post = root["hooks"]["PostToolUse"].as_array().unwrap();
-        assert!(post.iter().any(|e| e["matcher"] == "Bash"), "foreign hook kept");
+        assert!(
+            post.iter().any(|e| e["matcher"] == "Bash"),
+            "foreign hook kept"
+        );
         // Exactly one scryer entry per registration, even after re-install.
         let scryer_post: Vec<_> = post.iter().filter(|e| is_scryer_hook_entry(e)).collect();
         assert_eq!(scryer_post.len(), 2, "Read overlay + Edit touch: {post:?}");
         assert!(scryer_post.iter().any(|e| e["matcher"] == "Read"));
-        assert!(scryer_post.iter().any(|e| e["matcher"] == "Edit|Write|NotebookEdit"));
+        assert!(scryer_post
+            .iter()
+            .any(|e| e["matcher"] == "Edit|Write|NotebookEdit"));
         assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
         assert_eq!(root["hooks"]["Stop"].as_array().unwrap().len(), 1);
     }
@@ -735,14 +787,20 @@ mod hook_install_tests {
         write_codex_hooks(&project, "/opt/scryer/scryer-mcp").unwrap();
         assert!(check_codex_hooks(&project));
 
-        let root: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(codex_dir.join("hooks.json")).unwrap(),
-        )
-        .unwrap();
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(codex_dir.join("hooks.json")).unwrap())
+                .unwrap();
         let pre = root["hooks"]["PreToolUse"].as_array().unwrap();
-        assert!(pre.iter().any(|e| e["matcher"] == "Bash"), "foreign hook kept");
+        assert!(
+            pre.iter().any(|e| e["matcher"] == "Bash"),
+            "foreign hook kept"
+        );
         let scryer_pre: Vec<_> = pre.iter().filter(|e| is_scryer_hook_entry(e)).collect();
-        assert_eq!(scryer_pre.len(), 1, "no duplicates after re-install: {pre:?}");
+        assert_eq!(
+            scryer_pre.len(),
+            1,
+            "no duplicates after re-install: {pre:?}"
+        );
         assert_eq!(scryer_pre[0]["matcher"], "apply_patch|Bash");
         assert_eq!(
             root["hooks"]["PostToolUse"].as_array().unwrap().len(),
@@ -776,7 +834,11 @@ mod hook_install_tests {
             serde_json::from_str(&std::fs::read_to_string(&hooks_file).unwrap()).unwrap();
         assert_eq!(root["version"], 1);
         let post = root["hooks"]["PostToolUse"].as_array().unwrap();
-        assert_eq!(post.len(), 2, "read overlay + write touch, no duplicates: {post:?}");
+        assert_eq!(
+            post.len(),
+            2,
+            "read overlay + write touch, no duplicates: {post:?}"
+        );
         // Copilot's own tool vocabulary, matched on the runtime names.
         assert!(post.iter().any(|e| e["matcher"] == "view"));
         assert!(post
@@ -784,7 +846,10 @@ mod hook_install_tests {
             .any(|e| e["matcher"] == "create|edit|str_replace_editor|apply_patch"));
         // Flat schema, and the client is told which harness it is serving.
         assert_eq!(post[0]["type"], "command");
-        assert_eq!(post[0]["command"], "\"/opt/scryer/scryer-mcp\" hook --copilot");
+        assert_eq!(
+            post[0]["command"],
+            "\"/opt/scryer/scryer-mcp\" hook --copilot"
+        );
         assert!(post.iter().all(is_scryer_hook_entry));
         assert_eq!(root["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
         assert_eq!(root["hooks"]["Stop"].as_array().unwrap().len(), 1);
@@ -849,7 +914,11 @@ mod hook_install_tests {
         assert!(!check_mcp_json(&project), "no scryer entry");
         std::fs::write(&mcp, "{ not json").unwrap();
         assert!(!check_mcp_json(&project), "malformed reads as absent");
-        std::fs::write(&mcp, r#"{ "mcpServers": { "scryer": { "type": "stdio" } } }"#).unwrap();
+        std::fs::write(
+            &mcp,
+            r#"{ "mcpServers": { "scryer": { "type": "stdio" } } }"#,
+        )
+        .unwrap();
         assert!(check_mcp_json(&project));
     }
 
@@ -868,7 +937,10 @@ mod hook_install_tests {
             r#"{ "permissions": { "allow": ["Bash(ls:*)", "mcp__scryer"] } }"#,
         )
         .unwrap();
-        assert!(check_claude_approved(&project), "shared settings.json counts");
+        assert!(
+            check_claude_approved(&project),
+            "shared settings.json counts"
+        );
 
         std::fs::remove_file(claude_dir.join("settings.json")).unwrap();
         std::fs::write(
@@ -891,7 +963,11 @@ mod hook_install_tests {
         assert!(!check_codex_toml(&project), "no file");
         std::fs::write(&config, "[mcp_servers.other]\ncommand = \"x\"\n").unwrap();
         assert!(!check_codex_toml(&project), "no scryer entry");
-        std::fs::write(&config, "[mcp_servers.scryer]\ncommand = \"/opt/scryer-mcp\"\n").unwrap();
+        std::fs::write(
+            &config,
+            "[mcp_servers.scryer]\ncommand = \"/opt/scryer-mcp\"\n",
+        )
+        .unwrap();
         assert!(check_codex_toml(&project));
     }
 
@@ -941,7 +1017,10 @@ mod hook_install_tests {
         assert_eq!(status["claudeStatuslineForeign"], false);
 
         let none = detect_ai_tools(None);
-        assert_eq!(none["claudeMcpEnabled"], false, "no project, no project flags");
+        assert_eq!(
+            none["claudeMcpEnabled"], false,
+            "no project, no project flags"
+        );
         assert_eq!(none["claudeHooksEnabled"], false);
     }
 
