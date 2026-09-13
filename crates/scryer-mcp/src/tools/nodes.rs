@@ -4059,6 +4059,117 @@ mod tests {
         assert!(planned.changes.iter().any(|c| c.id == cid), "the change stays open on it");
     }
 
+
+    // ---- resp-48sw0j: folded and superseded is not "dropped". -------------
+
+    /// A plan with two approved claims on one host, signed off under `A` at
+    /// `signed_at`. Returns `A`'s id. Ubiquitous statements, so the evidence
+    /// gate stays out of the picture.
+    fn two_claim_signed_plan(model_ref: &ModelRef, signed_at: u64) -> String {
+        let mut committed = ScryModel::new();
+        committed.nodes.push(node("vt", Kind::Symbol, "verify_token", None));
+        scryer_core::write_model_at(model_ref, &committed).unwrap();
+        scryer_core::ensure_planned_at(model_ref).unwrap();
+        let mut planned = scryer_core::read_planned_at(model_ref).unwrap();
+        let host = planned.nodes.iter_mut().find(|n| n.id == "vt").unwrap();
+        for (id, stmt) in [("resp-1", "Verifies the approved thing"), ("resp-2", "Keeps this one")]
+        {
+            let mut r = resp(id);
+            r.statement = stmt.into();
+            host.responsibilities.push(r);
+        }
+        let cid = scryer_core::changes::open_change(&mut planned, "verify tokens", 1);
+        scryer_core::changes::tag(
+            &mut planned,
+            &["resp:resp-1".to_string(), "resp:resp-2".to_string()],
+            &cid,
+        );
+        scryer_core::changes::sign_off(&mut planned, &cid, signed_at).unwrap();
+        scryer_core::write_planned_at(model_ref, &planned).unwrap();
+        cid
+    }
+
+    /// resp-48sw0j — a claim approved under one change, later reworded,
+    /// approved again and folded under a SECOND, is not "dropped" from the
+    /// first: the next fold under the first change must leave it alone.
+    ///
+    /// Without the committed model in the picture the gate only asks whether
+    /// the PLAN still holds the entry at the hash it was signed at. After the
+    /// second change folded, it does not — so the first change read its own
+    /// approved claim as dropped and wrote its superseded sentence back over
+    /// the text the developer had just approved.
+    #[test]
+    fn resp_48sw0j_a_reworded_and_folded_claim_is_not_restored_under_its_earlier_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let now = scryer_core::drift::now_secs();
+        let first = two_claim_signed_plan(&model_ref, now - 100);
+
+        // The developer rewords resp-1 and files it under a second change,
+        // which they sign off and which folds — legitimately, through the
+        // gates, as approved text.
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let r1 = planned.nodes[0].responsibilities.iter_mut().find(|r| r.id == "resp-1").unwrap();
+        r1.statement = "Verifies the reworded thing".into();
+        let second = scryer_core::changes::open_change(&mut planned, "reword it", now - 60);
+        scryer_core::changes::tag(&mut planned, &["resp:resp-1".to_string()], &second);
+        scryer_core::changes::sign_off(&mut planned, &second, now - 50).unwrap();
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        fold_change(&ScryerServer::new(), dir.path(), &second);
+        assert!(committed_has(&model_ref, "resp-1"), "the reword folded under the second change");
+
+        // Now anything folds under the FIRST change. Its snapshot still holds
+        // the old sentence and the plan no longer tags the key to it.
+        let text = fold_change(&ScryerServer::new(), dir.path(), &first);
+        assert!(!text.contains("RESTORED resp-1"), "folded, not dropped: {text}");
+        assert_eq!(
+            planned_resp(&model_ref, "resp-1").expect("still in the plan").statement,
+            "Verifies the reworded thing",
+            "the approved text stands; the earlier snapshot must not be written back"
+        );
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(
+            !planned.change_map.contains_key("resp:resp-1"),
+            "and it is not re-filed under the change it already left"
+        );
+        assert!(committed_has(&model_ref, "resp-2"), "the first change's own claim folded");
+    }
+
+    /// resp-48sw0j, the other side — the restore this guards is still there.
+    /// An approved reword the agent quietly REVERTED to the text committed
+    /// already held is a drop: committed's copy is older than the signature
+    /// and no later signature covers the claim, so nothing says it folded.
+    #[test]
+    fn resp_48sw0j_a_revert_no_later_signature_covers_is_still_a_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        // The signature is stamped a minute ahead of the committed write that
+        // precedes it: what decides is the ORDER of the two, and a test cannot
+        // wait a real second to get it.
+        let signed_at = scryer_core::drift::now_secs() + 60;
+        let cid = signed_off_plan(&model_ref, Some("Verifies the old thing"));
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        // A second approved claim, so reverting the first does not empty the
+        // change and close it before anything folds.
+        let mut keep = resp("resp-3");
+        keep.statement = "Keeps this one".into();
+        planned.nodes[0].responsibilities.push(keep);
+        scryer_core::changes::tag(&mut planned, &["resp:resp-3".to_string()], &cid);
+        scryer_core::changes::sign_off(&mut planned, &cid, signed_at).unwrap();
+        // The agent puts the committed sentence back, un-approving its own
+        // reword; the write GCs the tag, because the plan now equals committed.
+        planned.nodes[0].responsibilities[0].statement = "Verifies the old thing".into();
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+
+        let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
+        assert!(text.contains("RESTORED resp-1"), "a reverted approval is still a drop: {text}");
+        assert_eq!(
+            planned_resp(&model_ref, "resp-1").unwrap().statement,
+            "Verifies the approved thing",
+            "the approved text comes back as pending intent"
+        );
+    }
+
     // ---- resp-6zv79y: the opt-in countersignature gate. -------------------
 
     /// A project with one pending claim tagged to a change, and the

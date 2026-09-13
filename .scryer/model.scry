@@ -12796,6 +12796,11 @@
           "statement": "**When** the project requires countersigned folds and the change carries no sign-off by an actor other than its author, **refuse** the fold, naming that a team member other than the author must sign; **while** the project does not require it, **fold** as before.",
           "concern": "oversight",
           "lastTouchedAt": 1789209162
+        },
+        {
+          "id": "resp-48sw0j",
+          "statement": "**If** a signed-off entry the plan no longer tags stands in the committed model at its snapshot, or a later signed-off change's snapshot covers the same element, **then** treat it as folded rather than dropped and leave the plan's text untouched.",
+          "lastTouchedAt": 1789317547
         }
       ]
     },
@@ -20130,6 +20135,16 @@
         "symbol": "parse_file_with"
       }
     ],
+    "resp-48sw0j": [
+      {
+        "pattern": "crates/scryer-mcp/src/tools/fold_gate.rs",
+        "symbol": "folded_not_dropped"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/fold_gate.rs",
+        "symbol": "gate"
+      }
+    ],
     "resp-49": [
       {
         "pattern": "crates/scryer-mcp/src/cli.rs",
@@ -23101,6 +23116,16 @@
       {
         "pattern": "crates/scryer-extract/src/lang.rs",
         "symbol": "ts_esm_imports_captured"
+      }
+    ],
+    "resp-48sw0j": [
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_48sw0j_a_reworded_and_folded_claim_is_not_restored_under_its_earlier_change"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
+        "symbol": "resp_48sw0j_a_revert_no_later_signature_covers_is_still_a_drop"
       }
     ],
     "resp-490": [

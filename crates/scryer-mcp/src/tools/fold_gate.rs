@@ -14,7 +14,10 @@
 //!    added AFTER the developer signed off its change is a proposal, not
 //!    intent. It is flagged `vagrant` with a `vagrant_origin` and the approved
 //!    text, left in the plan, and reported as awaiting the developer's verdict.
-//!    A signed-off claim the agent dropped is restored as pending intent.
+//!    A signed-off claim the agent dropped is restored as pending intent —
+//!    unless it only stopped being tagged because it FOLDED, which the
+//!    committed model's own copy, or a later signature over the same element,
+//!    is what tells apart ([`folded_not_dropped`]).
 //! 2. **Evidence**: a testable (When/While/If) claim on a code-backed host
 //!    folds only with a test attached AND a current passing verdict
 //!    (`scryer_extract::test_status::claim_evidence`). Otherwise it stays in the
@@ -99,6 +102,56 @@ fn find_resp_mut<'a>(
         }
     }
     None
+}
+
+/// Whether a signed-off entry the plan no longer tags LEFT BY FOLDING rather
+/// than by the agent dropping it — the difference between an approval that was
+/// consummated and one quietly taken back.
+///
+/// The restore this guards exists for a real fault: the agent deletes a claim
+/// the developer approved, or reverts it to the text committed already held,
+/// and the plan stops tagging it. But a tag also goes when the claim FOLDS,
+/// and the plan keeps no memory of which change carried it across. Two ways
+/// that happens innocently:
+///
+/// * **The committed model carries the element, at or after the snapshot.** At
+///   the snapshot's own hash it plainly folded as approved. After it — its
+///   content in committed is newer than the signature — it was reworded,
+///   approved again and folded under a LATER change, which the fold's own
+///   gates already vetted. `last_touched_at` is stamped on the committed write
+///   for exactly this: the date is the content's, not the file's, so a revert
+///   to text committed held BEFORE the signature keeps its old date and stays
+///   a drop.
+/// * **A later signature covers the same key.** The reword was signed off
+///   under another change and has not folded yet, so the text standing now is
+///   approved text belonging to that change.
+///
+/// Restoring either would rewrite approved text back to a superseded sentence
+/// — and, worse, re-open the earlier change on a claim nobody dropped.
+fn folded_not_dropped(
+    committed: &ScryModel,
+    planned: &ScryModel,
+    meta: &changes::ChangeMeta,
+    key: &str,
+    rid: &str,
+    snap: &changes::SignedEntry,
+) -> bool {
+    let signed_at = meta.signed_off.as_ref().map_or(0, |s| s.at);
+    if changes::entry_hash(committed, key).is_some_and(|now| {
+        now.hash == snap.hash
+            || find_resp(committed, rid)
+                .and_then(|(_, r)| r.last_touched_at)
+                .is_some_and(|at| at >= signed_at)
+    }) {
+        return true;
+    }
+    planned.changes.iter().any(|other| {
+        other.id != meta.id
+            && other
+                .signed_off
+                .as_ref()
+                .is_some_and(|s| s.at >= signed_at && s.entries.contains_key(key))
+    })
 }
 
 fn find_resp<'a>(model: &'a ScryModel, id: &str) -> Option<(&'a str, &'a Responsibility)> {
@@ -299,6 +352,9 @@ pub(crate) fn gate(
             // approved and only lost its tag because an earlier fold carried
             // it into committed. Nothing to restore.
             if changes::entry_hash(planned, &key).is_some_and(|now| now.hash == snap.hash) {
+                continue;
+            }
+            if folded_not_dropped(committed, planned, &meta, &key, &rid, &snap) {
                 continue;
             }
             let (Some(stmt), Some(host)) = (snap.statement.clone(), snap.host.clone()) else {
