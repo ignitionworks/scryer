@@ -37,7 +37,9 @@ struct RespMinter {
 
 impl RespMinter {
     fn new(model: &ScryModel) -> Self {
-        let mut me = Self { taken: std::collections::HashSet::new() };
+        let mut me = Self {
+            taken: std::collections::HashSet::new(),
+        };
         me.absorb(model);
         me
     }
@@ -125,7 +127,7 @@ fn err(msg: impl Into<String>) -> CallToolResult {
 /// (planned → model). Callers hold the model lock (this seeds by writing the plan).
 fn read_planned(model_ref: &ModelRef) -> Result<ScryModel, CallToolResult> {
     scryer_core::read_planned_seeded_at(model_ref)
-        .map_err(|e| err(read_fail("plan", &model_ref, &e)))
+        .map_err(|e| err(read_fail("plan", model_ref, &e)))
 }
 
 /// The committed model, read only to raise id-minting floors. Plan-first tools
@@ -436,7 +438,12 @@ impl ScryerServer {
             node.external = if item.external { Some(true) } else { None };
             node.responsibilities = minter.build(&item.responsibilities);
             model.nodes.push(node);
-            if let Some(dir) = item.boundary_dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            if let Some(dir) = item
+                .boundary_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+            {
                 // Normalize project-root spellings: ".", "./", "./" + prefix. Left
                 // as-is, "." → "./**/*", which matches no project-relative path and
                 // silently owns nothing. "." means the whole repo ("**/*").
@@ -449,7 +456,10 @@ impl ScryerServer {
                 };
                 model.boundaries.insert(
                     id.clone(),
-                    vec![Source { pattern, comment: None }],
+                    vec![Source {
+                        pattern,
+                        comment: None,
+                    }],
                 );
             }
             minted.push(id);
@@ -825,11 +835,12 @@ impl ScryerServer {
                 Kind::Component => Kind::Container,
                 Kind::Symbol => Kind::Component,
                 Kind::System | Kind::Person => {
+                    let kind = kind_str(&kind);
                     return Ok(err(format!(
-                        "newNode '{}' is a {} — those are top-level and can't be nested under a parent",
-                        nn.key,
-                        kind_str(&kind)
-                    )))
+                        "newNode '{}' is a {kind} — those are top-level and can't be nested \
+                         under a parent",
+                        nn.key
+                    )));
                 }
             };
             if let Some(e) = check_parent(&planned, &parent_id, want_parent) {
@@ -916,7 +927,7 @@ impl ScryerServer {
                 .or_default()
                 .push(resp_event_row("+", &planned, r));
         }
-        for (target, r) in targets.into_iter().zip(resps.into_iter()) {
+        for (target, r) in targets.into_iter().zip(resps) {
             if let Some(node) = planned.nodes.iter_mut().find(|n| n.id == target) {
                 node.responsibilities.push(r);
             }
@@ -992,12 +1003,20 @@ impl ScryerServer {
                 .nodes
                 .iter_mut()
                 .flat_map(|n| n.responsibilities.iter_mut())
-                .chain(planned.groups.iter_mut().flat_map(|g| g.responsibilities.iter_mut()))
+                .chain(
+                    planned
+                        .groups
+                        .iter_mut()
+                        .flat_map(|g| g.responsibilities.iter_mut()),
+                )
                 .find(|r| r.id == s.responsibility_id);
             match r {
                 Some(r) => {
                     r.stale = Some(true);
-                    r.stale_proposal = s.proposed_statement.clone().filter(|t| !t.trim().is_empty());
+                    r.stale_proposal = s
+                        .proposed_statement
+                        .clone()
+                        .filter(|t| !t.trim().is_empty());
                     staled += 1;
                 }
                 None => {
@@ -1068,13 +1087,15 @@ impl ScryerServer {
             let now = scryer_core::drift::now_secs();
             let mut stale_by_node: HashMap<String, Vec<EventRow>> = HashMap::new();
             for s in &req.stale {
-                if let Some(node) = planned
-                    .nodes
-                    .iter()
-                    .find(|n| n.responsibilities.iter().any(|r| r.id == s.responsibility_id))
-                {
-                    if let Some(r) =
-                        node.responsibilities.iter().find(|r| r.id == s.responsibility_id)
+                if let Some(node) = planned.nodes.iter().find(|n| {
+                    n.responsibilities
+                        .iter()
+                        .any(|r| r.id == s.responsibility_id)
+                }) {
+                    if let Some(r) = node
+                        .responsibilities
+                        .iter()
+                        .find(|r| r.id == s.responsibility_id)
                     {
                         stale_by_node
                             .entry(node.id.clone())
@@ -1086,7 +1107,8 @@ impl ScryerServer {
             for (node_id, rows) in stale_by_node {
                 record_event(
                     &model_ref,
-                    HistoryEvent::new(now, EventKind::Drift, &node_id, "took model").with_rows(rows),
+                    HistoryEvent::new(now, EventKind::Drift, &node_id, "took model")
+                        .with_rows(rows),
                 );
             }
         }
@@ -1147,7 +1169,8 @@ impl ScryerServer {
             for (node_id, rows) in by_node {
                 record_event(
                     &model_ref,
-                    HistoryEvent::new(now, EventKind::Drift, &node_id, "took model").with_rows(rows),
+                    HistoryEvent::new(now, EventKind::Drift, &node_id, "took model")
+                        .with_rows(rows),
                 );
             }
         }
@@ -1169,7 +1192,10 @@ impl ScryerServer {
                 "\nProposed {flagged_props} undescribed data field(s) as vagrant properties and flagged {staled_props} stale property(ies)."
             ));
             for sp in &req.stale_properties {
-                msg.push_str(&format!("\n  stale property {}.{}: {}", sp.node_id, sp.label, sp.reason));
+                msg.push_str(&format!(
+                    "\n  stale property {}.{}: {}",
+                    sp.node_id, sp.label, sp.reason
+                ));
             }
         }
         if staled_nodes > 0 {
@@ -1204,7 +1230,8 @@ impl ScryerServer {
             Err(e) => return Ok(e),
         };
         let project = model_ref.project_path();
-        let state = scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(project));
+        let state =
+            scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(project));
         if let Err(e) = scryer_core::write_sync_state(&model_ref, &state) {
             return Ok(err(format!("Failed to write reconcile anchor: {e}")));
         }
@@ -1256,7 +1283,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut model = ScryModel::new();
-        model.nodes.push(blank_node("node-1".into(), Kind::System, "Acme".into(), None));
+        model.nodes.push(blank_node(
+            "node-1".into(),
+            Kind::System,
+            "Acme".into(),
+            None,
+        ));
         scryer_core::write_model_at(&model_ref, &model).unwrap();
         let project = Some(dir.path().to_string_lossy().to_string());
 
@@ -1280,7 +1312,10 @@ mod tests {
         assert!(text.contains("REFUSED: no change is open"), "{text}");
         assert!(text.contains("open_change {rationale:"), "{text}");
         let plan = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(!plan.nodes.iter().any(|n| n.name == "API"), "nothing was written");
+        assert!(
+            !plan.nodes.iter().any(|n| n.name == "API"),
+            "nothing was written"
+        );
 
         // A change that has since closed is no better than none: the session
         // pointer is stale and the write still needs a live ledger.
@@ -1377,7 +1412,12 @@ mod tests {
         let mut model = ScryModel::new();
         let mut system = blank_node("node-1".into(), Kind::System, "Acme".into(), None);
         system.responsibilities = vec![resp("resp-1", "is the system")];
-        let mut old = blank_node("node-2".into(), Kind::Container, "Old".into(), Some("node-1".into()));
+        let mut old = blank_node(
+            "node-2".into(),
+            Kind::Container,
+            "Old".into(),
+            Some("node-1".into()),
+        );
         old.responsibilities = vec![resp("resp-2", "does the old thing")];
         model.nodes.push(system);
         model.nodes.push(old);
@@ -1409,10 +1449,16 @@ mod tests {
         let plan = read_plan(&dir);
         let new = plan.nodes.iter().find(|n| n.name == "New").unwrap();
         assert!(scryer_core::is_minted_id(&new.id, "node"), "{}", new.id);
-        assert_ne!(new.id, "node-2", "must not reuse the plan-deleted node-2 still live in committed");
+        assert_ne!(
+            new.id, "node-2",
+            "must not reuse the plan-deleted node-2 still live in committed"
+        );
         let rid = &new.responsibilities[0].id;
         assert!(scryer_core::is_minted_id(rid, "resp"), "{rid}");
-        assert_ne!(rid, "resp-2", "must not reuse the plan-deleted resp-2 still live in committed");
+        assert_ne!(
+            rid, "resp-2",
+            "must not reuse the plan-deleted resp-2 still live in committed"
+        );
     }
 
     /// Accept + warn on field shape: a paragraph-length `technology` (the card
@@ -1452,7 +1498,11 @@ mod tests {
 
         // Accepted regardless: the node exists in the plan with the value as passed.
         let plan = read_plan(&dir);
-        let node = plan.nodes.iter().find(|n| n.name == "Browser Embed").unwrap();
+        let node = plan
+            .nodes
+            .iter()
+            .find(|n| n.name == "Browser Embed")
+            .unwrap();
         assert_eq!(node.technology.as_deref(), Some(prose));
     }
 
@@ -1469,8 +1519,12 @@ mod tests {
         // Committed: a container whose responsibility carries a source anchor and
         // whose box carries a boundary glob. NO planned.scry is written.
         let sys = blank_node("node-1".into(), Kind::System, "Acme".into(), None);
-        let mut cont =
-            blank_node("node-2".into(), Kind::Container, "API".into(), Some("node-1".into()));
+        let mut cont = blank_node(
+            "node-2".into(),
+            Kind::Container,
+            "API".into(),
+            Some("node-1".into()),
+        );
         cont.responsibilities = vec![resp("resp-1", "serves the API")];
         let mut model = ScryModel::new();
         model.nodes.push(sys);
@@ -1484,7 +1538,10 @@ mod tests {
             vec![serde_json::from_value(serde_json::json!({ "pattern": "api/**/*" })).unwrap()],
         );
         scryer_core::write_model_at(&r, &model).unwrap();
-        assert!(!r.planned_path().exists(), "precondition: no draft exists yet");
+        assert!(
+            !r.planned_path().exists(),
+            "precondition: no draft exists yet"
+        );
 
         // An authoring write with no prior draft.
         let server = ScryerServer::with_change(dir.path());
@@ -1507,9 +1564,18 @@ mod tests {
         // The draft now exists but owns NO shadow of committed's anchors: a
         // committed element's mapping has a single home, in committed alone.
         let plan = read_plan(&dir);
-        assert!(plan.nodes.iter().any(|n| n.name == "New"), "the write landed in the plan");
-        assert!(plan.source_map.is_empty(), "draft must not shadow committed's source_map");
-        assert!(plan.boundaries.is_empty(), "draft must not shadow committed's boundaries");
+        assert!(
+            plan.nodes.iter().any(|n| n.name == "New"),
+            "the write landed in the plan"
+        );
+        assert!(
+            plan.source_map.is_empty(),
+            "draft must not shadow committed's source_map"
+        );
+        assert!(
+            plan.boundaries.is_empty(),
+            "draft must not shadow committed's boundaries"
+        );
 
         // Committed keeps its anchors — nothing was moved or lost.
         let committed = read_back(&dir);
@@ -1548,7 +1614,11 @@ mod tests {
             let n = m.nodes.iter().find(|n| n.name == name).unwrap();
             m.boundaries.get(&n.id).unwrap()[0].pattern.clone()
         };
-        assert_eq!(pat("Root"), "**/*", "\".\" is the whole repo, not \"./**/*\"");
+        assert_eq!(
+            pat("Root"),
+            "**/*",
+            "\".\" is the whole repo, not \"./**/*\""
+        );
         assert_eq!(pat("Src"), "src/**/*", "\"./\" prefix stripped");
     }
 
@@ -1780,10 +1850,21 @@ mod tests {
         // rides the working draft, never the source of truth.
         let m = read_back(&dir);
         let container = m.nodes.iter().find(|n| n.id == cid).unwrap();
-        let orig = container.responsibilities.iter().find(|r| r.id == rid).unwrap();
-        assert_ne!(orig.stale, Some(true), "committed claim is not flagged stale");
+        let orig = container
+            .responsibilities
+            .iter()
+            .find(|r| r.id == rid)
+            .unwrap();
+        assert_ne!(
+            orig.stale,
+            Some(true),
+            "committed claim is not flagged stale"
+        );
         assert!(
-            container.responsibilities.iter().all(|r| r.vagrant != Some(true)),
+            container
+                .responsibilities
+                .iter()
+                .all(|r| r.vagrant != Some(true)),
             "undescribed behaviour must not land in the committed model"
         );
 
@@ -1796,7 +1877,11 @@ mod tests {
         .unwrap();
         let pc = plan.nodes.iter().find(|n| n.id == cid).unwrap();
         let staled = pc.responsibilities.iter().find(|r| r.id == rid).unwrap();
-        assert_eq!(staled.stale, Some(true), "stale flag rides the working draft");
+        assert_eq!(
+            staled.stale,
+            Some(true),
+            "stale flag rides the working draft"
+        );
         let vagrant = pc
             .responsibilities
             .iter()
@@ -1897,7 +1982,10 @@ mod tests {
             .iter()
             .find(|r| r.id == rid)
             .unwrap();
-        assert_eq!(cr.stale_proposal, None, "no proposal on the committed claim");
+        assert_eq!(
+            cr.stale_proposal, None,
+            "no proposal on the committed claim"
+        );
 
         // A blank proposal is not a proposal — re-flagging with whitespace clears it
         // while keeping the stale flag, so the user falls back to re-implement/drop.
@@ -1926,7 +2014,9 @@ mod tests {
         // symbol mapped to api/admin.rs via its responsibility.
         let mut m = scryer_core::ScryModel::new();
         let node = |v: serde_json::Value| serde_json::from_value::<scryer_core::Node>(v).unwrap();
-        m.nodes.push(node(serde_json::json!({ "id": "c", "kind": "container", "name": "API" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "c", "kind": "container", "name": "API" }),
+        ));
         m.nodes
             .push(node(serde_json::json!({ "id": "comp", "kind": "component", "name": "Admin", "parentId": "c" })));
         m.nodes.push(node(serde_json::json!({
@@ -1972,7 +2062,9 @@ mod tests {
         );
         let cont = plan.nodes.iter().find(|n| n.id == "c").unwrap();
         assert!(
-            cont.responsibilities.iter().all(|r| r.vagrant != Some(true)),
+            cont.responsibilities
+                .iter()
+                .all(|r| r.vagrant != Some(true)),
             "the finding must NOT land on the reviewed container"
         );
     }
@@ -1987,7 +2079,9 @@ mod tests {
         // mapped to api/settings.rs, already carrying one property `agent`.
         let mut m = scryer_core::ScryModel::new();
         let node = |v: serde_json::Value| serde_json::from_value::<scryer_core::Node>(v).unwrap();
-        m.nodes.push(node(serde_json::json!({ "id": "c", "kind": "container", "name": "API" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "c", "kind": "container", "name": "API" }),
+        ));
         m.nodes
             .push(node(serde_json::json!({ "id": "comp", "kind": "component", "name": "Config", "parentId": "c" })));
         m.nodes.push(node(serde_json::json!({
@@ -1996,7 +2090,10 @@ mod tests {
         })));
         m.source_map.insert(
             "sym".into(),
-            vec![serde_json::from_value(serde_json::json!({ "pattern": "api/settings.rs", "symbol": "Settings" })).unwrap()],
+            vec![serde_json::from_value(
+                serde_json::json!({ "pattern": "api/settings.rs", "symbol": "Settings" }),
+            )
+            .unwrap()],
         );
         m.boundaries.insert(
             "c".into(),
@@ -2035,13 +2132,21 @@ mod tests {
             .iter()
             .find(|p| p.label == "confirm_launch")
             .expect("undescribed field is routed to the data node as a property");
-        assert_eq!(new_prop.vagrant, Some(true), "the new field lands vagrant, not as a responsibility");
+        assert_eq!(
+            new_prop.vagrant,
+            Some(true),
+            "the new field lands vagrant, not as a responsibility"
+        );
         assert!(
             sym.responsibilities.iter().all(|r| r.vagrant != Some(true)),
             "a data field must NOT become a vagrant responsibility"
         );
         let stale = sym.properties.iter().find(|p| p.label == "agent").unwrap();
-        assert_eq!(stale.stale, Some(true), "the removed field's property is flagged stale");
+        assert_eq!(
+            stale.stale,
+            Some(true),
+            "the removed field's property is flagged stale"
+        );
     }
 
     #[test]
@@ -2054,7 +2159,9 @@ mod tests {
         // case that used to dump findings on the container.
         let mut m = scryer_core::ScryModel::new();
         let node = |v: serde_json::Value| serde_json::from_value::<scryer_core::Node>(v).unwrap();
-        m.nodes.push(node(serde_json::json!({ "id": "c", "kind": "container", "name": "API" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "c", "kind": "container", "name": "API" }),
+        ));
         m.boundaries.insert(
             "c".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "api/**/*" })).unwrap()],
@@ -2105,8 +2212,16 @@ mod tests {
 
         let plan = scryer_core::read_planned_at(&mref).unwrap();
         // Both minted nodes exist, are vagrant, and form a chain under `c`.
-        let comp = plan.nodes.iter().find(|n| n.name == "Admin").expect("component minted");
-        let sym = plan.nodes.iter().find(|n| n.name == "admin_handler").expect("symbol minted");
+        let comp = plan
+            .nodes
+            .iter()
+            .find(|n| n.name == "Admin")
+            .expect("component minted");
+        let sym = plan
+            .nodes
+            .iter()
+            .find(|n| n.name == "admin_handler")
+            .expect("symbol minted");
         assert_eq!(comp.vagrant, Some(true), "minted component is vagrant");
         assert_eq!(sym.vagrant, Some(true), "minted symbol is vagrant");
         assert_eq!(comp.parent_id.as_deref(), Some("c"));
@@ -2116,7 +2231,10 @@ mod tests {
         let rid = &sym.responsibilities[0].id;
         assert_eq!(plan.source_map.get(rid).unwrap()[0].pattern, "api/admin.rs");
         let cont = plan.nodes.iter().find(|n| n.id == "c").unwrap();
-        assert!(cont.responsibilities.is_empty(), "nothing parks on the container");
+        assert!(
+            cont.responsibilities.is_empty(),
+            "nothing parks on the container"
+        );
     }
 
     #[test]
@@ -2128,7 +2246,9 @@ mod tests {
         // Plan: a container with a component whose backing folder was deleted.
         let mut m = scryer_core::ScryModel::new();
         let node = |v: serde_json::Value| serde_json::from_value::<scryer_core::Node>(v).unwrap();
-        m.nodes.push(node(serde_json::json!({ "id": "c", "kind": "container", "name": "API" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "c", "kind": "container", "name": "API" }),
+        ));
         m.nodes.push(node(serde_json::json!({
             "id": "comp", "kind": "component", "name": "Admin", "parentId": "c"
         })));
@@ -2154,7 +2274,11 @@ mod tests {
         let comp = plan.nodes.iter().find(|n| n.id == "comp").unwrap();
         assert_eq!(comp.stale, Some(true), "the node itself is flagged stale");
         let cont = plan.nodes.iter().find(|n| n.id == "c").unwrap();
-        assert_ne!(cont.stale, Some(true), "the reviewed container is not flagged");
+        assert_ne!(
+            cont.stale,
+            Some(true),
+            "the reviewed container is not flagged"
+        );
     }
 
     #[test]
@@ -2173,7 +2297,10 @@ mod tests {
                 }],
             }))
             .unwrap();
-        assert!(res.is_error.unwrap_or(false), "wrong parent kind is rejected");
+        assert!(
+            res.is_error.unwrap_or(false),
+            "wrong parent kind is rejected"
+        );
     }
 
     /// flag_drift mints new (vagrant) nodes too, and must enforce the same C4
@@ -2220,9 +2347,13 @@ mod tests {
         std::fs::write(root.join("api/src/server.rs"), "fn v1() {}").unwrap();
 
         let mut model = read_back(&dir);
-        model
-            .boundaries
-            .insert("node-1".into(), vec![Source { pattern: "api/**/*".into(), comment: None }]);
+        model.boundaries.insert(
+            "node-1".into(),
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
+        );
         scryer_core::write_model_at(&model_ref, &model).unwrap();
 
         // Anchor in the past + a file touched after it → the scope is drifted.
@@ -2238,11 +2369,16 @@ mod tests {
         // Reconcile advances the anchor to now → the same change stops surfacing.
         let project = root.to_string_lossy().to_string();
         let res = server
-            .reconcile_drift(Parameters(ReconcileDriftRequest { project: Some(project) }))
+            .reconcile_drift(Parameters(ReconcileDriftRequest {
+                project: Some(project),
+            }))
             .unwrap();
         assert!(!res.is_error.unwrap_or(false));
         let fresh = scryer_core::read_sync_state(&model_ref);
-        assert!(fresh.reconciled_at > old.reconciled_at, "anchor moved forward");
+        assert!(
+            fresh.reconciled_at > old.reconciled_at,
+            "anchor moved forward"
+        );
         assert!(
             drift::drifted_scopes(&model, root, &fresh).is_empty(),
             "post-reconcile, the prior change no longer reads as drift"
@@ -2275,7 +2411,10 @@ mod tests {
             .iter()
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap();
-        assert!(text.contains("\"next\""), "carries the follow-through: {text}");
+        assert!(
+            text.contains("\"next\""),
+            "carries the follow-through: {text}"
+        );
         let api = planned_id(&dir, "API");
         assert!(
             text.contains(&format!("mark_implemented {api}")),

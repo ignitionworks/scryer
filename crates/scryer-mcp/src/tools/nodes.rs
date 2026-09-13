@@ -7,8 +7,8 @@ use rmcp::{
     model::{CallToolResult, Content},
     tool, tool_router, ErrorData as McpError,
 };
-use scryer_core::{Kind, Link, Node, ScryModel};
 use scryer_core::history::{EventKind, EventRow, HistoryEvent};
+use scryer_core::{Kind, Link, Node, ScryModel};
 use std::collections::{HashMap, HashSet};
 
 use super::fold_gate;
@@ -28,7 +28,9 @@ fn prune_code_map(model: &mut ScryModel, removed_node_ids: &HashSet<String>) {
     model
         .source_map
         .retain(|k, _| !removed_resp_ids.contains(k) && !removed_node_ids.contains(k));
-    model.boundaries.retain(|k, _| !removed_node_ids.contains(k));
+    model
+        .boundaries
+        .retain(|k, _| !removed_node_ids.contains(k));
 }
 
 /// Replace `node_id`'s whole subtree in ONE model layer with `nodes` + `links`:
@@ -47,7 +49,11 @@ fn subtree_ids(model: &ScryModel, node_id: &str) -> HashSet<String> {
     let mut ids: HashSet<String> = HashSet::from([node_id.to_string()]);
     let mut frontier = vec![node_id.to_string()];
     while let Some(id) = frontier.pop() {
-        for child in model.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+        for child in model
+            .nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&id))
+        {
             if ids.insert(child.id.clone()) {
                 frontier.push(child.id.clone());
             }
@@ -68,7 +74,11 @@ fn splice_subtree(
     let mut to_remove: HashSet<String> = HashSet::new();
     let mut frontier = vec![node_id.to_string()];
     while let Some(id) = frontier.pop() {
-        for child in model.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+        for child in model
+            .nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&id))
+        {
             if to_remove.insert(child.id.clone()) {
                 frontier.push(child.id.clone());
             }
@@ -123,7 +133,11 @@ fn fold_out_layer(model: &mut ScryModel, target_ids: &[String]) -> (usize, usize
     let mut to_remove: HashSet<String> = target_ids.iter().cloned().collect();
     let mut frontier: Vec<String> = target_ids.to_vec();
     while let Some(id) = frontier.pop() {
-        for child in model.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+        for child in model
+            .nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&id))
+        {
             if to_remove.insert(child.id.clone()) {
                 frontier.push(child.id.clone());
             }
@@ -244,7 +258,11 @@ fn fold_change_by_id(
         let open: Vec<&str> = planned.changes.iter().map(|c| c.id.as_str()).collect();
         return Err(fail(format!(
             "No open change '{cid}'. Open changes: {}",
-            if open.is_empty() { "none".to_string() } else { open.join(", ") }
+            if open.is_empty() {
+                "none".to_string()
+            } else {
+                open.join(", ")
+            }
         )));
     };
     let keys: Vec<String> = planned
@@ -268,7 +286,9 @@ fn fold_change_by_id(
     let mut groups: Vec<String> = Vec::new();
     let mut links: Vec<String> = Vec::new();
     for k in &keys {
-        let Some((kind, owner, id)) = ledger::parse_key(k) else { continue };
+        let Some((kind, owner, id)) = ledger::parse_key(k) else {
+            continue;
+        };
         match kind {
             EK::Node => {
                 if planned.nodes.iter().any(|n| n.id == id) {
@@ -289,13 +309,21 @@ fn fold_change_by_id(
     let depth = |id: &str| {
         let mut d = 0usize;
         let mut seen: HashSet<String> = std::iter::once(id.to_string()).collect();
-        let mut cur = planned.nodes.iter().find(|n| n.id == id).and_then(|n| n.parent_id.clone());
+        let mut cur = planned
+            .nodes
+            .iter()
+            .find(|n| n.id == id)
+            .and_then(|n| n.parent_id.clone());
         while let Some(pid) = cur {
             if !seen.insert(pid.clone()) {
                 break;
             }
             d += 1;
-            cur = planned.nodes.iter().find(|n| n.id == pid).and_then(|n| n.parent_id.clone());
+            cur = planned
+                .nodes
+                .iter()
+                .find(|n| n.id == pid)
+                .and_then(|n| n.parent_id.clone());
         }
         d
     };
@@ -401,7 +429,9 @@ fn fold_change_by_id(
         hosts.dedup();
         let now = scryer_core::drift::now_secs();
         for host in hosts {
-            let Some(node) = after.nodes.iter().find(|n| n.id == host) else { continue };
+            let Some(node) = after.nodes.iter().find(|n| n.id == host) else {
+                continue;
+            };
             let rows: Vec<EventRow> = node
                 .responsibilities
                 .iter()
@@ -410,7 +440,11 @@ fn fold_change_by_id(
                         && before_stmts.get(&r.id) != Some(&r.statement)
                 })
                 .map(|r| {
-                    let marker = if before_stmts.contains_key(&r.id) { "~" } else { "+" };
+                    let marker = if before_stmts.contains_key(&r.id) {
+                        "~"
+                    } else {
+                        "+"
+                    };
                     resp_event_row(marker, &after, r)
                 })
                 .collect();
@@ -460,7 +494,11 @@ fn fold_change_by_id(
     let mut summary = format!(
         "Folded change {cid} (\"{}\"): {}.",
         meta.rationale,
-        if parts.is_empty() { "nothing".to_string() } else { parts.join(", ") }
+        if parts.is_empty() {
+            "nothing".to_string()
+        } else {
+            parts.join(", ")
+        }
     );
     if closed {
         summary.push_str(
@@ -468,7 +506,11 @@ fn fold_change_by_id(
              history log.",
         );
     } else {
-        let left = planned_after.change_map.values().filter(|v| v.as_str() == cid).count();
+        let left = planned_after
+            .change_map
+            .values()
+            .filter(|v| v.as_str() == cid)
+            .count();
         summary.push_str(&format!(" {left} entr(ies) still pending on it."));
     }
     Ok(vec![summary])
@@ -597,7 +639,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -677,8 +721,7 @@ impl ScryerServer {
                 // The `seen` set keeps this walk terminating even if the model
                 // already holds a malformed chain.
                 let mut cur = Some(v.clone());
-                let mut seen: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
                 while let Some(id) = cur {
                     if id == u.node_id {
                         return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -840,7 +883,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -861,7 +906,12 @@ impl ScryerServer {
                         .nodes
                         .iter_mut()
                         .flat_map(|n| n.responsibilities.iter_mut())
-                        .chain(model.groups.iter_mut().flat_map(|g| g.responsibilities.iter_mut()))
+                        .chain(
+                            model
+                                .groups
+                                .iter_mut()
+                                .flat_map(|g| g.responsibilities.iter_mut()),
+                        )
                         .find(|r| &r.id == resp_id);
                     let Some(r) = resp else {
                         return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -922,7 +972,7 @@ impl ScryerServer {
             Err(e) => return Ok(e),
         };
 
-        let empty = |v: &Option<Vec<String>>| v.as_ref().map_or(true, |x| x.is_empty());
+        let empty = |v: &Option<Vec<String>>| v.as_ref().is_none_or(|x| x.is_empty());
         if req.change.is_some()
             && (req.node_id.is_some()
                 || !empty(&req.link_ids)
@@ -965,7 +1015,9 @@ impl ScryerServer {
         let planned = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(p) => p,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("plan", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "plan", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -1003,12 +1055,16 @@ impl ScryerServer {
                 .nodes
                 .iter()
                 .flat_map(|n| n.responsibilities.iter())
-                .chain(planned.groups.iter().flat_map(|g| g.responsibilities.iter()))
+                .chain(
+                    planned
+                        .groups
+                        .iter()
+                        .flat_map(|g| g.responsibilities.iter()),
+                )
                 .map(|r| r.id.as_str())
                 .chain(before_stmts.keys().map(|k| k.as_str()))
                 .collect();
-            for (field, entries) in [("anchors", &req.anchors), ("tests", &req.tests)]
-            {
+            for (field, entries) in [("anchors", &req.anchors), ("tests", &req.tests)] {
                 for e in entries.iter().flatten() {
                     if !known.contains(e.responsibility_id.as_str()) {
                         return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -1156,11 +1212,8 @@ impl ScryerServer {
                     // too, so it rides the structure cascade as well.
                     let include_self =
                         req.responsibility_ids.is_some() || req.property_labels.is_some();
-                    match scryer_core::commit_plan_only_ancestors(
-                        &model_ref,
-                        node_id,
-                        include_self,
-                    ) {
+                    match scryer_core::commit_plan_only_ancestors(&model_ref, node_id, include_self)
+                    {
                         Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
                         Ok(folded) if folded.is_empty() => {}
                         Ok(folded) => {
@@ -1193,8 +1246,7 @@ impl ScryerServer {
                         }
                     }
                 }
-                let scoped =
-                    req.responsibility_ids.is_some() || req.property_labels.is_some();
+                let scoped = req.responsibility_ids.is_some() || req.property_labels.is_some();
                 match scoped {
                     // Scoped: commit exactly the named responsibilities and/or
                     // property labels. Their host node must already be committed
@@ -1274,16 +1326,14 @@ impl ScryerServer {
                             node_id,
                             &gate.withhold,
                         ) {
-                            return Ok(CallToolResult::error(vec![Content::text(
-                                ancestor_hint(e),
-                            )]));
+                            return Ok(CallToolResult::error(vec![Content::text(ancestor_hint(
+                                e,
+                            ))]));
                         }
                         // Pull in the ready plan-added links/groups incident to this
                         // node (item A); deletions never ride along — they fold by
                         // their own ids below.
-                        if let Err(e) =
-                            scryer_core::commit_ready_dependents(&model_ref, node_id)
-                        {
+                        if let Err(e) = scryer_core::commit_ready_dependents(&model_ref, node_id) {
                             return Ok(CallToolResult::error(vec![Content::text(e)]));
                         }
                         summaries.push(format!("Committed '{}' into the model.", node_id));
@@ -1302,7 +1352,9 @@ impl ScryerServer {
             let planned_now = match scryer_core::read_planned_at(&model_ref) {
                 Ok(p) => p,
                 Err(e) => {
-                    return Ok(CallToolResult::error(vec![Content::text(read_fail("plan", &model_ref, &e))]));
+                    return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                        "plan", &model_ref, &e,
+                    ))]));
                 }
             };
             if let Some(ids) = req.link_ids.as_ref().filter(|v| !v.is_empty()) {
@@ -1421,11 +1473,7 @@ impl ScryerServer {
         // The refusal ledger: record what stayed behind and why, clear what
         // folded, and drop entries for claims no longer in the plan.
         {
-            let _ = scryer_core::refusals::update_refusals(
-                &model_ref,
-                &gate.refusals,
-                &folded_ids,
-            );
+            let _ = scryer_core::refusals::update_refusals(&model_ref, &gate.refusals, &folded_ids);
             if let Ok(p) = scryer_core::read_planned_at(&model_ref) {
                 let live: HashSet<String> = p
                     .nodes
@@ -1478,7 +1526,11 @@ impl ScryerServer {
                 .and_then(|id| after.nodes.iter().find(|n| n.id == id))
             {
                 let target: Vec<&scryer_core::Responsibility> = match &req.responsibility_ids {
-                    Some(ids) => node.responsibilities.iter().filter(|r| ids.contains(&r.id)).collect(),
+                    Some(ids) => node
+                        .responsibilities
+                        .iter()
+                        .filter(|r| ids.contains(&r.id))
+                        .collect(),
                     // Whole-node: only the responsibilities this fold newly added or
                     // reworded relative to the committed snapshot above.
                     None => node
@@ -1490,7 +1542,11 @@ impl ScryerServer {
                 let rows: Vec<EventRow> = target
                     .iter()
                     .map(|r| {
-                        let marker = if before_stmts.contains_key(&r.id) { "~" } else { "+" };
+                        let marker = if before_stmts.contains_key(&r.id) {
+                            "~"
+                        } else {
+                            "+"
+                        };
                         resp_event_row(marker, &after, r)
                     })
                     .collect();
@@ -1549,8 +1605,7 @@ impl ScryerServer {
         }
         if let Some(node_id) = req.node_id.as_deref() {
             let committed = scryer_core::read_model_at(&model_ref).unwrap_or_default();
-            let planned_after =
-                scryer_core::read_planned_at(&model_ref).unwrap_or_default();
+            let planned_after = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
             let mut lines: Vec<String> = Vec::new();
 
             // Tests-attached callout — the FIRST post-flight line, because it is
@@ -1562,14 +1617,16 @@ impl ScryerServer {
                 if node.external != Some(true) && node.kind != scryer_core::Kind::Person {
                     let has_test = |key: &str| {
                         committed.test_map.get(key).is_some_and(|l| !l.is_empty())
-                            || planned_after.test_map.get(key).is_some_and(|l| !l.is_empty())
+                            || planned_after
+                                .test_map
+                                .get(key)
+                                .is_some_and(|l| !l.is_empty())
                     };
                     let untested: Vec<&str> = node
                         .responsibilities
                         .iter()
                         .filter(|r| {
-                            scryer_core::ears::classify(&r.statement).testable()
-                                && !has_test(&r.id)
+                            scryer_core::ears::classify(&r.statement).testable() && !has_test(&r.id)
                         })
                         .map(|r| r.id.as_str())
                         .collect();
@@ -1757,7 +1814,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         let prior = model.clone();
@@ -1857,20 +1916,36 @@ impl ScryerServer {
 
         // Timeline: a `move` event per node that actually changed parent.
         let name_of = |m: &ScryModel, id: &str| {
-            m.nodes.iter().find(|n| n.id == id).map(|n| n.name.clone()).unwrap_or_else(|| id.to_string())
+            m.nodes
+                .iter()
+                .find(|n| n.id == id)
+                .map(|n| n.name.clone())
+                .unwrap_or_else(|| id.to_string())
         };
         let now = scryer_core::drift::now_secs();
         for mv in &req.moves {
-            let old_parent = prior.nodes.iter().find(|n| n.id == mv.node_id).and_then(|n| n.parent_id.clone());
+            let old_parent = prior
+                .nodes
+                .iter()
+                .find(|n| n.id == mv.node_id)
+                .and_then(|n| n.parent_id.clone());
             if old_parent == mv.new_parent_id {
                 continue;
             }
-            let from = old_parent.as_deref().map(|p| name_of(&prior, p)).unwrap_or_else(|| "top level".into());
-            let to = mv.new_parent_id.as_deref().map(|p| name_of(&model, p)).unwrap_or_else(|| "top level".into());
+            let from = old_parent
+                .as_deref()
+                .map(|p| name_of(&prior, p))
+                .unwrap_or_else(|| "top level".into());
+            let to = mv
+                .new_parent_id
+                .as_deref()
+                .map(|p| name_of(&model, p))
+                .unwrap_or_else(|| "top level".into());
             record_event(
                 &model_ref,
-                HistoryEvent::new(now, EventKind::Move, &mv.node_id, "reorganize")
-                    .with_rows(vec![EventRow::new("→", format!("reparented {from} → {to}"))]),
+                HistoryEvent::new(now, EventKind::Move, &mv.node_id, "reorganize").with_rows(vec![
+                    EventRow::new("→", format!("reparented {from} → {to}")),
+                ]),
             );
         }
 
@@ -1914,7 +1989,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -1959,8 +2036,7 @@ impl ScryerServer {
         // snapshot's collision, and pushing it in would leave two nodes sharing
         // an id (see remint_colliding_node_ids). Runs against both layers, and
         // before the replacement, so the ids that land are already unique.
-        let replaced: std::collections::HashSet<String> =
-            subtree_ids(&model, &req.node_id);
+        let replaced: std::collections::HashSet<String> = subtree_ids(&model, &req.node_id);
         let node_remints = remint_colliding_node_ids(
             &mut payload.nodes,
             &mut payload.links,
@@ -1971,7 +2047,8 @@ impl ScryerServer {
         // Apply the subtree replacement to the plan. The dropped-link report
         // comes from the plan layer — always applied (node existence checked
         // above) and the authoritative surface the caller edits.
-        let (_, dropped_links) = splice_subtree(&mut model, &req.node_id, &payload.nodes, &payload.links);
+        let (_, dropped_links) =
+            splice_subtree(&mut model, &req.node_id, &payload.nodes, &payload.links);
         enforce_readonly_directives(&mut model, &prior);
         restore_node_positions(&mut model, &[&prior]);
 
@@ -1982,18 +2059,21 @@ impl ScryerServer {
         // generation skeleton); if it lives only in the plan this stays a
         // plan-only edit, and there is nothing to commit. Prepared before the
         // plan write so a `None` here just means "plan-only".
-        let committed = scryer_core::read_model_at(&model_ref).ok().and_then(|mut c| {
-            let cprior = c.clone();
-            let (applied, _) = splice_subtree(&mut c, &req.node_id, &payload.nodes, &payload.links);
-            applied.then(|| {
-                enforce_readonly_directives(&mut c, &cprior);
-                // Plan-first prior order: the plan layer is where the canvas
-                // writes placements, so the committed copy inherits the same
-                // positions the plan write above just restored.
-                restore_node_positions(&mut c, &[&prior, &cprior]);
-                c
-            })
-        });
+        let committed = scryer_core::read_model_at(&model_ref)
+            .ok()
+            .and_then(|mut c| {
+                let cprior = c.clone();
+                let (applied, _) =
+                    splice_subtree(&mut c, &req.node_id, &payload.nodes, &payload.links);
+                applied.then(|| {
+                    enforce_readonly_directives(&mut c, &cprior);
+                    // Plan-first prior order: the plan layer is where the canvas
+                    // writes placements, so the committed copy inherits the same
+                    // positions the plan write above just restored.
+                    restore_node_positions(&mut c, &[&prior, &cprior]);
+                    c
+                })
+            });
 
         // Write the plan first: if the committed write then fails, committed lags
         // the plan (recoverable pending work), never leads it (a phantom deletion).
@@ -2056,7 +2136,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -2064,7 +2146,11 @@ impl ScryerServer {
         let mut to_remove: HashSet<String> = req.node_ids.iter().cloned().collect();
         let mut frontier: Vec<String> = req.node_ids.clone();
         while let Some(id) = frontier.pop() {
-            for child in model.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+            for child in model
+                .nodes
+                .iter()
+                .filter(|n| n.parent_id.as_deref() == Some(&id))
+            {
                 if to_remove.insert(child.id.clone()) {
                     frontier.push(child.id.clone());
                 }
@@ -2126,13 +2212,17 @@ impl ScryerServer {
         let mut planned = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("plan", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "plan", &model_ref, &e,
+                ))]));
             }
         };
         let mut committed = match scryer_core::read_model_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -2202,7 +2292,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -2214,17 +2306,24 @@ impl ScryerServer {
                 let from_node = model.nodes.iter().find(|n| n.id == mv.from_node_id);
                 let Some(from_node) = from_node else {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Source node '{}' not found", mv.from_node_id
+                        "Source node '{}' not found",
+                        mv.from_node_id
                     ))]));
                 };
-                let Some(r) = from_node.responsibilities.iter().find(|r| r.id == mv.responsibility_id) else {
+                let Some(r) = from_node
+                    .responsibilities
+                    .iter()
+                    .find(|r| r.id == mv.responsibility_id)
+                else {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Responsibility '{}' not found on node '{}'", mv.responsibility_id, mv.from_node_id
+                        "Responsibility '{}' not found on node '{}'",
+                        mv.responsibility_id, mv.from_node_id
                     ))]));
                 };
                 if r.vagrant == Some(true) {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Vagrant responsibility '{}' cannot be moved", mv.responsibility_id
+                        "Vagrant responsibility '{}' cannot be moved",
+                        mv.responsibility_id
                     ))]));
                 }
                 r.clone()
@@ -2232,7 +2331,8 @@ impl ScryerServer {
 
             if !model.nodes.iter().any(|n| n.id == mv.to_node_id) {
                 return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Destination node '{}' not found", mv.to_node_id
+                    "Destination node '{}' not found",
+                    mv.to_node_id
                 ))]));
             }
 
@@ -2246,9 +2346,18 @@ impl ScryerServer {
                 .find(|n| n.id == mv.from_node_id)
                 .map(|n| n.name.clone())
                 .unwrap_or_else(|| mv.from_node_id.clone());
-            let from = model.nodes.iter_mut().find(|n| n.id == mv.from_node_id).unwrap();
-            from.responsibilities.retain(|r| r.id != mv.responsibility_id);
-            let to = model.nodes.iter_mut().find(|n| n.id == mv.to_node_id).unwrap();
+            let from = model
+                .nodes
+                .iter_mut()
+                .find(|n| n.id == mv.from_node_id)
+                .unwrap();
+            from.responsibilities
+                .retain(|r| r.id != mv.responsibility_id);
+            let to = model
+                .nodes
+                .iter_mut()
+                .find(|n| n.id == mv.to_node_id)
+                .unwrap();
             to.responsibilities.push(resp);
             reloc_rows.push((
                 mv.to_node_id.clone(),
@@ -2342,8 +2451,7 @@ mod tests {
         comp.responsibilities = vec![resp("r-comp")];
         m.nodes.push(comp);
 
-        let (relocated, removed, dropped) =
-            fold_out_layer(&mut m, &["con".into(), "comp".into()]);
+        let (relocated, removed, dropped) = fold_out_layer(&mut m, &["con".into(), "comp".into()]);
         assert_eq!(relocated, 1, "the claim relocates to the surviving system");
         assert_eq!(dropped, 0, "nothing is lost");
         assert_eq!(removed, 2);
@@ -2378,7 +2486,8 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
 
         let mut m = ScryModel::new();
-        m.nodes.push(node("node-1", Kind::Component, "Harness", None));
+        m.nodes
+            .push(node("node-1", Kind::Component, "Harness", None));
         let mut main = node("node-2", Kind::Symbol, "main", Some("node-1"));
         main.responsibilities = vec![resp("r-main")];
         m.nodes.push(main);
@@ -2421,9 +2530,14 @@ mod tests {
         // Single home: the draft this test wrote mirrored committed's anchor
         // (the pre-seeding shadow state), and the seeded read heals it — the
         // anchor lives in committed only, and the working view still surfaces it.
-        assert!(!planned.source_map.contains_key("r-main"), "no shadow copy in the draft");
         assert!(
-            scryer_core::working_view(&committed, &planned).source_map.contains_key("r-main"),
+            !planned.source_map.contains_key("r-main"),
+            "no shadow copy in the draft"
+        );
+        assert!(
+            scryer_core::working_view(&committed, &planned)
+                .source_map
+                .contains_key("r-main"),
             "the working view still lights the file"
         );
     }
@@ -2478,16 +2592,30 @@ mod tests {
 
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         let sys = planned.nodes.iter().find(|n| n.id == "sys").unwrap();
-        assert_eq!(sys.directives, vec!["must stay stateless"], "node-level replaced");
+        assert_eq!(
+            sys.directives,
+            vec!["must stay stateless"],
+            "node-level replaced"
+        );
         let con = planned.nodes.iter().find(|n| n.id == "con").unwrap();
-        assert_eq!(con.responsibilities[0].directives, vec!["never trust client input"]);
-        assert_eq!(planned.groups[0].responsibilities[0].directives, vec!["must audit-log"]);
+        assert_eq!(
+            con.responsibilities[0].directives,
+            vec!["never trust client input"]
+        );
+        assert_eq!(
+            planned.groups[0].responsibilities[0].directives,
+            vec!["must audit-log"]
+        );
 
         // The committed model is untouched — the edit is plan work like any
         // other authoring write, visible in the plan diff until folded.
         let committed = scryer_core::read_model_at(&model_ref).unwrap();
         let sys_c = committed.nodes.iter().find(|n| n.id == "sys").unwrap();
-        assert_eq!(sys_c.directives, vec!["old node rule"], "committed layer untouched");
+        assert_eq!(
+            sys_c.directives,
+            vec!["old node rule"],
+            "committed layer untouched"
+        );
     }
 
     /// An empty replacement array CLEARS — without it directives could be set
@@ -2529,7 +2657,10 @@ mod tests {
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         let sys = planned.nodes.iter().find(|n| n.id == "sys").unwrap();
         assert!(sys.directives.is_empty(), "node-level cleared");
-        assert!(sys.responsibilities[0].directives.is_empty(), "claim-level cleared");
+        assert!(
+            sys.responsibilities[0].directives.is_empty(),
+            "claim-level cleared"
+        );
     }
 
     /// An unknown id — or an item that names both / neither target — is
@@ -2563,7 +2694,11 @@ mod tests {
                 responsibility_id: Some("r-x".into()),
                 directives: vec!["x".into()],
             },
-            SetDirectivesItem { node_id: None, responsibility_id: None, directives: vec!["x".into()] },
+            SetDirectivesItem {
+                node_id: None,
+                responsibility_id: None,
+                directives: vec!["x".into()],
+            },
         ];
         for bad in bad_items {
             // A valid edit batched BEHIND the bad item must not land either.
@@ -2627,7 +2762,10 @@ mod tests {
             "the user's plan-layer placement survives the regeneration"
         );
         let sys2 = planned.nodes.iter().find(|n| n.id == "sys2").unwrap();
-        assert_eq!(sys2.position, None, "an agent-invented position never lands");
+        assert_eq!(
+            sys2.position, None,
+            "an agent-invented position never lands"
+        );
     }
 
     /// A reparent drops the node's canvas placement: coordinates are relative to
@@ -2655,8 +2793,14 @@ mod tests {
             .move_nodes(Parameters(MoveNodesRequest {
                 project: Some(dir.path().to_string_lossy().to_string()),
                 moves: vec![
-                    NodeMove { node_id: "con".into(), new_parent_id: Some("sys-b".into()) },
-                    NodeMove { node_id: "con2".into(), new_parent_id: Some("sys-a".into()) },
+                    NodeMove {
+                        node_id: "con".into(),
+                        new_parent_id: Some("sys-b".into()),
+                    },
+                    NodeMove {
+                        node_id: "con2".into(),
+                        new_parent_id: Some("sys-a".into()),
+                    },
                 ],
             }))
             .unwrap();
@@ -2664,9 +2808,15 @@ mod tests {
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         let moved = planned.nodes.iter().find(|n| n.id == "con").unwrap();
         assert_eq!(moved.parent_id.as_deref(), Some("sys-b"));
-        assert_eq!(moved.position, None, "reparent lands on a new surface — placement cleared");
+        assert_eq!(
+            moved.position, None,
+            "reparent lands on a new surface — placement cleared"
+        );
         let stayed = planned.nodes.iter().find(|n| n.id == "con2").unwrap();
-        assert!(stayed.position.is_some(), "same-parent move keeps the placement");
+        assert!(
+            stayed.position.is_some(),
+            "same-parent move keeps the placement"
+        );
     }
 
     /// replace_subtree is a generation primitive describing code that ALREADY exists, so
@@ -2708,7 +2858,10 @@ mod tests {
             committed.nodes.iter().any(|n| n.id == "node-2"),
             "the generated container lands in the committed model, not just the plan"
         );
-        assert!(planned.nodes.iter().any(|n| n.id == "node-2"), "and in the plan");
+        assert!(
+            planned.nodes.iter().any(|n| n.id == "node-2"),
+            "and in the plan"
+        );
         assert!(
             scryer_core::diff::diff(&committed, &planned).is_empty(),
             "committed == planned, so the plan diff is empty — no phantom subtree queue"
@@ -2749,13 +2902,26 @@ mod tests {
             }))
             .unwrap();
 
-        let text = result.content.iter().find_map(|c| c.as_text().map(|t| t.text.clone())).unwrap();
+        let text = result
+            .content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .unwrap();
         assert!(text.contains("Dropped 1 link"), "reports the drop: {text}");
-        assert!(text.contains("node-2 -> ghost (unknown dst)"), "names the bad link: {text}");
+        assert!(
+            text.contains("node-2 -> ghost (unknown dst)"),
+            "names the bad link: {text}"
+        );
 
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(planned.links.iter().any(|l| l.id == "l-ok"), "the valid link is kept");
-        assert!(!planned.links.iter().any(|l| l.id == "l-bad"), "the dangling link is dropped");
+        assert!(
+            planned.links.iter().any(|l| l.id == "l-ok"),
+            "the valid link is kept"
+        );
+        assert!(
+            !planned.links.iter().any(|l| l.id == "l-bad"),
+            "the dangling link is dropped"
+        );
     }
 
     /// mark_implemented folds a planned DELETION: a node removed from the plan (its
@@ -2767,7 +2933,8 @@ mod tests {
 
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::Component, "Root", None));
-        m.nodes.push(node("node-2", Kind::Symbol, "gone", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Symbol, "gone", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
         // Plan no longer has node-2 (the agent deleted it, then removed the code).
         let mut planned = m.clone();
@@ -2790,7 +2957,9 @@ mod tests {
                 change: None,
             }))
             .unwrap();
-        assert!(serde_json::to_string(&r.content).unwrap().contains("removal"));
+        assert!(serde_json::to_string(&r.content)
+            .unwrap()
+            .contains("removal"));
 
         let committed = scryer_core::read_model_at(&model_ref).unwrap();
         assert!(
@@ -2809,13 +2978,13 @@ mod tests {
 
         // Committed model: the node exists but is empty.
         let mut m = ScryModel::new();
-        m.nodes.push(node("node-1", Kind::Component, "ModelTree", None));
+        m.nodes
+            .push(node("node-1", Kind::Component, "ModelTree", None));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
         // Plan (draft): the node gains responsibilities.
         let mut planned = m.clone();
-        planned.nodes[0].responsibilities =
-            vec![resp("r-a"), resp("r-b")];
+        planned.nodes[0].responsibilities = vec![resp("r-a"), resp("r-b")];
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let server = ScryerServer::new();
@@ -2856,7 +3025,8 @@ mod tests {
         assert_eq!(folds[0].node_id, "node-1");
         assert_eq!(folds[0].rows.len(), 2, "both newly-folded claims listed");
         assert!(
-            log.iter().any(|e| e.kind == scryer_core::history::EventKind::Plan),
+            log.iter()
+                .any(|e| e.kind == scryer_core::history::EventKind::Plan),
             "and the plan write that proposed them, kept apart from the fold"
         );
     }
@@ -2902,22 +3072,38 @@ mod tests {
 
         // Without the flag: refused, and the refusal steers at the flag.
         let refused = call(None);
-        assert!(refused.is_error.unwrap_or(false), "plan-only parent refused");
+        assert!(
+            refused.is_error.unwrap_or(false),
+            "plan-only parent refused"
+        );
         let text = refused
             .content
             .iter()
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap();
-        assert!(text.contains("commit_ancestors"), "refusal names the recovery: {text}");
+        assert!(
+            text.contains("commit_ancestors"),
+            "refusal names the recovery: {text}"
+        );
 
         // With the flag: scaffolding chain + leaf all land, honestly.
         let ok = call(Some(true));
         assert!(!ok.is_error.unwrap_or(false), "{ok:?}");
         let m = scryer_core::read_model_at(&model_ref).unwrap();
         let by_id = |id: &str| m.nodes.iter().find(|n| n.id == id).unwrap();
-        assert!(by_id("sys").responsibilities.is_empty(), "scaffolding carries no claims");
-        assert!(by_id("app").responsibilities.is_empty(), "scaffolding carries no claims");
-        assert_eq!(by_id("leaf").responsibilities.len(), 1, "built claim folded");
+        assert!(
+            by_id("sys").responsibilities.is_empty(),
+            "scaffolding carries no claims"
+        );
+        assert!(
+            by_id("app").responsibilities.is_empty(),
+            "scaffolding carries no claims"
+        );
+        assert_eq!(
+            by_id("leaf").responsibilities.len(),
+            1,
+            "built claim folded"
+        );
         assert_eq!(
             scryer_core::plan_diff_at(&model_ref).unwrap().changes.len(),
             2,
@@ -2935,7 +3121,9 @@ mod tests {
         scryer_core::write_model_at(&model_ref, &ScryModel::new()).unwrap();
 
         let mut planned = ScryModel::new();
-        planned.nodes.push(node("app", Kind::Container, "App", None));
+        planned
+            .nodes
+            .push(node("app", Kind::Container, "App", None));
         let mut c = node("c", Kind::Component, "Feature", Some("app"));
         c.responsibilities = vec![resp("r-1"), resp("r-2")];
         planned.nodes.push(c);
@@ -2960,10 +3148,17 @@ mod tests {
         assert!(!r.is_error.unwrap_or(false), "{r:?}");
 
         let m = scryer_core::read_model_at(&model_ref).unwrap();
-        let c = m.nodes.iter().find(|n| n.id == "c").expect("host structure-committed");
+        let c = m
+            .nodes
+            .iter()
+            .find(|n| n.id == "c")
+            .expect("host structure-committed");
         assert_eq!(c.responsibilities.len(), 1, "only the named claim folded");
         assert_eq!(c.responsibilities[0].id, "r-1");
-        assert!(m.nodes.iter().any(|n| n.id == "app"), "ancestor structure-committed");
+        assert!(
+            m.nodes.iter().any(|n| n.id == "app"),
+            "ancestor structure-committed"
+        );
         assert!(
             !scryer_core::plan_diff_at(&model_ref).unwrap().is_empty(),
             "the unbuilt claim r-2 stays pending"
@@ -2981,8 +3176,10 @@ mod tests {
 
         // Committed: parent → child, plus an untouched sibling and a link into it.
         let mut m = ScryModel::new();
-        m.nodes.push(node("parent-1", Kind::Container, "Parent", None));
-        m.nodes.push(node("child-1", Kind::Component, "Child", Some("parent-1")));
+        m.nodes
+            .push(node("parent-1", Kind::Container, "Parent", None));
+        m.nodes
+            .push(node("child-1", Kind::Component, "Child", Some("parent-1")));
         m.nodes.push(node("keep-1", Kind::Component, "Keep", None));
         m.links.push(Link {
             id: "l1".into(),
@@ -3021,10 +3218,15 @@ mod tests {
 
         let m = scryer_core::read_model_at(&model_ref).unwrap();
         assert!(
-            !m.nodes.iter().any(|n| n.id == "parent-1" || n.id == "child-1"),
+            !m.nodes
+                .iter()
+                .any(|n| n.id == "parent-1" || n.id == "child-1"),
             "whole subtree removed from committed, not just the target"
         );
-        assert!(m.nodes.iter().any(|n| n.id == "keep-1"), "sibling untouched");
+        assert!(
+            m.nodes.iter().any(|n| n.id == "keep-1"),
+            "sibling untouched"
+        );
         assert!(m.links.is_empty(), "link into the deleted subtree dropped");
         assert!(
             scryer_core::plan_diff_at(&model_ref).unwrap().is_empty(),
@@ -3045,8 +3247,12 @@ mod tests {
         // Committed: empty. Plan: two new nodes and a link between them.
         scryer_core::write_model_at(&model_ref, &ScryModel::new()).unwrap();
         let mut planned = ScryModel::new();
-        planned.nodes.push(node("node-1", Kind::Component, "A", None));
-        planned.nodes.push(node("node-2", Kind::Component, "B", None));
+        planned
+            .nodes
+            .push(node("node-1", Kind::Component, "A", None));
+        planned
+            .nodes
+            .push(node("node-2", Kind::Component, "B", None));
         planned.links.push(Link {
             id: "l1".into(),
             src: "node-1".into(),
@@ -3068,9 +3274,9 @@ mod tests {
                     property_labels: None,
                     commit_ancestors: None,
                     force: None,
-                anchors: None,
-                tests: None,
-                change: None,
+                    anchors: None,
+                    tests: None,
+                    change: None,
                 }))
                 .unwrap();
         };
@@ -3078,14 +3284,22 @@ mod tests {
         // Folding the first node leaves the link pending — its far end isn't built.
         mark("node-1");
         assert!(
-            !scryer_core::read_model_at(&model_ref).unwrap().links.iter().any(|l| l.id == "l1"),
+            !scryer_core::read_model_at(&model_ref)
+                .unwrap()
+                .links
+                .iter()
+                .any(|l| l.id == "l1"),
             "link waits for its second endpoint"
         );
 
         // Folding the second node pulls the link in; the plan diff reaches empty.
         mark("node-2");
         assert!(
-            scryer_core::read_model_at(&model_ref).unwrap().links.iter().any(|l| l.id == "l1"),
+            scryer_core::read_model_at(&model_ref)
+                .unwrap()
+                .links
+                .iter()
+                .any(|l| l.id == "l1"),
             "link folded with its second endpoint"
         );
         assert!(
@@ -3176,12 +3390,8 @@ mod tests {
         // Plan: a new r-b is proposed on the same node; r-c is proposed too but
         // not named in the call, so it must stay in the plan.
         let mut planned = m.clone();
-        planned.nodes[0]
-            .responsibilities
-            .push(resp("r-b"));
-        planned.nodes[0]
-            .responsibilities
-            .push(resp("r-c"));
+        planned.nodes[0].responsibilities.push(resp("r-b"));
+        planned.nodes[0].responsibilities.push(resp("r-c"));
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let server = ScryerServer::new();
@@ -3203,8 +3413,14 @@ mod tests {
 
         let m = scryer_core::read_model_at(&model_ref).unwrap();
         let n = &m.nodes[0];
-        assert!(n.responsibilities.iter().any(|r| r.id == "r-b"), "r-b committed");
-        assert!(!n.responsibilities.iter().any(|r| r.id == "r-c"), "r-c left uncommitted");
+        assert!(
+            n.responsibilities.iter().any(|r| r.id == "r-b"),
+            "r-b committed"
+        );
+        assert!(
+            !n.responsibilities.iter().any(|r| r.id == "r-c"),
+            "r-c left uncommitted"
+        );
 
         // Only r-c remains as a pending plan entry (Added).
         let plan = scryer_core::plan_diff_at(&model_ref).unwrap();
@@ -3222,7 +3438,8 @@ mod tests {
         m.nodes.push(node("sys", Kind::System, "Sys", None));
         m.nodes.push(node("ca", Kind::Container, "A", Some("sys")));
         m.nodes.push(node("cb", Kind::Container, "B", Some("sys")));
-        m.nodes.push(node("comp", Kind::Component, "Comp", Some("ca")));
+        m.nodes
+            .push(node("comp", Kind::Component, "Comp", Some("ca")));
         m.nodes.push(node("sym", Kind::Symbol, "sym", Some("comp")));
         m.groups.push(scryer_core::Group {
             id: "g1".into(),
@@ -3242,7 +3459,10 @@ mod tests {
         let r = server
             .move_nodes(Parameters(MoveNodesRequest {
                 project: Some(project.clone()),
-                moves: vec![NodeMove { node_id: "comp".into(), new_parent_id: Some("cb".into()) }],
+                moves: vec![NodeMove {
+                    node_id: "comp".into(),
+                    new_parent_id: Some("cb".into()),
+                }],
             }))
             .unwrap();
         assert!(!r.is_error.unwrap_or(false), "{r:?}");
@@ -3252,13 +3472,19 @@ mod tests {
         assert_eq!(comp.parent_id.as_deref(), Some("cb"));
         let sym = m.nodes.iter().find(|n| n.id == "sym").unwrap();
         assert_eq!(sym.parent_id.as_deref(), Some("comp"), "subtree intact");
-        assert!(m.groups[0].member_ids.is_empty(), "left the old-level group");
+        assert!(
+            m.groups[0].member_ids.is_empty(),
+            "left the old-level group"
+        );
 
         // Invalid kind pair: component under system.
         let r = server
             .move_nodes(Parameters(MoveNodesRequest {
                 project: Some(project.clone()),
-                moves: vec![NodeMove { node_id: "comp".into(), new_parent_id: Some("sys".into()) }],
+                moves: vec![NodeMove {
+                    node_id: "comp".into(),
+                    new_parent_id: Some("sys".into()),
+                }],
             }))
             .unwrap();
         assert!(r.is_error.unwrap_or(false), "kind pair rejected");
@@ -3267,7 +3493,10 @@ mod tests {
         let r = server
             .move_nodes(Parameters(MoveNodesRequest {
                 project: Some(project),
-                moves: vec![NodeMove { node_id: "cb".into(), new_parent_id: Some("sym".into()) }],
+                moves: vec![NodeMove {
+                    node_id: "cb".into(),
+                    new_parent_id: Some("sym".into()),
+                }],
             }))
             .unwrap();
         assert!(r.is_error.unwrap_or(false), "cycle rejected");
@@ -3284,7 +3513,8 @@ mod tests {
         let mut m = ScryModel::new();
         m.nodes.push(node("sys", Kind::System, "Sys", None));
         m.nodes.push(node("ca", Kind::Container, "A", Some("sys")));
-        m.nodes.push(node("comp", Kind::Component, "Comp", Some("ca")));
+        m.nodes
+            .push(node("comp", Kind::Component, "Comp", Some("ca")));
         scryer_core::write_planned_at(&model_ref, &m).unwrap();
         let server = ScryerServer::new();
         let project = dir.path().to_string_lossy().to_string();
@@ -3419,7 +3649,11 @@ mod tests {
 
         let after = scryer_core::read_model_at(&model_ref).unwrap();
         let shape = after.nodes.iter().find(|n| n.id == "shape").unwrap();
-        let email = shape.properties.iter().find(|p| p.label == "email").unwrap();
+        let email = shape
+            .properties
+            .iter()
+            .find(|p| p.label == "email")
+            .unwrap();
         assert_eq!(email.description, "v2", "named fold landed");
         assert!(
             !shape.properties.iter().any(|p| p.label == "age"),
@@ -3439,7 +3673,8 @@ mod tests {
         m.nodes.push(node("sys", Kind::System, "Sys", None));
         m.nodes.push(node("ca", Kind::Container, "A", Some("sys")));
         m.nodes.push(node("cb", Kind::Container, "B", Some("sys")));
-        m.nodes.push(node("comp", Kind::Component, "Comp", Some("ca")));
+        m.nodes
+            .push(node("comp", Kind::Component, "Comp", Some("ca")));
         let mut ext = node("ext", Kind::Container, "Ext", Some("sys"));
         ext.external = Some(true);
         m.nodes.push(ext);
@@ -3478,28 +3713,55 @@ mod tests {
         };
 
         // Nonexistent parent: rejected, not silently orphaned.
-        assert!(attempt(reparent("comp", "ghost")).is_error.unwrap_or(false), "missing parent");
+        assert!(
+            attempt(reparent("comp", "ghost")).is_error.unwrap_or(false),
+            "missing parent"
+        );
         // Illegal pairing: a component cannot be parented by a system.
-        assert!(attempt(reparent("comp", "sys")).is_error.unwrap_or(false), "kind pair");
+        assert!(
+            attempt(reparent("comp", "sys")).is_error.unwrap_or(false),
+            "kind pair"
+        );
         // External node cannot take children.
-        assert!(attempt(reparent("comp", "ext")).is_error.unwrap_or(false), "external parent");
+        assert!(
+            attempt(reparent("comp", "ext")).is_error.unwrap_or(false),
+            "external parent"
+        );
 
         // The rejections left the plan untouched.
         let after = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(
-            after.nodes.iter().find(|n| n.id == "comp").unwrap().parent_id.as_deref(),
+            after
+                .nodes
+                .iter()
+                .find(|n| n.id == "comp")
+                .unwrap()
+                .parent_id
+                .as_deref(),
             Some("ca"),
             "parent unchanged after the rejected reparents"
         );
 
         // Valid reparent A→B: applied, and the node leaves its old-level group.
-        assert!(!attempt(reparent("comp", "cb")).is_error.unwrap_or(false), "valid reparent");
+        assert!(
+            !attempt(reparent("comp", "cb")).is_error.unwrap_or(false),
+            "valid reparent"
+        );
         let after = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(
-            after.nodes.iter().find(|n| n.id == "comp").unwrap().parent_id.as_deref(),
+            after
+                .nodes
+                .iter()
+                .find(|n| n.id == "comp")
+                .unwrap()
+                .parent_id
+                .as_deref(),
             Some("cb")
         );
-        assert!(after.groups[0].member_ids.is_empty(), "left the old-level group");
+        assert!(
+            after.groups[0].member_ids.is_empty(),
+            "left the old-level group"
+        );
     }
 
     /// Fold + anchor is one atomic statement: `anchors` on mark_implemented
@@ -3512,9 +3774,15 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
 
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("sys", Kind::System, "Acme", None));
-        committed.nodes.push(node("cont", Kind::Container, "API", Some("sys")));
-        committed.nodes.push(node("comp", Kind::Component, "Auth", Some("cont")));
+        committed
+            .nodes
+            .push(node("sys", Kind::System, "Acme", None));
+        committed
+            .nodes
+            .push(node("cont", Kind::Container, "API", Some("sys")));
+        committed
+            .nodes
+            .push(node("comp", Kind::Component, "Auth", Some("cont")));
         let mut planned = committed.clone();
         planned
             .nodes
@@ -3555,7 +3823,12 @@ mod tests {
         assert!(r.is_error.unwrap_or(false), "unknown anchor id rejected");
         let m = scryer_core::read_model_at(&model_ref).unwrap();
         assert!(
-            m.nodes.iter().find(|n| n.id == "comp").unwrap().responsibilities.is_empty(),
+            m.nodes
+                .iter()
+                .find(|n| n.id == "comp")
+                .unwrap()
+                .responsibilities
+                .is_empty(),
             "nothing folded on the failed call"
         );
 
@@ -3607,7 +3880,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("comp", Kind::Component, "Auth", None));
+        committed
+            .nodes
+            .push(node("comp", Kind::Component, "Auth", None));
         scryer_core::write_model_at(&model_ref, &committed).unwrap();
         scryer_core::ensure_planned_at(&model_ref).unwrap();
         let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
@@ -3662,16 +3937,24 @@ mod tests {
             .iter()
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap();
-        assert!(text.contains("Recorded attached test(s) for 1 claim(s)"), "{text}");
+        assert!(
+            text.contains("Recorded attached test(s) for 1 claim(s)"),
+            "{text}"
+        );
 
         let committed = scryer_core::read_model_at(&model_ref).unwrap();
         let loc = &committed.test_map["resp-1"][0];
-        assert_eq!(loc.pattern, "tests/auth.rs", "attached test lives in the committed layer");
+        assert_eq!(
+            loc.pattern, "tests/auth.rs",
+            "attached test lives in the committed layer"
+        );
         assert_eq!(loc.symbol.as_deref(), Some("forged_rejected"));
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(!planned.test_map.contains_key("resp-1"), "no shadow copy in the draft");
+        assert!(
+            !planned.test_map.contains_key("resp-1"),
+            "no shadow copy in the draft"
+        );
     }
-
 
     /// A symbol host with one claim in the plan, the committed model empty.
     fn plan_with_claim(model_ref: &ModelRef, statement: &str) {
@@ -3686,7 +3969,12 @@ mod tests {
         scryer_core::write_planned_at(model_ref, &planned).unwrap();
     }
 
-    fn fold_node(server: &ScryerServer, dir: &std::path::Path, node_id: &str, force: bool) -> String {
+    fn fold_node(
+        server: &ScryerServer,
+        dir: &std::path::Path,
+        node_id: &str,
+        force: bool,
+    ) -> String {
         let r = server
             .mark_implemented(Parameters(MarkImplementedRequest {
                 project: Some(dir.to_string_lossy().to_string()),
@@ -3702,7 +3990,10 @@ mod tests {
                 change: None,
             }))
             .unwrap();
-        assert!(!r.is_error.unwrap_or(false), "a refusal is never a tool error");
+        assert!(
+            !r.is_error.unwrap_or(false),
+            "a refusal is never a tool error"
+        );
         tool_text(&r)
     }
 
@@ -3724,7 +4015,11 @@ mod tests {
                 change: Some(cid.into()),
             }))
             .unwrap();
-        assert!(!r.is_error.unwrap_or(false), "a refusal is never a tool error: {}", tool_text(&r));
+        assert!(
+            !r.is_error.unwrap_or(false),
+            "a refusal is never a tool error: {}",
+            tool_text(&r)
+        );
         tool_text(&r)
     }
 
@@ -3755,18 +4050,31 @@ mod tests {
     fn fold_refuses_a_testable_claim_without_a_test() {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
-        plan_with_claim(&model_ref, "**If** the token is forged, **then** reject the request");
+        plan_with_claim(
+            &model_ref,
+            "**If** the token is forged, **then** reject the request",
+        );
 
         let text = fold_node(&ScryerServer::new(), dir.path(), "vt", false);
         assert!(text.contains("REFUSED resp-1"), "{text}");
         assert!(text.contains("no test attached"), "{text}");
-        assert!(!committed_has(&model_ref, "resp-1"), "the claim did not fold");
-        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim stays in the plan");
+        assert!(
+            !committed_has(&model_ref, "resp-1"),
+            "the claim did not fold"
+        );
+        assert!(
+            planned_resp(&model_ref, "resp-1").is_some(),
+            "the claim stays in the plan"
+        );
         let refusals = scryer_core::refusals::read_refusals(&model_ref);
         assert_eq!(refusals.len(), 1);
         assert_eq!(refusals[0].kind, "no-test");
         // The host itself folded structure-wise — the rest of the fold proceeds.
-        assert!(scryer_core::read_model_at(&model_ref).unwrap().nodes.iter().any(|n| n.id == "vt"));
+        assert!(scryer_core::read_model_at(&model_ref)
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|n| n.id == "vt"));
     }
 
     /// A test attached in the SAME call but never run is still refused: the
@@ -3775,7 +4083,10 @@ mod tests {
     fn fold_refuses_a_claim_whose_attached_test_has_no_verdict() {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
-        plan_with_claim(&model_ref, "**When** a token arrives, **verify** its signature");
+        plan_with_claim(
+            &model_ref,
+            "**When** a token arrives, **verify** its signature",
+        );
         let server = ScryerServer::new();
         let r = server
             .mark_implemented(Parameters(MarkImplementedRequest {
@@ -3800,12 +4111,21 @@ mod tests {
             .unwrap();
         let text = tool_text(&r);
         assert!(text.contains("REFUSED resp-1"), "{text}");
-        assert!(text.contains("no verdict recorded: run tests/auth.rs"), "{text}");
+        assert!(
+            text.contains("no verdict recorded: run tests/auth.rs"),
+            "{text}"
+        );
         assert!(!committed_has(&model_ref, "resp-1"));
         // The attachment still landed — on the plan copy, where the claim lives.
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(planned.test_map.contains_key("resp-1"), "test attached to the plan copy");
-        assert_eq!(scryer_core::refusals::read_refusals(&model_ref)[0].kind, "no-verdict");
+        assert!(
+            planned.test_map.contains_key("resp-1"),
+            "test attached to the plan copy"
+        );
+        assert_eq!(
+            scryer_core::refusals::read_refusals(&model_ref)[0].kind,
+            "no-verdict"
+        );
     }
 
     /// Ubiquitous claims are not gated: a test is a judgment call there, and
@@ -3827,9 +4147,20 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.to_path_buf());
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::create_dir_all(dir.join("tests")).unwrap();
-        std::fs::write(dir.join("src/auth.rs"), "fn verify_token() {\n    let ok = true;\n}\n").unwrap();
-        std::fs::write(dir.join("tests/auth.rs"), "#[test]\nfn forged_rejected() {\n    assert!(true);\n}\n").unwrap();
-        plan_with_claim(&model_ref, "**If** the token is forged, **then** reject the request");
+        std::fs::write(
+            dir.join("src/auth.rs"),
+            "fn verify_token() {\n    let ok = true;\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("tests/auth.rs"),
+            "#[test]\nfn forged_rejected() {\n    assert!(true);\n}\n",
+        )
+        .unwrap();
+        plan_with_claim(
+            &model_ref,
+            "**If** the token is forged, **then** reject the request",
+        );
         let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
         planned.source_map.insert(
             "resp-1".into(),
@@ -3848,7 +4179,11 @@ mod tests {
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
         let junit = r#"<testsuites><testsuite name="auth"><testcase classname="tests/auth.rs" name="forged_rejected" time="0.001"/></testsuite></testsuites>"#;
         let summary = scryer_extract::test_status::ingest_report(&model_ref, junit).unwrap();
-        assert_eq!(summary.recorded, 1, "the plan-layer attachment matched: {:?}", summary.report);
+        assert_eq!(
+            summary.recorded, 1,
+            "the plan-layer attachment matched: {:?}",
+            summary.report
+        );
         model_ref
     }
 
@@ -3863,8 +4198,14 @@ mod tests {
         assert!(!text.contains("REFUSED"), "{text}");
         assert!(committed_has(&model_ref, "resp-1"));
         let baseline = std::fs::read_to_string(model_ref.anchors_path()).unwrap();
-        assert!(baseline.contains("\"key\":\"resp-1\""), "impl anchor fingerprinted: {baseline}");
-        assert!(baseline.contains("\"key\":\"test:resp-1\""), "test anchor fingerprinted: {baseline}");
+        assert!(
+            baseline.contains("\"key\":\"resp-1\""),
+            "impl anchor fingerprinted: {baseline}"
+        );
+        assert!(
+            baseline.contains("\"key\":\"test:resp-1\""),
+            "test anchor fingerprinted: {baseline}"
+        );
         // The verdict still reads current after the fold moved the anchors to committed.
         let statuses = scryer_extract::test_status::test_statuses(&model_ref).unwrap();
         assert_eq!(statuses.len(), 1);
@@ -3887,7 +4228,10 @@ mod tests {
         assert!(text.contains("REFUSED resp-1"), "{text}");
         assert!(text.contains("verdict stale: run tests/auth.rs"), "{text}");
         assert!(!committed_has(&model_ref, "resp-1"));
-        assert_eq!(scryer_core::refusals::read_refusals(&model_ref)[0].kind, "stale");
+        assert_eq!(
+            scryer_core::refusals::read_refusals(&model_ref)[0].kind,
+            "stale"
+        );
     }
 
     /// `force: true` folds an unverified claim anyway — and leaves an
@@ -3896,13 +4240,18 @@ mod tests {
     fn force_folds_unverified_and_records_it() {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
-        plan_with_claim(&model_ref, "**If** the token is forged, **then** reject the request");
+        plan_with_claim(
+            &model_ref,
+            "**If** the token is forged, **then** reject the request",
+        );
         let text = fold_node(&ScryerServer::new(), dir.path(), "vt", true);
         assert!(text.contains("UNVERIFIED resp-1"), "{text}");
         assert!(committed_has(&model_ref, "resp-1"));
         let events = scryer_core::history::read_history(&model_ref);
         assert!(
-            events.iter().any(|e| e.driver == "unverified" && e.node_id == "vt"),
+            events
+                .iter()
+                .any(|e| e.driver == "unverified" && e.node_id == "vt"),
             "{events:?}"
         );
         assert!(scryer_core::refusals::read_refusals(&model_ref).is_empty());
@@ -3953,12 +4302,25 @@ mod tests {
         let r = planned_resp(&model_ref, "resp-1").unwrap();
         assert_eq!(r.vagrant, Some(true));
         assert_eq!(r.vagrant_origin.as_deref(), Some("amendment"));
-        assert_eq!(r.approved_statement.as_deref(), Some("Verifies the approved thing"));
+        assert_eq!(
+            r.approved_statement.as_deref(),
+            Some("Verifies the approved thing")
+        );
         assert_eq!(r.statement, "Verifies something else entirely");
         let committed = scryer_core::read_model_at(&model_ref).unwrap();
-        let c = committed.nodes[0].responsibilities.iter().find(|r| r.id == "resp-1").unwrap();
-        assert_eq!(c.statement, "Verifies the old thing", "committed keeps the original");
-        assert_eq!(scryer_core::refusals::read_refusals(&model_ref)[0].kind, "amendment");
+        let c = committed.nodes[0]
+            .responsibilities
+            .iter()
+            .find(|r| r.id == "resp-1")
+            .unwrap();
+        assert_eq!(
+            c.statement, "Verifies the old thing",
+            "committed keeps the original"
+        );
+        assert_eq!(
+            scryer_core::refusals::read_refusals(&model_ref)[0].kind,
+            "amendment"
+        );
     }
 
     /// A claim the agent adds after sign-off is scope it invented: withheld as
@@ -3978,7 +4340,10 @@ mod tests {
         let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
         assert!(text.contains("AWAITING VERDICT resp-2"), "{text}");
         assert!(text.contains("added after sign-off"), "{text}");
-        assert!(committed_has(&model_ref, "resp-1"), "the untouched intent folded");
+        assert!(
+            committed_has(&model_ref, "resp-1"),
+            "the untouched intent folded"
+        );
         assert!(!committed_has(&model_ref, "resp-2"), "the addition did not");
         let r2 = planned_resp(&model_ref, "resp-2").unwrap();
         assert_eq!(r2.vagrant_origin.as_deref(), Some("addition"));
@@ -4011,7 +4376,10 @@ mod tests {
         assert!(!text.contains("DROPPED resp-1"), "{text}");
         assert!(committed_has(&model_ref, "resp-1"));
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(planned.change_map.get("resp:resp-1").is_none(), "no tag was re-minted");
+        assert!(
+            !planned.change_map.contains_key("resp:resp-1"),
+            "no tag was re-minted"
+        );
     }
 
     /// Retagging the concern is metadata, not intent — it never reads as an
@@ -4044,7 +4412,9 @@ mod tests {
         scryer_core::changes::tag(&mut planned, &["resp:resp-3".to_string()], &cid);
         scryer_core::changes::sign_off(&mut planned, &cid, 3).unwrap();
         // The agent drops resp-1 (its tag is GC'd by the write) and folds.
-        planned.nodes[0].responsibilities.retain(|r| r.id != "resp-1");
+        planned.nodes[0]
+            .responsibilities
+            .retain(|r| r.id != "resp-1");
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
         assert!(planned_resp(&model_ref, "resp-1").is_none());
 
@@ -4052,13 +4422,24 @@ mod tests {
         assert!(text.contains("RESTORED resp-1"), "{text}");
         let r1 = planned_resp(&model_ref, "resp-1").expect("restored into the plan");
         assert_eq!(r1.statement, "Verifies the approved thing");
-        assert!(!committed_has(&model_ref, "resp-1"), "restored as PENDING intent, not folded");
-        assert!(committed_has(&model_ref, "resp-3"), "the untouched claim folded");
+        assert!(
+            !committed_has(&model_ref, "resp-1"),
+            "restored as PENDING intent, not folded"
+        );
+        assert!(
+            committed_has(&model_ref, "resp-3"),
+            "the untouched claim folded"
+        );
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert_eq!(planned.change_map.get("resp:resp-1").map(String::as_str), Some(cid.as_str()));
-        assert!(planned.changes.iter().any(|c| c.id == cid), "the change stays open on it");
+        assert_eq!(
+            planned.change_map.get("resp:resp-1").map(String::as_str),
+            Some(cid.as_str())
+        );
+        assert!(
+            planned.changes.iter().any(|c| c.id == cid),
+            "the change stays open on it"
+        );
     }
-
 
     // ---- resp-48sw0j: folded and superseded is not "dropped". -------------
 
@@ -4067,13 +4448,17 @@ mod tests {
     /// gate stays out of the picture.
     fn two_claim_signed_plan(model_ref: &ModelRef, signed_at: u64) -> String {
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("vt", Kind::Symbol, "verify_token", None));
+        committed
+            .nodes
+            .push(node("vt", Kind::Symbol, "verify_token", None));
         scryer_core::write_model_at(model_ref, &committed).unwrap();
         scryer_core::ensure_planned_at(model_ref).unwrap();
         let mut planned = scryer_core::read_planned_at(model_ref).unwrap();
         let host = planned.nodes.iter_mut().find(|n| n.id == "vt").unwrap();
-        for (id, stmt) in [("resp-1", "Verifies the approved thing"), ("resp-2", "Keeps this one")]
-        {
+        for (id, stmt) in [
+            ("resp-1", "Verifies the approved thing"),
+            ("resp-2", "Keeps this one"),
+        ] {
             let mut r = resp(id);
             r.statement = stmt.into();
             host.responsibilities.push(r);
@@ -4109,21 +4494,33 @@ mod tests {
         // which they sign off and which folds — legitimately, through the
         // gates, as approved text.
         let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        let r1 = planned.nodes[0].responsibilities.iter_mut().find(|r| r.id == "resp-1").unwrap();
+        let r1 = planned.nodes[0]
+            .responsibilities
+            .iter_mut()
+            .find(|r| r.id == "resp-1")
+            .unwrap();
         r1.statement = "Verifies the reworded thing".into();
         let second = scryer_core::changes::open_change(&mut planned, "reword it", now - 60);
         scryer_core::changes::tag(&mut planned, &["resp:resp-1".to_string()], &second);
         scryer_core::changes::sign_off(&mut planned, &second, now - 50).unwrap();
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
         fold_change(&ScryerServer::new(), dir.path(), &second);
-        assert!(committed_has(&model_ref, "resp-1"), "the reword folded under the second change");
+        assert!(
+            committed_has(&model_ref, "resp-1"),
+            "the reword folded under the second change"
+        );
 
         // Now anything folds under the FIRST change. Its snapshot still holds
         // the old sentence and the plan no longer tags the key to it.
         let text = fold_change(&ScryerServer::new(), dir.path(), &first);
-        assert!(!text.contains("RESTORED resp-1"), "folded, not dropped: {text}");
+        assert!(
+            !text.contains("RESTORED resp-1"),
+            "folded, not dropped: {text}"
+        );
         assert_eq!(
-            planned_resp(&model_ref, "resp-1").expect("still in the plan").statement,
+            planned_resp(&model_ref, "resp-1")
+                .expect("still in the plan")
+                .statement,
             "Verifies the reworded thing",
             "the approved text stands; the earlier snapshot must not be written back"
         );
@@ -4132,7 +4529,10 @@ mod tests {
             !planned.change_map.contains_key("resp:resp-1"),
             "and it is not re-filed under the change it already left"
         );
-        assert!(committed_has(&model_ref, "resp-2"), "the first change's own claim folded");
+        assert!(
+            committed_has(&model_ref, "resp-2"),
+            "the first change's own claim folded"
+        );
     }
 
     /// resp-48sw0j, the other side — the restore this guards is still there.
@@ -4162,7 +4562,10 @@ mod tests {
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
-        assert!(text.contains("RESTORED resp-1"), "a reverted approval is still a drop: {text}");
+        assert!(
+            text.contains("RESTORED resp-1"),
+            "a reverted approval is still a drop: {text}"
+        );
         assert_eq!(
             planned_resp(&model_ref, "resp-1").unwrap().statement,
             "Verifies the approved thing",
@@ -4178,10 +4581,13 @@ mod tests {
     /// out of the picture.
     fn countersign_project(model_ref: &ModelRef, opted_in: bool) -> String {
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("vt", Kind::Symbol, "verify_token", None));
+        committed
+            .nodes
+            .push(node("vt", Kind::Symbol, "verify_token", None));
         if opted_in {
-            committed.policy =
-                Some(scryer_core::changes::Policy { require_countersigned_folds: true });
+            committed.policy = Some(scryer_core::changes::Policy {
+                require_countersigned_folds: true,
+            });
         }
         scryer_core::write_model_at(model_ref, &committed).unwrap();
         scryer_core::ensure_planned_at(model_ref).unwrap();
@@ -4265,13 +4671,28 @@ mod tests {
         let (is_error, text) = fold_change_raw(&ScryerServer::new(), dir.path(), &cid);
         assert!(is_error, "{text}");
         assert!(text.contains("no sign-off at all"), "{text}");
-        assert!(text.contains("A team member other than its author"), "{text}");
+        assert!(
+            text.contains("A team member other than its author"),
+            "{text}"
+        );
         assert!(text.contains("nothing was folded"), "{text}");
-        assert!(!committed_has(&model_ref, "resp-1"), "the fold landed nothing");
-        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim is still pending");
+        assert!(
+            !committed_has(&model_ref, "resp-1"),
+            "the fold landed nothing"
+        );
+        assert!(
+            planned_resp(&model_ref, "resp-1").is_some(),
+            "the claim is still pending"
+        );
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(planned.changes.iter().any(|c| c.id == cid), "the change is still open");
-        assert_eq!(planned.change_map.get("resp:resp-1").map(String::as_str), Some(cid.as_str()));
+        assert!(
+            planned.changes.iter().any(|c| c.id == cid),
+            "the change is still open"
+        );
+        assert_eq!(
+            planned.change_map.get("resp:resp-1").map(String::as_str),
+            Some(cid.as_str())
+        );
 
         // A sign-off that names nobody is not a countersignature either.
         let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
@@ -4296,10 +4717,22 @@ mod tests {
 
         let (is_error, text) = fold_change_raw(&ScryerServer::new(), dir.path(), &cid);
         assert!(is_error, "{text}");
-        assert!(text.contains(&format!("signed off only by its own author, {author}")), "{text}");
-        assert!(text.contains(&format!("other than its author ({author})")), "{text}");
-        assert!(!committed_has(&model_ref, "resp-1"), "the fold landed nothing");
-        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim is still pending");
+        assert!(
+            text.contains(&format!("signed off only by its own author, {author}")),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!("other than its author ({author})")),
+            "{text}"
+        );
+        assert!(
+            !committed_has(&model_ref, "resp-1"),
+            "the fold landed nothing"
+        );
+        assert!(
+            planned_resp(&model_ref, "resp-1").is_some(),
+            "the claim is still pending"
+        );
     }
 
     /// Opted in, and a second actor signed: the fold proceeds as it always
@@ -4310,11 +4743,17 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let cid = countersign_project(&model_ref, true);
         let author = author_of(&model_ref, &cid);
-        assert_ne!(author, "reviewer-bea", "the countersignature is a DIFFERENT actor");
+        assert_ne!(
+            author, "reviewer-bea",
+            "the countersignature is a DIFFERENT actor"
+        );
         sign_as(&model_ref, &cid, "reviewer-bea", None);
 
         let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
-        assert!(text.contains(&format!("COUNTERSIGNED {cid} by reviewer-bea")), "{text}");
+        assert!(
+            text.contains(&format!("COUNTERSIGNED {cid} by reviewer-bea")),
+            "{text}"
+        );
         assert!(committed_has(&model_ref, "resp-1"), "{text}");
     }
 
@@ -4345,7 +4784,9 @@ mod tests {
 
         let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
         assert!(
-            text.contains(&format!("COUNTERSIGNED {cid} by claude-session-7 on behalf of jesseh")),
+            text.contains(&format!(
+                "COUNTERSIGNED {cid} by claude-session-7 on behalf of jesseh"
+            )),
             "the fold names the proxy it folded on: {text}"
         );
         assert!(committed_has(&model_ref, "resp-1"), "{text}");
@@ -4371,7 +4812,10 @@ mod tests {
             Some(a) => std::env::set_var(k, a),
             None => std::env::remove_var(k),
         };
-        let prior = (std::env::var("SCRYER_ACTOR").ok(), std::env::var("SCRYER_ON_BEHALF_OF").ok());
+        let prior = (
+            std::env::var("SCRYER_ACTOR").ok(),
+            std::env::var("SCRYER_ON_BEHALF_OF").ok(),
+        );
         set("SCRYER_ACTOR", actor);
         set("SCRYER_ON_BEHALF_OF", person);
         let out = body();
@@ -4385,9 +4829,12 @@ mod tests {
     /// picture and the countersignature is the only thing under test.
     fn countersign_project_for_mcp(model_ref: &ModelRef) -> Option<String> {
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("vt", Kind::Symbol, "verify_token", None));
-        committed.policy =
-            Some(scryer_core::changes::Policy { require_countersigned_folds: true });
+        committed
+            .nodes
+            .push(node("vt", Kind::Symbol, "verify_token", None));
+        committed.policy = Some(scryer_core::changes::Policy {
+            require_countersigned_folds: true,
+        });
         scryer_core::write_model_at(model_ref, &committed).unwrap();
         Some(model_ref.project_path().to_string_lossy().to_string())
     }
@@ -4416,7 +4863,6 @@ mod tests {
         cid
     }
 
-
     /// resp-7xts3y, through the seam a host actually signs at: the MCP tool
     /// reads both facts from the environment — WHO is signing, and who FOR —
     /// and the timeline ends up carrying both. A reader who only had `by`
@@ -4442,7 +4888,10 @@ mod tests {
                     .unwrap(),
             )
         });
-        assert!(text.contains("Signed by claude-session-7 on behalf of jesseh"), "{text}");
+        assert!(
+            text.contains("Signed by claude-session-7 on behalf of jesseh"),
+            "{text}"
+        );
 
         let approval = scryer_core::history::read_history(&model_ref)
             .into_iter()
@@ -4488,7 +4937,10 @@ mod tests {
             .find(|e| e.driver == "signed off")
             .unwrap();
         assert_eq!(direct.by, "jesseh");
-        assert!(direct.on_behalf_of.is_none(), "their own signature is nobody's proxy");
+        assert!(
+            direct.on_behalf_of.is_none(),
+            "their own signature is nobody's proxy"
+        );
     }
 
     /// The MCP seam names the ACTOR on the plan event, not the bare agent.
@@ -4553,17 +5005,26 @@ mod tests {
 
             // Ada authored it and Ada is the only signature: refused.
             let (is_error, text) = fold_change_raw(&server, dir.path(), &cid);
-            assert!(is_error, "the gate must bite for agent-authored work: {text}");
+            assert!(
+                is_error,
+                "the gate must bite for agent-authored work: {text}"
+            );
             assert!(
                 text.contains("signed off only by its own author, ada-fixture"),
                 "{text}"
             );
-            assert!(text.contains("other than its author (ada-fixture)"), "{text}");
+            assert!(
+                text.contains("other than its author (ada-fixture)"),
+                "{text}"
+            );
             cid
         });
         assert_eq!(author_of(&model_ref, &cid), "ada-fixture");
         assert!(!committed_has(&model_ref, "resp-1"), "nothing folded");
-        assert!(planned_resp(&model_ref, "resp-1").is_some(), "the claim is still pending");
+        assert!(
+            planned_resp(&model_ref, "resp-1").is_some(),
+            "the claim is still pending"
+        );
 
         // A second actor signs under their own identity: countersigned, folds.
         let text = as_actor(Some("reviewer-bea"), || {
@@ -4577,7 +5038,9 @@ mod tests {
             fold_change(&server, dir.path(), &cid)
         });
         assert!(
-            text.contains(&format!("COUNTERSIGNED {cid} by reviewer-bea (authored by ada-fixture)")),
+            text.contains(&format!(
+                "COUNTERSIGNED {cid} by reviewer-bea (authored by ada-fixture)"
+            )),
             "{text}"
         );
         assert!(committed_has(&model_ref, "resp-1"), "{text}");
@@ -4593,10 +5056,18 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
 
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("sys", Kind::System, "Acme", None));
-        committed.nodes.push(node("cont", Kind::Container, "API", Some("sys")));
-        committed.nodes.push(node("comp", Kind::Component, "Auth", Some("cont")));
-        committed.nodes.push(node("peer", Kind::Component, "Billing", Some("cont")));
+        committed
+            .nodes
+            .push(node("sys", Kind::System, "Acme", None));
+        committed
+            .nodes
+            .push(node("cont", Kind::Container, "API", Some("sys")));
+        committed
+            .nodes
+            .push(node("comp", Kind::Component, "Auth", Some("cont")));
+        committed
+            .nodes
+            .push(node("peer", Kind::Component, "Billing", Some("cont")));
         // A committed link the plan REMOVES — deletions never ride a node fold.
         committed.links.push(Link {
             id: "l-old".into(),
@@ -4615,7 +5086,9 @@ mod tests {
             .responsibilities
             .push(resp("resp-1"));
         // A plan-added link to a plan-only node: not ready, stays pending.
-        planned.nodes.push(node("newco", Kind::Component, "Tokens", Some("cont")));
+        planned
+            .nodes
+            .push(node("newco", Kind::Component, "Tokens", Some("cont")));
         planned.links.push(Link {
             id: "l-new".into(),
             src: "comp".into(),
@@ -4666,8 +5139,14 @@ mod tests {
     /// The change id an `open_change` response opened — "Opened chg-…".
     fn opened(r: &CallToolResult) -> String {
         let text = tool_text(r);
-        let rest = text.split("Opened ").nth(1).unwrap_or_else(|| panic!("no 'Opened' in: {text}"));
-        rest.split(|c: char| c.is_whitespace() || c == '(' || c == ',' || c == '.').next().unwrap().to_string()
+        let rest = text
+            .split("Opened ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("no 'Opened' in: {text}"));
+        rest.split(|c: char| c.is_whitespace() || c == '(' || c == ',' || c == '.')
+            .next()
+            .unwrap()
+            .to_string()
     }
 
     /// The minted id (and first claim id) of the planned node called `name`.
@@ -4678,11 +5157,17 @@ mod tests {
             .iter()
             .find(|n| n.name == name)
             .unwrap_or_else(|| panic!("no planned node named {name}"));
-        (n.id.clone(), n.responsibilities.first().map(|r| r.id.clone()))
+        (
+            n.id.clone(),
+            n.responsibilities.first().map(|r| r.id.clone()),
+        )
     }
 
     fn tool_text(r: &CallToolResult) -> String {
-        r.content.iter().find_map(|c| c.as_text().map(|t| t.text.clone())).unwrap()
+        r.content
+            .iter()
+            .find_map(|c| c.as_text().map(|t| t.text.clone()))
+            .unwrap()
     }
 
     /// The ledger loop end to end: `open_change` opens a named change, an
@@ -4697,7 +5182,8 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "API", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "API", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
         let server = ScryerServer::new();
@@ -4726,8 +5212,20 @@ mod tests {
         let (rl, rl_resp) = planned_named(&model_ref, "RateLimiter");
         let rl_resp = rl_resp.unwrap();
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert_eq!(planned.change_map.get(&format!("node:{rl}")).map(String::as_str), Some(chg.as_str()));
-        assert_eq!(planned.change_map.get(&format!("resp:{rl_resp}")).map(String::as_str), Some(chg.as_str()));
+        assert_eq!(
+            planned
+                .change_map
+                .get(&format!("node:{rl}"))
+                .map(String::as_str),
+            Some(chg.as_str())
+        );
+        assert_eq!(
+            planned
+                .change_map
+                .get(&format!("resp:{rl_resp}"))
+                .map(String::as_str),
+            Some(chg.as_str())
+        );
 
         // get_pending groups by change and filters to one.
         let r = server
@@ -4739,8 +5237,15 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&tool_text(&r)).unwrap();
         assert_eq!(v["currentChange"], chg.as_str());
         assert_eq!(v["openChanges"][0]["id"], chg.as_str());
-        assert_eq!(v["openChanges"][0]["rationale"], "give the API rate limiting");
-        assert!(v["changes"].as_array().unwrap().iter().all(|c| c["change"] == chg.as_str()));
+        assert_eq!(
+            v["openChanges"][0]["rationale"],
+            "give the API rate limiting"
+        );
+        assert!(v["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["change"] == chg.as_str()));
         let r = server
             .get_pending(Parameters(GetPendingRequest {
                 project: Some(project.clone()),
@@ -4748,7 +5253,10 @@ mod tests {
             }))
             .unwrap();
         let v: serde_json::Value = serde_json::from_str(&tool_text(&r)).unwrap();
-        assert!(v["changes"].as_array().unwrap().is_empty(), "everything is tagged");
+        assert!(
+            v["changes"].as_array().unwrap().is_empty(),
+            "everything is tagged"
+        );
 
         // A FRESH session (new server) resumes the change by id…
         let session2 = ScryerServer::new();
@@ -4759,7 +5267,11 @@ mod tests {
                 change_id: Some(chg.clone()),
             }))
             .unwrap();
-        assert!(tool_text(&r).contains(&format!("Resumed {chg}")), "{}", tool_text(&r));
+        assert!(
+            tool_text(&r).contains(&format!("Resumed {chg}")),
+            "{}",
+            tool_text(&r)
+        );
 
         // …and folds the whole change in one call.
         let r = session2
@@ -4812,17 +5324,18 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "API", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "API", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
         let server = ScryerServer::new();
         let open = |rationale: &str| {
             server
                 .open_change(Parameters(OpenChangeRequest {
-                project: Some(project.clone()),
-                rationale: Some(rationale.into()),
-                change_id: None,
-            }))
+                    project: Some(project.clone()),
+                    rationale: Some(rationale.into()),
+                    change_id: None,
+                }))
                 .unwrap()
         };
         let chg1 = opened(&open("give the API rate limiting"));
@@ -4850,15 +5363,33 @@ mod tests {
             }))
             .unwrap();
         let text = tool_text(&r);
-        assert!(text.contains(&format!("Moved 2 entries to {chg2}")), "{text}");
+        assert!(
+            text.contains(&format!("Moved 2 entries to {chg2}")),
+            "{text}"
+        );
         assert!(text.contains(&format!("node:{rl} (was {chg1})")), "{text}");
-        assert!(text.contains(&format!("resp:{rl_resp} (was {chg1})")), "{text}");
+        assert!(
+            text.contains(&format!("resp:{rl_resp} (was {chg1})")),
+            "{text}"
+        );
         assert!(text.contains("No pending work under: node-99"), "{text}");
 
         // The carrier AND its claim moved together — the unit get_pending shows.
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert_eq!(planned.change_map.get(&format!("node:{rl}")).map(String::as_str), Some(chg2.as_str()));
-        assert_eq!(planned.change_map.get(&format!("resp:{rl_resp}")).map(String::as_str), Some(chg2.as_str()));
+        assert_eq!(
+            planned
+                .change_map
+                .get(&format!("node:{rl}"))
+                .map(String::as_str),
+            Some(chg2.as_str())
+        );
+        assert_eq!(
+            planned
+                .change_map
+                .get(&format!("resp:{rl_resp}"))
+                .map(String::as_str),
+            Some(chg2.as_str())
+        );
 
         // Detaching sends them back to the unfiled bucket.
         let r = server
@@ -4868,7 +5399,11 @@ mod tests {
                 to: Some("unfiled".into()),
             }))
             .unwrap();
-        assert!(tool_text(&r).contains("Moved 2 entries to unfiled"), "{}", tool_text(&r));
+        assert!(
+            tool_text(&r).contains("Moved 2 entries to unfiled"),
+            "{}",
+            tool_text(&r)
+        );
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert!(planned.change_map.is_empty(), "{:?}", planned.change_map);
     }
@@ -4883,7 +5418,8 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "API", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "API", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
         // chg-1 gets real work; chg-2 is opened and never written to.
@@ -4891,10 +5427,10 @@ mod tests {
         let chg1 = opened(
             &server
                 .open_change(Parameters(OpenChangeRequest {
-                project: Some(project.clone()),
-                rationale: Some("rate limiting".into()),
-                change_id: None,
-            }))
+                    project: Some(project.clone()),
+                    rationale: Some("rate limiting".into()),
+                    change_id: None,
+                }))
                 .unwrap(),
         );
         server
@@ -4911,10 +5447,10 @@ mod tests {
         let chg2 = opened(
             &server
                 .open_change(Parameters(OpenChangeRequest {
-                project: Some(project.clone()),
-                rationale: Some("opened then orphaned".into()),
-                change_id: None,
-            }))
+                    project: Some(project.clone()),
+                    rationale: Some("opened then orphaned".into()),
+                    change_id: None,
+                }))
                 .unwrap(),
         );
         let close = |id: &str| {
@@ -4927,16 +5463,27 @@ mod tests {
         // A change with tagged entries refuses to close by hand.
         let r = close(&chg1).unwrap();
         assert_eq!(r.is_error, Some(true));
-        assert!(tool_text(&r).contains("still has 1 tagged entry"), "{}", tool_text(&r));
+        assert!(
+            tool_text(&r).contains("still has 1 tagged entry"),
+            "{}",
+            tool_text(&r)
+        );
 
         // The stranded one closes, and the session (which selected it on
         // open) detaches.
         let r = close(&chg2).unwrap();
-        assert!(tool_text(&r).contains(&format!("Closed {chg2}")), "{}", tool_text(&r));
+        assert!(
+            tool_text(&r).contains(&format!("Closed {chg2}")),
+            "{}",
+            tool_text(&r)
+        );
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(planned.changes.len(), 1);
         assert_eq!(planned.changes[0].id, chg1);
-        assert!(server.session_change(&model_ref).is_none(), "selection detached");
+        assert!(
+            server.session_change(&model_ref).is_none(),
+            "selection detached"
+        );
 
         let history = scryer_core::history::read_history(&model_ref);
         let ev = history
@@ -4949,7 +5496,11 @@ mod tests {
 
         let r = close("chg-9").unwrap();
         assert_eq!(r.is_error, Some(true));
-        assert!(tool_text(&r).contains("no open change 'chg-9'"), "{}", tool_text(&r));
+        assert!(
+            tool_text(&r).contains("no open change 'chg-9'"),
+            "{}",
+            tool_text(&r)
+        );
     }
 
     /// Two changes touching the same element is the collision the ledger
@@ -4962,17 +5513,18 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "API", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "API", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
         let session1 = ScryerServer::new();
         let chg1 = opened(
             &session1
                 .open_change(Parameters(OpenChangeRequest {
-                project: Some(project.clone()),
-                rationale: Some("rate limiting".into()),
-                change_id: None,
-            }))
+                    project: Some(project.clone()),
+                    rationale: Some("rate limiting".into()),
+                    change_id: None,
+                }))
                 .unwrap(),
         );
         session1
@@ -4992,10 +5544,10 @@ mod tests {
         let chg2 = opened(
             &session2
                 .open_change(Parameters(OpenChangeRequest {
-                project: Some(project.clone()),
-                rationale: Some("rename things".into()),
-                change_id: None,
-            }))
+                    project: Some(project.clone()),
+                    rationale: Some("rename things".into()),
+                    change_id: None,
+                }))
                 .unwrap(),
         );
         let r = session2
@@ -5016,12 +5568,17 @@ mod tests {
             .unwrap();
         let text = tool_text(&r);
         assert!(
-            text.contains(&format!("conflict: node:{rl} was tagged by {chg1} (\"rate limiting\")")),
+            text.contains(&format!(
+                "conflict: node:{rl} was tagged by {chg1} (\"rate limiting\")"
+            )),
             "{text}"
         );
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(
-            planned.change_map.get(&format!("node:{rl}")).map(String::as_str),
+            planned
+                .change_map
+                .get(&format!("node:{rl}"))
+                .map(String::as_str),
             Some(chg2.as_str()),
             "last writer wins the tag"
         );
@@ -5044,7 +5601,9 @@ mod tests {
         committed.nodes.push(c);
         scryer_core::write_model_at(&model_ref, &committed).unwrap();
         let mut planned = committed.clone();
-        planned.nodes[0].responsibilities.retain(|r| r.id != "resp-2");
+        planned.nodes[0]
+            .responsibilities
+            .retain(|r| r.id != "resp-2");
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let server = ScryerServer::with_change(dir.path());
@@ -5079,14 +5638,21 @@ mod tests {
         // resp-1 and the hand-written resp-9 keep their identity; both 'new's
         // mint PAST resp-9 (payload floor) — not past resp-2 alone.
         assert_eq!(ids.len(), 4, "{ids:?}");
-        assert_eq!((ids[0], ids[2]), ("resp-1", "resp-9"), "real ids keep their identity: {ids:?}");
+        assert_eq!(
+            (ids[0], ids[2]),
+            ("resp-1", "resp-9"),
+            "real ids keep their identity: {ids:?}"
+        );
         for fresh in [ids[1], ids[3]] {
             assert!(scryer_core::is_minted_id(fresh, "resp"), "{fresh}");
             assert!(!["resp-1", "resp-2", "resp-9"].contains(&fresh), "{ids:?}");
         }
         assert_ne!(ids[1], ids[3], "two 'new's take two ids: {ids:?}");
         let text = tool_text(&r);
-        assert!(text.contains(&format!("node-1: 'new' → {}", ids[1])), "reports the re-mint: {text}");
+        assert!(
+            text.contains(&format!("node-1: 'new' → {}", ids[1])),
+            "reports the re-mint: {text}"
+        );
     }
 
     /// The stale-snapshot collision: an agent working from an old read picks a
@@ -5144,11 +5710,16 @@ mod tests {
         let n1 = on("node-1");
         assert_eq!(n1[0], "resp-1");
         let fresh = n1[1].clone();
-        assert!(scryer_core::is_minted_id(&fresh, "resp") && fresh != "resp-2", "the colliding id was re-minted: {n1:?}");
+        assert!(
+            scryer_core::is_minted_id(&fresh, "resp") && fresh != "resp-2",
+            "the colliding id was re-minted: {n1:?}"
+        );
         assert_eq!(on("node-2"), vec!["resp-2"], "the real resp-2 is untouched");
         let text = tool_text(&r);
         assert!(
-            text.contains(&format!("node-1: 'resp-2' → {fresh} (that id belongs to a claim on another node)")),
+            text.contains(&format!(
+                "node-1: 'resp-2' → {fresh} (that id belongs to a claim on another node)"
+            )),
             "the report names the collision and the new id: {text}"
         );
     }
@@ -5163,9 +5734,11 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "API", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "API", Some("node-1")));
         // Lives elsewhere in the tree — not the subtree being replaced.
-        m.nodes.push(node("node-3", Kind::Container, "Worker", Some("node-1")));
+        m.nodes
+            .push(node("node-3", Kind::Container, "Worker", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
         scryer_core::write_planned_at(&model_ref, &m).unwrap();
 
@@ -5198,7 +5771,10 @@ mod tests {
         );
         let router = planned.nodes.iter().find(|n| n.name == "Router").unwrap();
         let fresh = router.id.clone();
-        assert!(scryer_core::is_minted_id(&fresh, "node") && fresh != "node-3", "the collision took a fresh id: {fresh}");
+        assert!(
+            scryer_core::is_minted_id(&fresh, "node") && fresh != "node-3",
+            "the collision took a fresh id: {fresh}"
+        );
         let auth = planned.nodes.iter().find(|n| n.name == "Auth").unwrap();
         assert_eq!(
             auth.parent_id.as_deref(),
@@ -5209,7 +5785,9 @@ mod tests {
         assert_eq!(link.dst, fresh, "the link endpoint followed the rename");
         let text = tool_text(&r);
         assert!(
-            text.contains(&format!("'node-3' → {fresh} (that id belongs to a node outside this subtree)")),
+            text.contains(&format!(
+                "'node-3' → {fresh} (that id belongs to a node outside this subtree)"
+            )),
             "the report names the collision: {text}"
         );
     }
@@ -5245,11 +5823,21 @@ mod tests {
 
         let committed = scryer_core::read_model_at(&model_ref).unwrap();
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        let minted = committed.nodes.iter().find(|n| n.id == "node-2").unwrap().responsibilities[0].id.clone();
+        let minted = committed
+            .nodes
+            .iter()
+            .find(|n| n.id == "node-2")
+            .unwrap()
+            .responsibilities[0]
+            .id
+            .clone();
         assert!(scryer_core::is_minted_id(&minted, "resp"), "{minted}");
         for layer in [&committed, &planned] {
             let api = layer.nodes.iter().find(|n| n.id == "node-2").unwrap();
-            assert_eq!(api.responsibilities[0].id, minted, "minted, and the same in both layers");
+            assert_eq!(
+                api.responsibilities[0].id, minted,
+                "minted, and the same in both layers"
+            );
         }
         assert!(
             scryer_core::diff::diff(&committed, &planned).is_empty(),
@@ -5294,7 +5882,10 @@ mod tests {
         let committed = scryer_core::read_model_at(&model_ref).unwrap();
         let minted = &committed.nodes[0].responsibilities[0].id;
         assert!(scryer_core::is_minted_id(minted, "resp"), "{minted}");
-        assert_ne!(minted, "resp-5", "must not reuse the dropped resp-5 still live in the outgoing layers");
+        assert_ne!(
+            minted, "resp-5",
+            "must not reuse the dropped resp-5 still live in the outgoing layers"
+        );
     }
 
     /// `sign_off` snapshots the session's change; a plan write
@@ -5337,7 +5928,10 @@ mod tests {
 
         let text = tool_text(
             &server
-                .sign_off(Parameters(SignOffRequest { project: project.clone(), change_id: None }))
+                .sign_off(Parameters(SignOffRequest {
+                    project: project.clone(),
+                    change_id: None,
+                }))
                 .unwrap(),
         );
         assert!(text.contains(&format!("Signed off {cid}")), "{text}");
@@ -5347,7 +5941,10 @@ mod tests {
 
         let text = write("Verifies something else", Some("Also logs tokens"));
         assert!(text.contains("AMENDMENT: resp:resp-1"), "{text}");
-        assert!(text.contains("approved: \"Verifies the approved thing\""), "{text}");
+        assert!(
+            text.contains("approved: \"Verifies the approved thing\""),
+            "{text}"
+        );
         assert!(text.contains("ADDITION: resp:resp-2"), "{text}");
         // The write itself landed — the agent can always record what it did.
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();

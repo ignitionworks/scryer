@@ -31,7 +31,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -124,16 +126,16 @@ impl ScryerServer {
             .entries
             .iter()
             .chain(req.test_entries.iter())
-            .filter(|e| !e.locations.is_empty() && !committed_resp_ids.contains(&e.responsibility_id))
+            .filter(|e| {
+                !e.locations.is_empty() && !committed_resp_ids.contains(&e.responsibility_id)
+            })
             .map(|e| e.responsibility_id.clone())
             .collect();
         premature.sort();
         premature.dedup();
 
-        let count = req.entries.len()
-            + req.test_entries.len()
-            + req.schemas.len()
-            + req.boundaries.len();
+        let count =
+            req.entries.len() + req.test_entries.len() + req.schemas.len() + req.boundaries.len();
         let (mut normalized, mut committed_dirty) = apply_resp_anchor_entries(
             model_ref.project_path(),
             &mut model,
@@ -259,7 +261,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -283,8 +287,11 @@ impl ScryerServer {
         }
 
         // Validate members exist + share a level
-        let node_kinds: std::collections::HashMap<&str, scryer_core::Kind> =
-            model.nodes.iter().map(|n| (n.id.as_str(), n.kind)).collect();
+        let node_kinds: std::collections::HashMap<&str, scryer_core::Kind> = model
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n.kind))
+            .collect();
         for g in &groups {
             let mut kinds: HashSet<scryer_core::Kind> = HashSet::new();
             for mid in &g.member_ids {
@@ -363,7 +370,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -465,8 +474,10 @@ impl ScryerServer {
         Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 
-    #[tool(description = "Delete a group by id. Fold the deletion with mark_implemented `group_ids`.\n\
-         Rules: fold-in-layers")]
+    #[tool(
+        description = "Delete a group by id. Fold the deletion with mark_implemented `group_ids`.\n\
+         Rules: fold-in-layers"
+    )]
     fn delete_group(
         &self,
         Parameters(req): Parameters<DeleteGroupRequest>,
@@ -479,7 +490,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -549,8 +562,14 @@ impl ScryerServer {
         };
 
         match (
-            req.rationale.as_deref().map(str::trim).filter(|s| !s.is_empty()),
-            req.change_id.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+            req.rationale
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            req.change_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
         ) {
             (Some(_), Some(_)) => Ok(CallToolResult::error(vec![Content::text(
                 "Pass rationale (open a new change) OR change_id (resume one), not both."
@@ -560,8 +579,9 @@ impl ScryerServer {
                 let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
                 let current = match self.session_change(&model_ref) {
                     Some(id) => format!("Current change: {id}."),
-                    None => "No current change — plan writes are refused until one is open."
-                        .to_string(),
+                    None => {
+                        "No current change — plan writes are refused until one is open.".to_string()
+                    }
                 };
                 Ok(CallToolResult::error(vec![Content::text(format!(
                     "Pass rationale (open a new change) or change_id (resume one).\n{current}\n{}",
@@ -592,10 +612,7 @@ impl ScryerServer {
                     return Ok(CallToolResult::error(vec![Content::text(e)]));
                 }
                 drop(_lock);
-                self.set_session_change(Some((
-                    model_ref.project_path().to_path_buf(),
-                    id.clone(),
-                )));
+                self.set_session_change(Some((model_ref.project_path().to_path_buf(), id.clone())));
                 Ok(CallToolResult::success(vec![Content::text(format!(
                     "Opened {id} — \"{rationale}\". Plan writes in this session are now \
                      tagged to it; fold it with mark_implemented {{change: \"{id}\"}} when \
@@ -723,20 +740,23 @@ impl ScryerServer {
         }
         drop(_lock);
         // The session keeps working on the change it just signed off.
-        self.set_session_change(Some((model_ref.project_path().to_path_buf(), target.clone())));
+        self.set_session_change(Some((
+            model_ref.project_path().to_path_buf(),
+            target.clone(),
+        )));
         let signature = match (actor.as_deref(), on_behalf_of.as_deref()) {
             (Some(a), Some(p)) => format!(" Signed by {a} on behalf of {p}, and recorded as such."),
             (Some(a), None) => format!(" Signed by {a}."),
             _ => String::new(),
         };
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        Ok(CallToolResult::success(vec![Content::text(format!(
             "Signed off {target} — {n} entr{} snapshotted as the developer's intent.{signature} \
              From here, a claim you reword or add under it is an amendment/addition: it lands \
              as vagrant for the developer's verdict at mark_implemented and does not fold. \
              If implementing shows a planned claim is wrong, reword it and fold the rest — \
              the reword waits.",
             if n == 1 { "y" } else { "ies" }
-        ))]));
+        ))]))
     }
 
     #[tool(
@@ -791,11 +811,11 @@ impl ScryerServer {
         if self.session_change(&model_ref).as_deref() == Some(cid) {
             self.set_session_change(None);
         }
-        return Ok(CallToolResult::success(vec![Content::text(format!(
+        Ok(CallToolResult::success(vec![Content::text(format!(
             "Closed {cid} — \"{}\" (abandoned, no entries). The rationale is kept in \
              the history log.",
             meta.rationale
-        ))]));
+        ))]))
     }
 
     #[tool(
@@ -872,8 +892,7 @@ impl ScryerServer {
             },
         };
         let outcome =
-            match scryer_core::changes::retag(&committed, &mut plan, &targets, dest.as_deref())
-            {
+            match scryer_core::changes::retag(&committed, &mut plan, &targets, dest.as_deref()) {
                 Ok(o) => o,
                 Err(e) => {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -913,7 +932,7 @@ impl ScryerServer {
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
-        return Ok(CallToolResult::success(vec![Content::text(msg)]));
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 }
 
@@ -986,10 +1005,7 @@ mod tests {
             .update_source_map(Parameters(UpdateSourceMapRequest {
                 project: Some(dir.path().to_string_lossy().to_string()),
                 entries: vec![],
-                test_entries: vec![
-                    entry("r-c", "tests/c.rs"),
-                    entry("r-p", "tests/p.rs"),
-                ],
+                test_entries: vec![entry("r-c", "tests/c.rs"), entry("r-p", "tests/p.rs")],
                 schemas: vec![],
                 boundaries: vec![],
             }))
@@ -1007,7 +1023,10 @@ mod tests {
             draft.test_map["r-p"][0].pattern, "tests/p.rs",
             "plan-added claim's attached test stays in the draft"
         );
-        assert!(!draft.test_map.contains_key("r-c"), "no shadow copy in the draft");
+        assert!(
+            !draft.test_map.contains_key("r-c"),
+            "no shadow copy in the draft"
+        );
     }
 
     /// An anchor keyed to a plan-added (uncommitted) claim is written — code-
@@ -1055,9 +1074,15 @@ mod tests {
             .unwrap();
         assert!(!res.is_error.unwrap_or(false), "warn, never reject");
         let out = serde_json::to_string(&res.content).unwrap();
-        assert!(out.contains("PLAN-ADDED") && out.contains("r-p"), "warns: {out}");
+        assert!(
+            out.contains("PLAN-ADDED") && out.contains("r-p"),
+            "warns: {out}"
+        );
         let draft = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert_eq!(draft.source_map["r-p"][0].pattern, "src/f.ts", "the write still lands");
+        assert_eq!(
+            draft.source_map["r-p"][0].pattern, "src/f.ts",
+            "the write still lands"
+        );
 
         let res = server
             .update_source_map(Parameters(UpdateSourceMapRequest {
@@ -1069,7 +1094,10 @@ mod tests {
             }))
             .unwrap();
         let out = serde_json::to_string(&res.content).unwrap();
-        assert!(!out.contains("PLAN-ADDED"), "committed claim's anchor is quiet: {out}");
+        assert!(
+            !out.contains("PLAN-ADDED"),
+            "committed claim's anchor is quiet: {out}"
+        );
     }
 
     /// A boundary glob with no directory prefix is written (the user may mean
@@ -1080,7 +1108,8 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "Web", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "Web", Some("node-1")));
         scryer_core::write_planned_at(&model_ref, &m).unwrap();
 
         let server = ScryerServer::new();
@@ -1120,7 +1149,10 @@ mod tests {
             }))
             .unwrap();
         let out = serde_json::to_string(&res.content).unwrap();
-        assert!(!out.contains("no directory prefix"), "scoped glob is quiet: {out}");
+        assert!(
+            !out.contains("no directory prefix"),
+            "scoped glob is quiet: {out}"
+        );
     }
 
     /// update_group patches an existing group by id: rename + clear
@@ -1132,8 +1164,10 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "Web", Some("node-1")));
-        m.nodes.push(node("node-3", Kind::Container, "Worker", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "Web", Some("node-1")));
+        m.nodes
+            .push(node("node-3", Kind::Container, "Worker", Some("node-1")));
         m.groups.push(Group {
             id: "group-1".into(),
             name: "Backend".into(),
@@ -1165,7 +1199,11 @@ mod tests {
         let g = scryer_core::read_planned_at(&model_ref).unwrap().groups[0].clone();
         assert_eq!(g.name, "Platform");
         assert_eq!(g.description.as_deref(), Some("deployable backend"));
-        assert_eq!(g.member_ids.len(), 2, "membership unchanged when memberIds omitted");
+        assert_eq!(
+            g.member_ids.len(),
+            2,
+            "membership unchanged when memberIds omitted"
+        );
         assert!(g.responsibilities.is_empty(), "responsibilities cleared");
 
         let res = server
@@ -1225,13 +1263,19 @@ mod tests {
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         let minted = planned.groups[0].responsibilities[0].id.clone();
         assert!(scryer_core::is_minted_id(&minted, "resp"), "{minted}");
-        assert_ne!(minted, "resp-3", "must not collide with the node-owned resp-3");
+        assert_ne!(
+            minted, "resp-3",
+            "must not collide with the node-owned resp-3"
+        );
         let text = res
             .content
             .iter()
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap();
-        assert!(text.contains(&format!("group-1: 'new' → {minted}")), "reports the re-mint: {text}");
+        assert!(
+            text.contains(&format!("group-1: 'new' → {minted}")),
+            "reports the re-mint: {text}"
+        );
     }
 
     /// replace_groups (raw Group JSON) gets the same guard: invented ids are
@@ -1272,6 +1316,9 @@ mod tests {
             .iter()
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap();
-        assert!(text.contains(&format!("group-1: 'new' → {minted}")), "reports the re-mint: {text}");
+        assert!(
+            text.contains(&format!("group-1: 'new' → {minted}")),
+            "reports the re-mint: {text}"
+        );
     }
 }

@@ -113,7 +113,11 @@ fn subtree_payload(model: &ScryModel, node_id: &str) -> Result<serde_json::Value
     subtree_ids.insert(node_id.to_string());
     let mut frontier = vec![node_id.to_string()];
     while let Some(id) = frontier.pop() {
-        for child in model.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+        for child in model
+            .nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&id))
+        {
             if subtree_ids.insert(child.id.clone()) {
                 frontier.push(child.id.clone());
             }
@@ -176,7 +180,12 @@ fn subtree_payload(model: &ScryModel, node_id: &str) -> Result<serde_json::Value
         .source_map
         .iter()
         .filter(|(k, _)| subtree_resp_ids.contains(k.as_str()) || subtree_ids.contains(k.as_str()))
-        .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(serde_json::Value::Null)))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            )
+        })
         .collect();
 
     // Attached tests (claim → test locations), scoped like the source map.
@@ -184,7 +193,12 @@ fn subtree_payload(model: &ScryModel, node_id: &str) -> Result<serde_json::Value
         .test_map
         .iter()
         .filter(|(k, _)| subtree_resp_ids.contains(k.as_str()))
-        .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(serde_json::Value::Null)))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            )
+        })
         .collect();
 
     // Boundaries are keyed by node id.
@@ -192,7 +206,12 @@ fn subtree_payload(model: &ScryModel, node_id: &str) -> Result<serde_json::Value
         .boundaries
         .iter()
         .filter(|(k, _)| subtree_ids.contains(k.as_str()))
-        .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(serde_json::Value::Null)))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                serde_json::to_value(v).unwrap_or(serde_json::Value::Null),
+            )
+        })
         .collect();
 
     // References available to this node's children: the partners of the node's
@@ -227,8 +246,11 @@ fn subtree_payload(model: &ScryModel, node_id: &str) -> Result<serde_json::Value
         .flat_map(|n| n.responsibilities.iter())
         .filter_map(|r| r.concern.as_deref())
         .collect();
-    let concerns: Vec<_> =
-        model.concerns.iter().filter(|c| used_concerns.contains(c.slug.as_str())).collect();
+    let concerns: Vec<_> = model
+        .concerns
+        .iter()
+        .filter(|c| used_concerns.contains(c.slug.as_str()))
+        .collect();
 
     Ok(serde_json::json!({
         "node": subtree_nodes.iter().find(|n| n.id == node_id),
@@ -299,26 +321,34 @@ fn eval_condition(n: &Node, c: &QueryCondition, child_count: usize) -> Result<bo
         return Ok(if op == "exists" { present } else { !present });
     }
 
-    let value = c
-        .value
-        .as_ref()
-        .ok_or_else(|| format!("Condition on '{}' with op '{}' needs a `value`.", c.field, op))?;
+    let value = c.value.as_ref().ok_or_else(|| {
+        format!(
+            "Condition on '{}' with op '{}' needs a `value`.",
+            c.field, op
+        )
+    })?;
 
     match &fv {
         FieldVal::Bool(b) => {
-            let want = value
-                .as_bool()
-                .ok_or_else(|| format!("Field '{}' is boolean — `value` must be true/false.", c.field))?;
+            let want = value.as_bool().ok_or_else(|| {
+                format!(
+                    "Field '{}' is boolean — `value` must be true/false.",
+                    c.field
+                )
+            })?;
             match op {
                 "eq" => Ok(*b == want),
                 "ne" => Ok(*b != want),
-                _ => Err(format!("Operator '{}' invalid on boolean field '{}' (use eq/ne).", op, c.field)),
+                _ => Err(format!(
+                    "Operator '{}' invalid on boolean field '{}' (use eq/ne).",
+                    op, c.field
+                )),
             }
         }
         FieldVal::Num(x) => {
-            let want = value
-                .as_f64()
-                .ok_or_else(|| format!("Field '{}' is numeric — `value` must be a number.", c.field))?;
+            let want = value.as_f64().ok_or_else(|| {
+                format!("Field '{}' is numeric — `value` must be a number.", c.field)
+            })?;
             match op {
                 "eq" => Ok(*x == want),
                 "ne" => Ok(*x != want),
@@ -326,13 +356,19 @@ fn eval_condition(n: &Node, c: &QueryCondition, child_count: usize) -> Result<bo
                 "gte" => Ok(*x >= want),
                 "lt" => Ok(*x < want),
                 "lte" => Ok(*x <= want),
-                _ => Err(format!("Operator '{}' invalid on numeric field '{}'.", op, c.field)),
+                _ => Err(format!(
+                    "Operator '{}' invalid on numeric field '{}'.",
+                    op, c.field
+                )),
             }
         }
         FieldVal::Str(o) => {
-            let want = value
-                .as_str()
-                .ok_or_else(|| format!("Field '{}' is a string — `value` must be a string.", c.field))?;
+            let want = value.as_str().ok_or_else(|| {
+                format!(
+                    "Field '{}' is a string — `value` must be a string.",
+                    c.field
+                )
+            })?;
             let have = o.as_deref().unwrap_or("");
             match op {
                 "eq" => Ok(have.eq_ignore_ascii_case(want)),
@@ -361,7 +397,10 @@ fn read_layer(model_ref: &scryer_core::ModelRef, layer: Layer) -> Result<ScryMod
 /// `/`-separated. An absolute path inside the project is accepted.
 fn normalize_project_rel(model_ref: &scryer_core::ModelRef, path: &str) -> String {
     let mut file = path.replace('\\', "/");
-    let root = model_ref.project_path().to_string_lossy().replace('\\', "/");
+    let root = model_ref
+        .project_path()
+        .to_string_lossy()
+        .replace('\\', "/");
     if let Some(rest) = file.strip_prefix(root.as_str()) {
         file = rest.trim_start_matches('/').to_string();
     }
@@ -387,7 +426,9 @@ impl ScryerServer {
         let model = match read_layer(&model_ref, req.layer) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         // Keep the legacy committed-model baseline fresh only when committed was actually
@@ -471,7 +512,9 @@ impl ScryerServer {
         let model = match read_layer(&model_ref, req.layer) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         // Keep the legacy committed-model baseline fresh only when committed was actually
@@ -490,9 +533,7 @@ impl ScryerServer {
             .map(|t| t.to_lowercase())
             .collect();
         if terms.is_empty() {
-            return Ok(CallToolResult::error(vec![Content::text(
-                "Empty query.",
-            )]));
+            return Ok(CallToolResult::error(vec![Content::text("Empty query.")]));
         }
 
         const CAP: usize = 50;
@@ -575,7 +616,9 @@ impl ScryerServer {
         {
             Ok(r) => r,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         let res = report.result;
@@ -779,24 +822,23 @@ impl ScryerServer {
             scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
             for (score, n) in scored.iter().take(3) {
                 finest.insert(n.id.clone());
-                let resps: Vec<&str> =
-                    n.responsibilities.iter().map(|r| r.statement.as_str()).collect();
+                let resps: Vec<&str> = n
+                    .responsibilities
+                    .iter()
+                    .map(|r| r.statement.as_str())
+                    .collect();
                 // Testable claims on this node with no test attached — same
                 // gate as health's `untested` (person/external never expect
                 // tests), surfaced per match so the test gap is in view from
                 // the first orientation call.
-                let untested = if n.external == Some(true) || n.kind == scryer_core::Kind::Person
-                {
+                let untested = if n.external == Some(true) || n.kind == scryer_core::Kind::Person {
                     0
                 } else {
                     n.responsibilities
                         .iter()
                         .filter(|r| {
                             scryer_core::ears::classify(&r.statement).testable()
-                                && !working
-                                    .test_map
-                                    .get(&r.id)
-                                    .is_some_and(|l| !l.is_empty())
+                                && !working.test_map.get(&r.id).is_some_and(|l| !l.is_empty())
                         })
                         .count()
                 };
@@ -822,7 +864,11 @@ impl ScryerServer {
         let mut scope: HashSet<String> = finest.clone();
         let mut frontier: Vec<String> = finest.iter().cloned().collect();
         while let Some(id) = frontier.pop() {
-            for child in working.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+            for child in working
+                .nodes
+                .iter()
+                .filter(|n| n.parent_id.as_deref() == Some(&id))
+            {
                 if scope.insert(child.id.clone()) {
                     frontier.push(child.id.clone());
                 }
@@ -854,17 +900,27 @@ impl ScryerServer {
                 .any(|l| l.id == id && (scope.contains(&l.src) || scope.contains(&l.dst)))
         };
         let is_vagrant = |ch: &scryer_core::diff::ElementChange| match ch.kind {
-            EK::Node => planned.nodes.iter().any(|n| n.id == ch.id && n.vagrant == Some(true)),
+            EK::Node => planned
+                .nodes
+                .iter()
+                .any(|n| n.id == ch.id && n.vagrant == Some(true)),
             EK::Responsibility => planned
                 .nodes
                 .iter()
                 .flat_map(|n| n.responsibilities.iter())
-                .chain(planned.groups.iter().flat_map(|g| g.responsibilities.iter()))
+                .chain(
+                    planned
+                        .groups
+                        .iter()
+                        .flat_map(|g| g.responsibilities.iter()),
+                )
                 .any(|r| r.id == ch.id && r.vagrant == Some(true)),
             EK::Property => ch.owner_id.as_deref().is_some_and(|oid| {
                 planned.nodes.iter().any(|n| {
                     n.id == oid
-                        && n.properties.iter().any(|p| p.label == ch.id && p.vagrant == Some(true))
+                        && n.properties
+                            .iter()
+                            .any(|p| p.label == ch.id && p.vagrant == Some(true))
                 })
             }),
             _ => false,
@@ -978,7 +1034,9 @@ impl ScryerServer {
         let model = match read_layer(&model_ref, req.layer) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         // Keep the legacy committed-model baseline fresh only when committed was actually
@@ -1006,7 +1064,11 @@ impl ScryerServer {
                 ids.insert(root.to_string());
                 let mut frontier = vec![root.to_string()];
                 while let Some(id) = frontier.pop() {
-                    for child in model.nodes.iter().filter(|n| n.parent_id.as_deref() == Some(&id)) {
+                    for child in model
+                        .nodes
+                        .iter()
+                        .filter(|n| n.parent_id.as_deref() == Some(&id))
+                    {
                         if ids.insert(child.id.clone()) {
                             frontier.push(child.id.clone());
                         }
@@ -1018,7 +1080,8 @@ impl ScryerServer {
         };
 
         // Child counts, computed once (childCount is a queryable field).
-        let mut child_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut child_count: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
         for n in &model.nodes {
             if let Some(p) = n.parent_id.as_deref() {
                 *child_count.entry(p).or_insert(0) += 1;
@@ -1093,7 +1156,9 @@ impl ScryerServer {
         let model = match scryer_core::read_model_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         let project = model_ref.project_path();
@@ -1109,7 +1174,9 @@ impl ScryerServer {
         if !model_ref.sync_path().exists() {
             let _ = scryer_core::write_sync_state(
                 &model_ref,
-                &scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(project)),
+                &scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(
+                    project,
+                )),
             );
             let _ = scryer_extract::anchors::write_baseline(&model_ref);
             let payload = serde_json::json!({
@@ -1174,13 +1241,17 @@ impl ScryerServer {
         let model = match scryer_core::read_model_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         let planned = match scryer_core::read_planned_at(&model_ref) {
             Ok(p) => p,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("plan", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "plan", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -1204,7 +1275,12 @@ impl ScryerServer {
                 .nodes
                 .iter()
                 .flat_map(|n| n.responsibilities.iter())
-                .chain(planned.groups.iter().flat_map(|g| g.responsibilities.iter()))
+                .chain(
+                    planned
+                        .groups
+                        .iter()
+                        .flat_map(|g| g.responsibilities.iter()),
+                )
                 .any(|r| r.id == id && r.vagrant == Some(true))
         };
         // A property's identity is (owner node, label); a vagrant one is a
@@ -1371,9 +1447,16 @@ impl ScryerServer {
                     rules::rules_index()
                 ));
             }
-            return Ok(CallToolResult::success(vec![Content::text(body.trim().to_string())]));
+            return Ok(CallToolResult::success(vec![Content::text(
+                body.trim().to_string(),
+            )]));
         }
-        let body = match req.topic.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        let body = match req
+            .topic
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
             None => format!(
                 "Rules (index). These are authoritative and binding — pull a rule's full text with \
                  get_rules {{id}} before the decision it governs.\n\n{}",
@@ -1434,13 +1517,17 @@ impl ScryerServer {
         let committed = match scryer_core::read_model_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         let planned = match scryer_core::read_planned_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("plan", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "plan", &model_ref, &e,
+                ))]));
             }
         };
         let model = scryer_core::working_view(&committed, &planned);
@@ -1458,7 +1545,10 @@ impl ScryerServer {
             blocking.iter().map(String::as_str).collect();
         let mut advisory = validate::validate(&model);
         advisory.retain(|w| !blocking_set.contains(w.as_str()));
-        advisory.extend(validate::validate_coverage(&model, model_ref.project_path()));
+        advisory.extend(validate::validate_coverage(
+            &model,
+            model_ref.project_path(),
+        ));
         advisory.extend(scryer_extract::anchors::whole_symbol_warnings(
             &model,
             model_ref.project_path(),
@@ -1506,7 +1596,9 @@ impl ScryerServer {
         let model = match scryer_core::read_model_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
         let project = model_ref.project_path();
@@ -1569,8 +1661,7 @@ impl ScryerServer {
                     let mut payload = payload;
                     model_ref.stamp(&mut payload);
                     return Ok(CallToolResult::success(vec![Content::text(
-                        serde_json::to_string(&payload)
-                            .unwrap_or_else(|_| "{}".to_string()),
+                        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
                     )]));
                 }
             }
@@ -1585,7 +1676,9 @@ impl ScryerServer {
         } else {
             let _ = scryer_core::write_sync_state(
                 &model_ref,
-                &scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(project)),
+                &scryer_core::drift::SyncState::anchored_now(scryer_core::drift::head_commit(
+                    project,
+                )),
             );
             let _ = scryer_extract::anchors::write_baseline(&model_ref);
             scryer_extract::anchors::AnchorCheck::default()
@@ -1602,8 +1695,7 @@ impl ScryerServer {
         // parent structural, matching completeness's union view.
         let planned_for_health =
             scryer_core::read_planned_at(&model_ref).unwrap_or_else(|_| model.clone());
-        let health =
-            scryer_core::health::compute_health(&model, Some(&planned_for_health), None);
+        let health = scryer_core::health::compute_health(&model, Some(&planned_for_health), None);
 
         // Completeness — how much of each node's AUTHORED subtree reads through to
         // real code. Spans committed + planned (so it is defined from greenfield),
@@ -1612,7 +1704,8 @@ impl ScryerServer {
         // present and not broken/missing.
         let files = scryer_extract::list_project_files(project);
         let completeness = {
-            let planned = scryer_core::read_planned_at(&model_ref).unwrap_or_else(|_| model.clone());
+            let planned =
+                scryer_core::read_planned_at(&model_ref).unwrap_or_else(|_| model.clone());
             // Anchors reported broken/missing are dead; `changed` still exists.
             let dead: HashSet<&str> = anchor_check
                 .observations
@@ -1639,9 +1732,8 @@ impl ScryerServer {
         let derived = scryer_core::build_edges::read_build_edges(&model_ref.build_edges_path())
             .map(|edges| scryer_core::build_edges::derive_graph(&model, &edges));
 
-        let counts_json = |c: &scryer_core::health::HealthCounts| {
-            serde_json::to_value(c).unwrap_or_default()
-        };
+        let counts_json =
+            |c: &scryer_core::health::HealthCounts| serde_json::to_value(c).unwrap_or_default();
 
         // Boundary globs with no directory prefix (`**/*`, specificity 0) own
         // every otherwise-unowned file, so drift and coverage attribute unrelated
@@ -1865,8 +1957,7 @@ impl ScryerServer {
                         }
                     }
                 }
-                let mut by_scope: Vec<((String, String), (usize, usize, usize))> =
-                    per_scope.into_iter().collect();
+                let mut by_scope: Vec<ScopeTally> = per_scope.into_iter().collect();
                 by_scope.sort_by_key(|(_, (c, b, m))| std::cmp::Reverse(c + b + m));
                 let by_scope: Vec<serde_json::Value> = by_scope
                     .into_iter()
@@ -1912,6 +2003,10 @@ impl ScryerServer {
         )]))
     }
 }
+
+/// One scope's anchor tally for the health report: the scope (node id, name)
+/// and its (changed, broken, missing) counts, ready to sort by total.
+type ScopeTally = ((String, String), (usize, usize, usize));
 
 #[cfg(test)]
 mod tests {
@@ -1960,13 +2055,19 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Container, "API", Some("node-1")));
-        m.nodes.push(node("node-3", Kind::Component, "Auth", Some("node-2")));
+        m.nodes
+            .push(node("node-2", Kind::Container, "API", Some("node-1")));
+        m.nodes
+            .push(node("node-3", Kind::Component, "Auth", Some("node-2")));
         let mut sym = node("node-4", Kind::Symbol, "verify_token", Some("node-3"));
         sym.responsibilities = vec![resp("resp-1", "rejects forged credentials")];
         m.nodes.push(sym);
-        m.nodes
-            .push(node("node-5", Kind::Symbol, "hash_password", Some("node-3")));
+        m.nodes.push(node(
+            "node-5",
+            Kind::Symbol,
+            "hash_password",
+            Some("node-3"),
+        ));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
         let project = dir.path().to_string_lossy().to_string();
         (ScryerServer::new(), dir, project)
@@ -1981,7 +2082,10 @@ mod tests {
 
     fn result_text(r: &CallToolResult) -> String {
         let content = serde_json::to_value(&r.content).unwrap();
-        content[0]["text"].as_str().expect("text content").to_string()
+        content[0]["text"]
+            .as_str()
+            .expect("text content")
+            .to_string()
     }
 
     /// `get_rules {id}` is the exact fetch behind a description's `Rules:`
@@ -1998,7 +2102,10 @@ mod tests {
             .unwrap();
         let text = result_text(&r);
         assert!(text.starts_with("fold-post-flight — "), "{text}");
-        assert!(text.contains("\nsymbols — "), "second slug rendered: {text}");
+        assert!(
+            text.contains("\nsymbols — "),
+            "second slug rendered: {text}"
+        );
         assert!(!text.contains("No rule has slug"), "{text}");
 
         let r = server
@@ -2008,17 +2115,26 @@ mod tests {
             }))
             .unwrap();
         let text = result_text(&r);
-        assert!(text.starts_with("symbols — "), "known slug still resolves: {text}");
+        assert!(
+            text.starts_with("symbols — "),
+            "known slug still resolves: {text}"
+        );
         assert!(text.contains("No rule has slug no-such-rule"), "{text}");
         assert!(text.contains("statement-ears — "), "index appended: {text}");
 
         // No arguments: the slug-keyed index, no bodies.
         let r = server
-            .get_rules(Parameters(GetRulesRequest { id: None, topic: None }))
+            .get_rules(Parameters(GetRulesRequest {
+                id: None,
+                topic: None,
+            }))
             .unwrap();
         let text = result_text(&r);
         assert!(text.contains("symbols — Code level uses only"), "{text}");
-        assert!(!text.contains("A `symbol` is exactly one"), "index carries no bodies: {text}");
+        assert!(
+            !text.contains("A `symbol` is exactly one"),
+            "index carries no bodies: {text}"
+        );
     }
 
     #[test]
@@ -2065,7 +2181,9 @@ mod tests {
                 layer: Layer::Plan,
             }))
             .unwrap();
-        assert!(serde_json::to_string(&r.content).unwrap().contains("not found"));
+        assert!(serde_json::to_string(&r.content)
+            .unwrap()
+            .contains("not found"));
     }
 
     /// validate_model is the CLOSE gate, but authoring lands in the PLAN — so it
@@ -2080,7 +2198,9 @@ mod tests {
 
         // Committed: a lone, clean system.
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("node-1", Kind::System, "Acme", None));
+        committed
+            .nodes
+            .push(node("node-1", Kind::System, "Acme", None));
         scryer_core::write_model_at(&model_ref, &committed).unwrap();
 
         // Plan authors a component directly under the system — a parent-kind
@@ -2119,9 +2239,13 @@ mod tests {
         let mut sys = node("node-1", Kind::System, "Acme", None);
         sys.responsibilities.push(resp("resp-1", "serve the API"));
         committed.nodes.push(sys);
-        committed
-            .boundaries
-            .insert("node-1".into(), vec![Source { pattern: "src/**".into(), comment: None }]);
+        committed.boundaries.insert(
+            "node-1".into(),
+            vec![Source {
+                pattern: "src/**".into(),
+                comment: None,
+            }],
+        );
         committed.source_map.insert(
             "resp-1".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "src/api.rs" })).unwrap()],
@@ -2160,7 +2284,9 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
 
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("node-1", Kind::System, "Acme", None));
+        committed
+            .nodes
+            .push(node("node-1", Kind::System, "Acme", None));
         committed
             .nodes
             .push(node("node-2", Kind::Container, "API", Some("node-1")));
@@ -2168,16 +2294,25 @@ mod tests {
 
         // The draft puts resp-1 on BOTH hosts.
         let mut planned = committed.clone();
-        planned.nodes[0].responsibilities.push(resp("resp-1", "serve"));
-        planned.nodes[1].responsibilities.push(resp("resp-1", "serve"));
+        planned.nodes[0]
+            .responsibilities
+            .push(resp("resp-1", "serve"));
+        planned.nodes[1]
+            .responsibilities
+            .push(resp("resp-1", "serve"));
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let server = ScryerServer::new();
         let r = server
-            .validate_model(Parameters(ValidateModelRequest { project: Some(project) }))
+            .validate_model(Parameters(ValidateModelRequest {
+                project: Some(project),
+            }))
             .unwrap();
         let out = serde_json::to_string(&r.content).unwrap();
-        assert!(out.contains("BLOCKING"), "surfaces a blocking section: {out}");
+        assert!(
+            out.contains("BLOCKING"),
+            "surfaces a blocking section: {out}"
+        );
         assert!(
             out.contains("globally unique") && out.contains("resp-1"),
             "names the invariant and the colliding id: {out}"
@@ -2194,7 +2329,9 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
 
         let mut committed = ScryModel::new();
-        committed.nodes.push(node("node-1", Kind::System, "Acme", None));
+        committed
+            .nodes
+            .push(node("node-1", Kind::System, "Acme", None));
         scryer_core::write_model_at(&model_ref, &committed).unwrap();
         let mut planned = committed.clone();
         planned
@@ -2222,7 +2359,8 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::System, "Acme", None));
-        m.nodes.push(node("node-2", Kind::Component, "Fat", Some("node-1")));
+        m.nodes
+            .push(node("node-2", Kind::Component, "Fat", Some("node-1")));
         // Many fat symbols under the component to push its subtree past the guard.
         for i in 0..400 {
             let mut s = node(
@@ -2287,7 +2425,8 @@ mod tests {
             resp("resp-keep", "settles nightly"),
         ];
         m.nodes.push(c);
-        m.nodes.push(node("node-3", Kind::Component, "Legacy", Some("node-1")));
+        m.nodes
+            .push(node("node-3", Kind::Component, "Legacy", Some("node-1")));
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
         // Plan (draft): add a claim, reword another, leave one untouched, and
@@ -2298,7 +2437,7 @@ mod tests {
             .push(resp("resp-prop", "issues refunds")); // Added
         planned.nodes[1].responsibilities[0].statement = "charges the card and logs it".into(); // Reworded
         planned.nodes.retain(|n| n.id != "node-3"); // Deleted
-        // a source anchor for the new claim (lives in the draft's source map)
+                                                    // a source anchor for the new claim (lives in the draft's source map)
         planned.source_map.insert(
             "resp-prop".into(),
             vec![scryer_core::SourceLocation {
@@ -2329,7 +2468,7 @@ mod tests {
         assert!(dump.contains("charges the card and logs it")); // reworded (new text)
         assert!(dump.contains("src/billing.rs")); // source anchor carried through
         assert!(dump.contains("node-3")); // deletion surfaced
-        // the untouched claim is not part of the plan
+                                          // the untouched claim is not part of the plan
         assert!(!dump.contains("settles nightly"));
     }
 
@@ -2498,8 +2637,13 @@ mod tests {
 
         let mut m = ScryModel::new();
         m.nodes.push(node("node-1", Kind::Container, "API", None));
-        m.boundaries
-            .insert("node-1".into(), vec![Source { pattern: "api/**/*".into(), comment: None }]);
+        m.boundaries.insert(
+            "node-1".into(),
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
+        );
         scryer_core::write_model_at(&model_ref, &m).unwrap();
         let project = root.to_string_lossy().to_string();
         let server = ScryerServer::new();
@@ -2507,7 +2651,9 @@ mod tests {
         // First call: no anchor exists → seed in-sync, report clean (not noise).
         let v = result_json(
             &server
-                .get_drift(Parameters(GetDriftRequest { project: Some(project.clone()) }))
+                .get_drift(Parameters(GetDriftRequest {
+                    project: Some(project.clone()),
+                }))
                 .unwrap(),
         );
         assert_eq!(v["clean"], true);
@@ -2519,7 +2665,9 @@ mod tests {
         std::fs::write(root.join("api/src/server.rs"), "fn v2() {}").unwrap();
         let v = result_json(
             &server
-                .get_drift(Parameters(GetDriftRequest { project: Some(project.clone()) }))
+                .get_drift(Parameters(GetDriftRequest {
+                    project: Some(project.clone()),
+                }))
                 .unwrap(),
         );
         assert_eq!(v["clean"], false);
@@ -2547,34 +2695,51 @@ mod tests {
 
         let mut m = ScryModel::new();
         m.nodes.push(node("sys", Kind::System, "Acme", None));
-        m.nodes.push(node("api", Kind::Container, "API", Some("sys")));
+        m.nodes
+            .push(node("api", Kind::Container, "API", Some("sys")));
         let mut sym = node("h", Kind::Symbol, "handler", Some("api"));
         sym.responsibilities = vec![resp("r-h", "serves requests")];
         m.nodes.push(sym);
         m.source_map.insert(
             "r-h".into(),
-            vec![serde_json::from_value(serde_json::json!({ "pattern": "api/src/server.rs" }))
-                .unwrap()],
+            vec![
+                serde_json::from_value(serde_json::json!({ "pattern": "api/src/server.rs" }))
+                    .unwrap(),
+            ],
         );
-        m.boundaries
-            .insert("api".into(), vec![Source { pattern: "api/**/*".into(), comment: None }]);
+        m.boundaries.insert(
+            "api".into(),
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
+        );
         scryer_core::write_model_at(&model_ref, &m).unwrap();
         let project = root.to_string_lossy().to_string();
         let server = ScryerServer::new();
 
         // First call seeds the baseline; then the anchored file changes.
         let _ = server
-            .get_health(Parameters(GetHealthRequest { project: Some(project.clone()), node_id: None }))
+            .get_health(Parameters(GetHealthRequest {
+                project: Some(project.clone()),
+                node_id: None,
+            }))
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
         std::fs::write(root.join("api/src/server.rs"), "fn v2() {}\n").unwrap();
 
         let v = result_json(
             &server
-                .get_health(Parameters(GetHealthRequest { project: Some(project.clone()), node_id: None }))
+                .get_health(Parameters(GetHealthRequest {
+                    project: Some(project.clone()),
+                    node_id: None,
+                }))
                 .unwrap(),
         );
-        assert!(v.get("anchors").is_none(), "no flat list on the whole-model call");
+        assert!(
+            v.get("anchors").is_none(),
+            "no flat list on the whole-model call"
+        );
         assert_eq!(v["anchorSummary"]["changed"], 1);
         assert_eq!(v["anchorSummary"]["byScope"][0]["nodeId"], "api");
         assert_eq!(v["anchorSummary"]["byScope"][0]["name"], "API");
@@ -2633,7 +2798,10 @@ mod tests {
             "greenfield reads 0 WITH a denominator: {v}"
         );
         assert!(
-            v["guidance"].as_str().unwrap().contains("Do NOT conclude the model is empty"),
+            v["guidance"]
+                .as_str()
+                .unwrap()
+                .contains("Do NOT conclude the model is empty"),
             "{v}"
         );
     }
@@ -2718,14 +2886,21 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut m = ScryModel::new();
         m.nodes.push(node("sys", Kind::System, "Sys", None));
-        m.nodes.push(node("c", Kind::Container, "Core", Some("sys")));
+        m.nodes
+            .push(node("c", Kind::Container, "Core", Some("sys")));
         m.boundaries.insert(
             "c".into(),
-            vec![scryer_core::Source { pattern: "**/*".into(), comment: None }],
+            vec![scryer_core::Source {
+                pattern: "**/*".into(),
+                comment: None,
+            }],
         );
         m.boundaries.insert(
             "sys".into(),
-            vec![scryer_core::Source { pattern: "src/**/*".into(), comment: None }],
+            vec![scryer_core::Source {
+                pattern: "src/**/*".into(),
+                comment: None,
+            }],
         );
         scryer_core::write_model_at(&model_ref, &m).unwrap();
 
@@ -2739,18 +2914,18 @@ mod tests {
                 .unwrap(),
         );
         let broad = v["broadBoundaries"].as_array().unwrap();
-        assert_eq!(broad.len(), 1, "only the prefixless glob is flagged: {broad:?}");
+        assert_eq!(
+            broad.len(),
+            1,
+            "only the prefixless glob is flagged: {broad:?}"
+        );
         assert_eq!(broad[0]["node"], "c");
         assert_eq!(broad[0]["pattern"], "**/*");
     }
 
-    /// System > Container (boundary src/**) > Component > symbol, with the
-    /// symbol's claim anchored in `src/auth.rs` — committed. Directives on the
-    /// component and container prove the binding set rides along.
-
-    /// The process working directory is process-global, so the one test that
-    /// needs to BE somewhere serializes on this and puts it back. Correct
-    /// under nextest's process-per-test and under `cargo test`'s threads.
+    // The process working directory is process-global, so the one test that
+    // needs to BE somewhere serializes on this and puts it back. Correct
+    // under nextest's process-per-test and under `cargo test`'s threads.
     struct CwdGuard {
         prior: std::path::PathBuf,
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -2861,11 +3036,21 @@ mod tests {
                 ),
             ),
         ] {
-            assert_eq!(v["project"].as_str(), Some(project.as_str()), "{name} names the project");
-            assert!(v.get("projectDefaulted").is_none(), "{name} was named, not guessed");
+            assert_eq!(
+                v["project"].as_str(),
+                Some(project.as_str()),
+                "{name} names the project"
+            );
+            assert!(
+                v.get("projectDefaulted").is_none(),
+                "{name} was named, not guessed"
+            );
         }
     }
 
+    /// System > Container (boundary src/**) > Component > symbol, with the
+    /// symbol's claim anchored in `src/auth.rs` — committed. Directives on the
+    /// component and container prove the binding set rides along.
     fn locate_project() -> (ScryerServer, tempfile::TempDir, String, ModelRef) {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
@@ -2913,7 +3098,11 @@ mod tests {
         assert_eq!(v["ownerChain"][0]["id"], "vt");
         assert_eq!(v["path"], "Acme / API / Auth / verify_token");
         assert_eq!(v["boundaryOwner"]["id"], "api");
-        assert_eq!(v["ownDirectives"], serde_json::Value::Null, "symbol carries none");
+        assert_eq!(
+            v["ownDirectives"],
+            serde_json::Value::Null,
+            "symbol carries none"
+        );
         let inh = serde_json::to_string(&v["inheritedDirectives"]).unwrap();
         assert!(inh.contains("must never log tokens") && inh.contains("must stay stateless"));
     }
@@ -2962,7 +3151,9 @@ mod tests {
             .responsibilities
             .push(resp("r-new", "refuses expired tokens"));
         // Unrelated pending work elsewhere: a sibling container.
-        planned.nodes.push(node("web", Kind::Container, "Web", Some("sys")));
+        planned
+            .nodes
+            .push(node("web", Kind::Container, "Web", Some("sys")));
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let v = result_json(
@@ -2982,13 +3173,19 @@ mod tests {
 
         // Task side: the symbol matches on its name/claim.
         let matches = serde_json::to_string(&v["matches"]).unwrap();
-        assert!(matches.contains("\"vt\""), "task terms reach the symbol: {matches}");
+        assert!(
+            matches.contains("\"vt\""),
+            "task terms reach the symbol: {matches}"
+        );
 
         // Pending is scoped: the new claim on vt shows; the unrelated sibling
         // container's work does not.
         let pending = serde_json::to_string(&v["pending"]).unwrap();
         assert!(pending.contains("r-new"), "{pending}");
-        assert!(!pending.contains("\"web\""), "sibling work stays out: {pending}");
+        assert!(
+            !pending.contains("\"web\""),
+            "sibling work stays out: {pending}"
+        );
         assert_eq!(v["pendingTotal"], 1);
 
         // Task matches are capped at 3 — the full list is search_model's job —
@@ -2996,13 +3193,23 @@ mod tests {
         // entry point, so its size is budgeted like the tool list.
         assert!(v["matches"].as_array().unwrap().len() <= 3);
         let rendered = serde_json::to_string(&v).unwrap();
-        assert!(rendered.len() <= 4_000, "orient response is {} chars", rendered.len());
+        assert!(
+            rendered.len() <= 4_000,
+            "orient response is {} chars",
+            rendered.len()
+        );
 
         // Rules by slug: "symbol" names the symbols rule, capped at 3, no body.
         let rules = v["rules"].as_array().unwrap();
-        assert!(rules.iter().any(|r| r["id"] == "symbols"), "symbols rule rides along: {rules:?}");
+        assert!(
+            rules.iter().any(|r| r["id"] == "symbols"),
+            "symbols rule rides along: {rules:?}"
+        );
         assert!(rules.len() <= 3);
-        assert!(rules.iter().all(|r| r.get("body").is_none()), "bodies are fetched on demand");
+        assert!(
+            rules.iter().all(|r| r.get("body").is_none()),
+            "bodies are fetched on demand"
+        );
 
         // Phase: pending intent exists, no drift baseline → plan-execution.
         let phase = v["phase"].as_str().unwrap();
@@ -3033,9 +3240,15 @@ mod tests {
                 .unwrap(),
         );
         let matches = serde_json::to_string(&v["matches"]).unwrap();
-        assert!(matches.contains("\"vt\""), "claim text reaches the node: {matches}");
+        assert!(
+            matches.contains("\"vt\""),
+            "claim text reaches the node: {matches}"
+        );
         let phase = v["phase"].as_str().unwrap();
-        assert!(phase.starts_with("free:"), "clean scope reads free: {phase}");
+        assert!(
+            phase.starts_with("free:"),
+            "clean scope reads free: {phase}"
+        );
     }
 
     #[test]
@@ -3059,7 +3272,9 @@ mod tests {
             )
             .unwrap()],
         );
-        planned.nodes.push(node("web", Kind::Container, "Web", Some("sys")));
+        planned
+            .nodes
+            .push(node("web", Kind::Container, "Web", Some("sys")));
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
         let v = result_json(
@@ -3073,11 +3288,17 @@ mod tests {
         );
         assert_eq!(v["symbolMatched"], true);
         let dump = serde_json::to_string(&v["claims"]).unwrap();
-        assert!(dump.contains("r-new"), "plan-authored claim visible: {dump}");
+        assert!(
+            dump.contains("r-new"),
+            "plan-authored claim visible: {dump}"
+        );
         // Pending is scoped: the new claim shows, the unrelated container doesn't.
         let pending = serde_json::to_string(&v["pending"]).unwrap();
         assert!(pending.contains("r-new"), "scoped pending: {pending}");
-        assert!(!pending.contains("\"web\""), "unrelated pending excluded: {pending}");
+        assert!(
+            !pending.contains("\"web\""),
+            "unrelated pending excluded: {pending}"
+        );
     }
 
     #[test]
@@ -3095,7 +3316,10 @@ mod tests {
         );
         assert!(v["claims"][0].is_null());
         assert_eq!(v["boundaryOwner"]["id"], "api");
-        assert!(v["note"].as_str().unwrap().contains("dark code under 'API'"));
+        assert!(v["note"]
+            .as_str()
+            .unwrap()
+            .contains("dark code under 'API'"));
 
         // Outside every boundary and anchor: steered to model-first authoring.
         let v = result_json(

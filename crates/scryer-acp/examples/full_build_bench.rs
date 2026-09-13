@@ -47,6 +47,9 @@ fn job_permits(job: &Job, pool: usize) -> u32 {
     desired.min(pool).max(1) as u32
 }
 
+/// The launch description a bench session needs; see the note on
+/// `AcpRuntime::start_session`, which this mirrors.
+#[allow(clippy::too_many_arguments)]
 async fn run_session(
     runtime: &scryer_acp::AcpRuntime,
     binary: &str,
@@ -169,7 +172,7 @@ async fn main() {
             evidence_json,
         });
     }
-    jobs.sort_by(|a, b| b.work_units.cmp(&a.work_units));
+    jobs.sort_by_key(|j| std::cmp::Reverse(j.work_units));
     let pool = pool_size(&jobs);
     eprintln!(
         "[bench] {} container job(s), pool {} (+1 system)",
@@ -254,7 +257,6 @@ async fn main() {
             effort.clone(),
             mcp_binary.clone(),
         );
-        let build_start = build_start;
         handles.push(tokio::spawn(async move {
             let _p = sem.acquire_many(permits).await.unwrap();
             eprintln!(

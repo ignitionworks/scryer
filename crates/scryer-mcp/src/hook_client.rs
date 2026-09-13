@@ -10,7 +10,7 @@
 //!
 //! - SessionStart      → GET /status   → inject the model's status line
 //! - PostToolUse read  → GET /overlay  → inject the file's governing intent
-//!                                        (once per session until it changes)
+//!   (once per session until it changes)
 //! - PostToolUse edit… → POST /touch   → record the touch, say nothing
 //! - Stop              → GET /close    → block once with unreconciled claims
 //!
@@ -248,8 +248,12 @@ fn emit(v: &serde_json::Value) {
 }
 
 fn session_start(ep: &Endpoint, harness: Harness) {
-    let Some(status) = call(ep, "GET", "/status", "") else { return };
-    let Some(line) = status["statusLine"].as_str() else { return };
+    let Some(status) = call(ep, "GET", "/status", "") else {
+        return;
+    };
+    let Some(line) = status["statusLine"].as_str() else {
+        return;
+    };
     // Harness-neutral wording: on Claude Code and Copilot the overlay arrives
     // as files are read, on Codex as they are edited — "work in" covers all
     // three truthfully.
@@ -294,8 +298,7 @@ fn post_tool_use(ep: &Endpoint, event: &serde_json::Value, harness: Harness) {
     match harness.tool_kind(event["tool_name"].as_str().unwrap_or_default()) {
         ToolKind::Read => {
             let Some(file) = tool_file(event) else { return };
-            let Some(overlay) =
-                call(ep, "GET", &overlay_target(file, session_id(event)), "")
+            let Some(overlay) = call(ep, "GET", &overlay_target(file, session_id(event)), "")
             else {
                 return;
             };
@@ -385,9 +388,14 @@ fn envelope_files(command: &str) -> Vec<String> {
     let mut files: Vec<String> = Vec::new();
     for line in command.lines() {
         let line = line.trim();
-        let path = ["*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"]
-            .iter()
-            .find_map(|marker| line.strip_prefix(marker));
+        let path = [
+            "*** Add File:",
+            "*** Update File:",
+            "*** Delete File:",
+            "*** Move to:",
+        ]
+        .iter()
+        .find_map(|marker| line.strip_prefix(marker));
         if let Some(p) = path {
             let p = p.trim();
             if !p.is_empty() && !files.iter().any(|f| f == p) {
@@ -421,7 +429,11 @@ fn render_overlay(overlay: &serde_json::Value) -> Option<String> {
             directives.push(s.to_string());
         }
     }
-    for inh in overlay["inheritedDirectives"].as_array().into_iter().flatten() {
+    for inh in overlay["inheritedDirectives"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
         let from = inh["name"].as_str().unwrap_or("ancestor");
         for d in inh["directives"].as_array().into_iter().flatten() {
             if let Some(s) = d.as_str() {
@@ -443,7 +455,9 @@ fn render_overlay(overlay: &serde_json::Value) -> Option<String> {
         out.push_str("The model claims this file:\n");
         for c in &claims {
             let host = c["hostName"].as_str().unwrap_or("?");
-            let statement = c["statement"].as_str().unwrap_or("(data shape declaration)");
+            let statement = c["statement"]
+                .as_str()
+                .unwrap_or("(data shape declaration)");
             let mut flags = String::new();
             if c["stale"].as_bool() == Some(true) {
                 flags.push_str(" [stale — awaiting verdict]");
@@ -502,7 +516,10 @@ fn stop(ep: &Endpoint, event: &serde_json::Value) {
     // holds only touched files whose anchor fingerprints report the modeled
     // spans changed, broken, or missing. Clean-modeled and unmodeled touches
     // owe nothing — a session that edited around the claims stops freely.
-    let needs = close["needsReconcile"].as_array().cloned().unwrap_or_default();
+    let needs = close["needsReconcile"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     if needs.is_empty() {
         return;
     }
@@ -513,7 +530,9 @@ fn stop(ep: &Endpoint, event: &serde_json::Value) {
         lines.push(format!("- {file}:"));
         for c in f["claims"].as_array().into_iter().flatten() {
             let host = c["host"].as_str().unwrap_or("?");
-            let statement = c["statement"].as_str().unwrap_or("(data shape declaration)");
+            let statement = c["statement"]
+                .as_str()
+                .unwrap_or("(data shape declaration)");
             let state = c["state"].as_str().unwrap_or("changed");
             lines.push(format!("    [{state}] ({host}) {statement}"));
         }
@@ -549,14 +568,17 @@ mod tests {
     /// whose author has exited — is not trusted, so the token is never offered.
     #[test]
     fn only_a_live_author_is_trusted() {
-        let live =
-            serde_json::json!({ "port": 42, "token": "tok", "pid": std::process::id() }).to_string();
+        let live = serde_json::json!({ "port": 42, "token": "tok", "pid": std::process::id() })
+            .to_string();
         let ep = parse_live_endpoint(&live).expect("live pid → endpoint");
         assert_eq!(ep.port, 42);
         assert_eq!(ep.token, "tok");
 
         let no_pid = serde_json::json!({ "port": 42, "token": "tok" }).to_string();
-        assert!(parse_live_endpoint(&no_pid).is_none(), "a file with no pid is stale");
+        assert!(
+            parse_live_endpoint(&no_pid).is_none(),
+            "a file with no pid is stale"
+        );
     }
 
     /// The envelope parser lifts every named file exactly once — add, update,
@@ -582,7 +604,11 @@ mod tests {
         );
 
         let heredoc = format!("apply_patch <<'PATCH'\n{envelope}\nPATCH");
-        assert_eq!(envelope_files(&heredoc).len(), 4, "heredoc wrapper parses the same");
+        assert_eq!(
+            envelope_files(&heredoc).len(),
+            4,
+            "heredoc wrapper parses the same"
+        );
 
         assert!(
             envelope_files("cargo test && git status").is_empty(),
@@ -611,7 +637,11 @@ mod tests {
                 "command": "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: /repo/src/lib.rs\n*** End Patch\nEOF"
             }
         });
-        assert_eq!(patched_files(&event), vec!["/repo/src/lib.rs"], "absolute path untouched");
+        assert_eq!(
+            patched_files(&event),
+            vec!["/repo/src/lib.rs"],
+            "absolute path untouched"
+        );
     }
 
     /// The overlay request names the session when the event carries one
@@ -623,11 +653,18 @@ mod tests {
             overlay_target("/repo/src/lib.rs", Some("sess 1")),
             "/overlay?file=/repo/src/lib.rs&session=sess%201"
         );
-        assert_eq!(overlay_target("/repo/src/lib.rs", None), "/overlay?file=/repo/src/lib.rs");
+        assert_eq!(
+            overlay_target("/repo/src/lib.rs", None),
+            "/overlay?file=/repo/src/lib.rs"
+        );
 
         let event = serde_json::json!({ "session_id": "abc", "tool_input": {} });
         assert_eq!(session_id(&event), Some("abc"));
-        assert_eq!(session_id(&serde_json::json!({ "session_id": "" })), None, "empty id is no id");
+        assert_eq!(
+            session_id(&serde_json::json!({ "session_id": "" })),
+            None,
+            "empty id is no id"
+        );
         assert_eq!(session_id(&serde_json::json!({})), None);
         assert!(overlay_target("f.rs", session_id(&event)).ends_with("&session=abc"));
     }
@@ -637,7 +674,10 @@ mod tests {
     /// on the server side keeps the client silent without a client-side rule.
     #[test]
     fn an_empty_overlay_renders_to_nothing() {
-        assert_eq!(render_overlay(&serde_json::json!({ "file": "src/lib.rs" })), None);
+        assert_eq!(
+            render_overlay(&serde_json::json!({ "file": "src/lib.rs" })),
+            None
+        );
         assert_eq!(render_overlay(&serde_json::json!({})), None);
         assert!(render_overlay(&serde_json::json!({
             "file": "src/lib.rs",

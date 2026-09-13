@@ -224,7 +224,9 @@ fn countersign_gate(
     }
     let history = scryer_core::history::read_history(model_ref);
     for cid in in_fold {
-        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid) else { continue };
+        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid) else {
+            continue;
+        };
         let author = change_author(&history, cid);
         let signature = meta.signed_off.as_ref();
         let signer = signature.and_then(|s| s.by.as_deref());
@@ -233,11 +235,11 @@ fn countersign_gate(
             (Some(by), a) if Some(by) != a => None,
             (Some(by), _) => Some(format!("is signed off only by its own author, {by}")),
             (None, _) if signature.is_none() => Some("carries no sign-off at all".to_string()),
-            (None, _) => {
-                Some("carries a sign-off that names no actor, so nobody is on record as \
+            (None, _) => Some(
+                "carries a sign-off that names no actor, so nobody is on record as \
                       having approved it"
-                    .to_string())
-            }
+                    .to_string(),
+            ),
         };
         let Some(missing) = missing else {
             // Passed — say by whom, and say when it was a proxy, so the fold's
@@ -274,9 +276,15 @@ fn countersign_gate(
 /// Run the gates over `candidates` (the claims this fold is about to commit).
 /// `tests_in_call` maps claim id → test files attached in the SAME call: an
 /// attachment with no verdict yet still refuses (the verdict comes from a run
-/// + ingest, which must precede the fold), but the refusal names those files.
+/// and an ingest, which must precede the fold), but the refusal names those
+/// files.
 /// `change` is the change `mark_implemented` was pointed at by name, when it
 /// was — gate 0 needs it even for a fold whose candidates are empty.
+///
+/// The argument list is the fold's whole context — both model layers, what is
+/// being folded, what was attached in the same call, and the two flags. A
+/// struct of exactly these would be the same list with a name in front of it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gate(
     model_ref: &ModelRef,
     committed: &ScryModel,
@@ -295,7 +303,10 @@ pub(crate) fn gate(
     let involved: BTreeSet<String> = candidates
         .iter()
         .filter_map(|id| {
-            planned.change_map.get(&changes::element_key(EK::Responsibility, None, id)).cloned()
+            planned
+                .change_map
+                .get(&changes::element_key(EK::Responsibility, None, id))
+                .cloned()
         })
         .collect();
 
@@ -309,9 +320,15 @@ pub(crate) fn gate(
     // ---- 1. Sign-off: amendments and additions stay behind as vagrant. -----
     for id in candidates {
         let key = changes::element_key(EK::Responsibility, None, id);
-        let Some((cid, class, snap)) = changes::classify_key(planned, &key) else { continue };
-        let Some(origin) = class.origin() else { continue };
-        let Some((host, r)) = find_resp_mut(planned, id) else { continue };
+        let Some((cid, class, snap)) = changes::classify_key(planned, &key) else {
+            continue;
+        };
+        let Some(origin) = class.origin() else {
+            continue;
+        };
+        let Some((host, r)) = find_resp_mut(planned, id) else {
+            continue;
+        };
         let approved = snap.as_ref().and_then(|s| s.statement.clone());
         r.vagrant = Some(true);
         r.vagrant_origin = Some(origin.to_string());
@@ -341,12 +358,16 @@ pub(crate) fn gate(
 
     // Dropped signed-off claims come back as the original intent.
     for cid in &involved {
-        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid).cloned() else { continue };
+        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid).cloned() else {
+            continue;
+        };
         for (key, class, snap) in changes::classify_against_signoff(planned, &meta) {
             if class != Classification::Dropped {
                 continue;
             }
-            let Some((EK::Responsibility, _, rid)) = changes::parse_key(&key) else { continue };
+            let Some((EK::Responsibility, _, rid)) = changes::parse_key(&key) else {
+                continue;
+            };
             let Some(snap) = snap else { continue };
             // Folded, not dropped: the element stands in the plan exactly as
             // approved and only lost its tag because an earlier fold carried
@@ -411,7 +432,9 @@ pub(crate) fn gate(
         if out.withhold.contains(id) {
             continue;
         }
-        let Some((host, r)) = find_resp(planned, id) else { continue };
+        let Some((host, r)) = find_resp(planned, id) else {
+            continue;
+        };
         if !code_backed_host(planned, host) {
             continue;
         }
@@ -427,12 +450,16 @@ pub(crate) fn gate(
     for id in &gated {
         let mut ev = evidence.get(id).cloned().unwrap_or(Evidence::NoTest);
         if let (Evidence::NoTest, Some(files)) = (&ev, tests_in_call.get(id)) {
-            ev = Evidence::NoVerdict { tests: files.clone() };
+            ev = Evidence::NoVerdict {
+                tests: files.clone(),
+            };
         }
         if ev.verified() {
             continue;
         }
-        let host = find_resp(planned, id).map(|(h, _)| h.to_string()).unwrap_or_default();
+        let host = find_resp(planned, id)
+            .map(|(h, _)| h.to_string())
+            .unwrap_or_default();
         let kind = match &ev {
             Evidence::NoTest => "no-test",
             Evidence::NoVerdict { .. } => "no-verdict",
@@ -457,7 +484,8 @@ pub(crate) fn gate(
             }
             _ => ", ingest_test_report the report, then fold again",
         };
-        out.lines.push(format!("REFUSED {id} (stays in the plan): {reason}{fix}"));
+        out.lines
+            .push(format!("REFUSED {id} (stays in the plan): {reason}{fix}"));
         out.refusals.push(Refusal {
             resp_id: id.clone(),
             host_id: host,
