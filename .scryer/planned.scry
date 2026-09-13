@@ -217,6 +217,11 @@
           "id": "resp-32",
           "statement": "**Discover and authenticate** against a running desktop app instance for a linked project.",
           "lastTouchedAt": 1784883634
+        },
+        {
+          "id": "resp-de0hs1",
+          "statement": "**When** a model answer is given — orient, read_model, get_pending, get_health and the plan writes — **name** the resolved project path it answered from, and **when** that path was defaulted from the process's working directory rather than named by the caller, **say** so.",
+          "lastTouchedAt": 1789334457
         }
       ]
     },
@@ -13340,7 +13345,7 @@
         }
       ],
       "directives": [
-        "Additive only: never move or edit the desktop shell's command bodies in src-tauri; mirror upstream's behaviour changes across at each rebase."
+        "Additive only: never move or edit the desktop shell's command bodies in src-tauri to suit the fork's own design. Where the fork's service gains behaviour the desktop must also carry, mirror it across deliberately and name the delta in the round's report. Upstream's behaviour changes come across at each rebase."
       ]
     },
     {
@@ -17512,16 +17517,48 @@
     {
       "id": "chg-amak8b",
       "rationale": "Fork round 3: a label-only highlight renders its word rather than an empty wash; a pending link entry names both its ends; and the desktop canvas records a sign-off in history the way the service does.",
-      "createdAt": 1789334069
+      "createdAt": 1789334069,
+      "signedOff": {
+        "at": 1789334469,
+        "by": "HAPI",
+        "onBehalfOf": "jesseh",
+        "entries": {
+          "node:node-yz4jd6": {
+            "hash": "d57cf2520e330b03"
+          },
+          "resp:resp-874gz9": {
+            "hash": "cce3d57194095f5a",
+            "statement": "**When** the canvas signs a change off, **record** the approval in the durable history the way the service does, so the desktop and the service leave the same trace.",
+            "host": "node-391"
+          },
+          "resp:resp-de0hs1": {
+            "hash": "ce7b4696d8f25370",
+            "statement": "**When** a model answer is given — orient, read_model, get_pending, get_health and the plan writes — **name** the resolved project path it answered from, and **when** that path was defaulted from the process's working directory rather than named by the caller, **say** so.",
+            "host": "node-6"
+          },
+          "resp:resp-shsme2": {
+            "hash": "617098fdc169c34d",
+            "statement": "**When** a host's highlight carries a label and no image, **render** the label in the pill, never colour alone.",
+            "host": "node-3yfzg3"
+          },
+          "resp:resp-wsbj76": {
+            "hash": "dbf2552fc2cda53a",
+            "statement": "**When** a pending link entry is listed, **name** both of its ends — source, destination, then the label — so a reader never sees a bare verb.",
+            "host": "node-263"
+          }
+        }
+      }
     }
   ],
   "changeMap": {
+    "node:node-yz4jd6": "chg-amak8b",
     "resp:resp-683": "chg-qxjsaq",
     "resp:resp-874gz9": "chg-amak8b",
     "resp:resp-900": "chg-frz54y",
     "resp:resp-912": "chg-frz54y",
     "resp:resp-913": "chg-frz54y",
     "resp:resp-a44pxh": "chg-frz54y",
+    "resp:resp-de0hs1": "chg-amak8b",
     "resp:resp-kc1r12": "chg-j88eqf",
     "resp:resp-shsme2": "chg-amak8b",
     "resp:resp-wsbj76": "chg-amak8b"
