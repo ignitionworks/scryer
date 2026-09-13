@@ -1,0 +1,10 @@
+# The formatting this repository is checked against.
+#
+# Committed so `cargo fmt --check` means the same thing on every machine and in
+# CI: rustfmt's defaults drift between editions, and a project that pins
+# nothing gets a different answer from a newer toolchain than the one its code
+# was written with. These ARE the defaults the tree was written to — the point
+# is not to choose a style, it is to stop the style choosing itself.
+edition = "2021"
+style_edition = "2021"
+max_width = 100
