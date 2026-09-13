@@ -54,8 +54,17 @@ export function TreeRowMarks({ nodeId }: { nodeId: string }) {
       }`}
       title={highlight ? markTitle(highlight) : undefined}
     >
+      {/* The highlight is the only mark here, so it has to say itself. An
+          image reads as itself, a dot; a LABEL has to be spelled, because a
+          coloured wash with nothing in it says "something is true of this
+          row" and never what — colour carrying meaning alone, which no
+          reader can decode and a colour-blind one cannot see at all. The
+          wrapper is already the pill, so the word goes straight into it. */}
       {highlight && !badges.length && highlight.image && (
         <Badge mark={{ ...highlight, kind: "badge" }} compact />
+      )}
+      {highlight && !badges.length && highlight.label && (
+        <span className="text-[11px] leading-none">{highlight.label}</span>
       )}
       {badges.map((m, i) => (
         <Badge key={i} mark={m} compact />

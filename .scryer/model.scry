@@ -13403,6 +13403,11 @@
           "id": "resp-c88gf7",
           "statement": "**While** no host supplies marks, **render** nothing",
           "lastTouchedAt": 1789076308
+        },
+        {
+          "id": "resp-shsme2",
+          "statement": "**When** a host's highlight carries a label and no image, **render** the label in the pill, never colour alone.",
+          "lastTouchedAt": 1789335467
         }
       ],
       "directives": [
@@ -22523,6 +22528,12 @@
         "symbol": "refile"
       }
     ],
+    "resp-shsme2": [
+      {
+        "pattern": "src/annotations/Annotations.tsx",
+        "symbol": "TreeRowMarks"
+      }
+    ],
     "resp-svcshp": [
       {
         "pattern": "src/host/commands.ts",
@@ -24779,6 +24790,28 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/nodes.rs",
         "symbol": "refile_moves_pending_work_between_changes"
+      }
+    ],
+    "resp-shsme2": [
+      {
+        "pattern": "tests/annotationRender.test.tsx",
+        "symbol": "resp-shsme2: a label-only highlight renders its word"
+      },
+      {
+        "pattern": "tests/annotationRender.test.tsx",
+        "symbol": "resp-shsme2: the wash is never empty"
+      },
+      {
+        "pattern": "tests/annotationRender.test.tsx",
+        "symbol": "resp-shsme2: an image-only highlight stays a dot, and both draws both"
+      },
+      {
+        "pattern": "tests/annotationRender.test.tsx",
+        "symbol": "resp-shsme2: badges beside it still speak for themselves"
+      },
+      {
+        "pattern": "tests/annotationRender.test.tsx",
+        "symbol": "resp-shsme2: no marks, no element — the desktop is unchanged"
       }
     ],
     "resp-svcshp": [
