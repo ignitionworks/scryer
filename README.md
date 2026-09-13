@@ -230,6 +230,31 @@ pnpm dev              # Run frontend only
 pnpm tauri build      # Production build
 ```
 
+### Running the tests
+
+```bash
+cp target/debug/scryer-mcp src-tauri/binaries/scryer-mcp-x86_64-unknown-linux-gnu
+cargo nextest run --workspace
+pnpm test
+```
+
+That first line is not optional, and it is the reason a workspace test run can
+look impossible on a clean checkout. `src-tauri/tauri.conf.json` declares the
+MCP server as an `externalBin` sidecar, so the desktop crate does not COMPILE
+until a binary exists at that path — the failure is
+`resource path binaries/scryer-mcp-... doesn't exist`, which reads like a
+packaging problem rather than a missing build step. `src-tauri/binaries/` is
+gitignored, so this is a local step on every machine; substitute your own host
+triple, and `target/release/` if that is what you built.
+
+Quality gates, all of which should be clean:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+pnpm exec tsc --noEmit
+```
+
 ### The committed export viewer
 
 `crates/scryer-app/assets/export-viewer.html` is **generated and checked in** —

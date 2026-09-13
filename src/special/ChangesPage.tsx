@@ -318,6 +318,16 @@ function LinkRow({ link, ctx }: { link: LinkChange; ctx: RowCtx }) {
       <div className="min-w-0 font-mono text-[var(--text-secondary)]">
         <span className="inline-flex flex-wrap items-baseline gap-1">
           <span className="text-2xs uppercase tracking-[0.07em] text-[var(--text-ghost)]">link</span>
+          {/* The source is STATED, not left to the card this row sits under: a
+              row that only implies one end is read on its own the moment it is
+              quoted, copied, or rendered anywhere but here. The diff carries
+              both ends, so both are spelled. */}
+          {ec.from && (
+            <>
+              <NodeRef id={ec.from} {...ctx} />
+              <span className="text-[var(--text-ghost)]">→</span>
+            </>
+          )}
           {deleted ? (
             <span className={DIFF_TINT.delete}>{ec.label}</span>
           ) : label ? (

@@ -91,9 +91,11 @@
             "type": "reworded"
           }
         ],
+        "from": "node-2",
         "id": "link-1",
         "kind": "link",
-        "label": "routes via"
+        "label": "routes via",
+        "to": "node-5"
       },
       {
         "changes": [
@@ -101,9 +103,11 @@
             "type": "added"
           }
         ],
+        "from": "node-5",
         "id": "link-2",
         "kind": "link",
-        "label": "forwards to"
+        "label": "forwards to",
+        "to": "node-2"
       },
       {
         "changes": [

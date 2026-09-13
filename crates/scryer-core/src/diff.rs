@@ -101,6 +101,21 @@ pub struct ElementChange {
     pub owner_id: Option<String>,
     /// Human-facing label for display (the element's name / statement).
     pub label: String,
+    /// For a LINK: the ids of the two ends it joins, source then destination.
+    ///
+    /// A link's label is a verb phrase — "Spawns change sessions from" — and
+    /// says nothing on its own about what is joined to what. Every surface
+    /// listing one therefore had to go back to the model and look the ends up,
+    /// and the ones that did not (`get_pending`, and anything reading the diff
+    /// as data) showed a bare verb. The ends travel WITH the change so no
+    /// reader has to reconstruct them, and a link the plan DROPPED still names
+    /// them, which a lookup in the planned model cannot do.
+    ///
+    /// `None` for everything that is not a link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
     pub changes: Vec<Change>,
 }
 
@@ -335,6 +350,8 @@ fn diff_nodes(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for (id, n) in &to_by {
         match from_by.get(id) {
             None => out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Node,
                 id: (*id).to_string(),
                 owner_id: None,
@@ -396,6 +413,8 @@ fn diff_nodes(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
                 );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
+                        from: None,
+                        to: None,
                         kind: ElementKind::Node,
                         id: (*id).to_string(),
                         owner_id: None,
@@ -409,6 +428,8 @@ fn diff_nodes(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for (id, n) in &from_by {
         if !to_by.contains_key(id) {
             out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Node,
                 id: (*id).to_string(),
                 owner_id: None,
@@ -426,6 +447,8 @@ fn diff_links(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for (id, l) in &to_by {
         match from_by.get(id) {
             None => out.changes.push(ElementChange {
+                from: Some(l.src.clone()),
+                to: Some(l.dst.clone()),
                 kind: ElementKind::Link,
                 id: (*id).to_string(),
                 owner_id: None,
@@ -451,6 +474,8 @@ fn diff_links(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
                 );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
+                        from: Some(l.src.clone()),
+                        to: Some(l.dst.clone()),
                         kind: ElementKind::Link,
                         id: (*id).to_string(),
                         owner_id: None,
@@ -463,7 +488,11 @@ fn diff_links(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     }
     for (id, l) in &from_by {
         if !to_by.contains_key(id) {
+            // A DROPPED link: its ends come from the layer that still has it,
+            // which is the only place they survive at all.
             out.changes.push(ElementChange {
+                from: Some(l.src.clone()),
+                to: Some(l.dst.clone()),
                 kind: ElementKind::Link,
                 id: (*id).to_string(),
                 owner_id: None,
@@ -517,6 +546,8 @@ fn diff_responsibilities(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) 
     for (id, owned) in &to_by {
         match from_by.get(id) {
             None => out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Responsibility,
                 id: (*id).to_string(),
                 owner_id: Some(owned.owner_id.clone()),
@@ -545,6 +576,8 @@ fn diff_responsibilities(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) 
                 );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
+                        from: None,
+                        to: None,
                         kind: ElementKind::Responsibility,
                         id: (*id).to_string(),
                         owner_id: Some(owned.owner_id.clone()),
@@ -558,6 +591,8 @@ fn diff_responsibilities(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) 
     for (id, owned) in &from_by {
         if !to_by.contains_key(id) {
             out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Responsibility,
                 id: (*id).to_string(),
                 owner_id: Some(owned.owner_id.clone()),
@@ -586,6 +621,8 @@ fn diff_properties(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for ((owner, label), p) in &to_by {
         match from_by.get(&(owner.clone(), label.clone())) {
             None => out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Property,
                 id: label.clone(),
                 owner_id: Some(owner.clone()),
@@ -602,6 +639,8 @@ fn diff_properties(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
                 );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
+                        from: None,
+                        to: None,
                         kind: ElementKind::Property,
                         id: label.clone(),
                         owner_id: Some(owner.clone()),
@@ -615,6 +654,8 @@ fn diff_properties(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for (owner, label) in from_by.keys() {
         if !to_by.contains_key(&(owner.clone(), label.clone())) {
             out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Property,
                 id: label.clone(),
                 owner_id: Some(owner.clone()),
@@ -640,6 +681,8 @@ fn diff_groups(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for (id, g) in &to_by {
         match from_by.get(id) {
             None => out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Group,
                 id: (*id).to_string(),
                 owner_id: None,
@@ -678,6 +721,8 @@ fn diff_groups(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
                 }
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
+                        from: None,
+                        to: None,
                         kind: ElementKind::Group,
                         id: (*id).to_string(),
                         owner_id: None,
@@ -691,6 +736,8 @@ fn diff_groups(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
     for (id, g) in &from_by {
         if !to_by.contains_key(id) {
             out.changes.push(ElementChange {
+                from: None,
+                to: None,
                 kind: ElementKind::Group,
                 id: (*id).to_string(),
                 owner_id: None,
@@ -756,6 +803,61 @@ mod tests {
             .iter()
             .find(|c| c.id == id)
             .unwrap_or_else(|| panic!("no change for {id}"))
+    }
+
+    /// resp-wsbj76 — a link change carries the two ends it joins, so no
+    /// surface has to reconstruct them.
+    ///
+    /// A link's label is a verb phrase: "routes via" names neither what routes
+    /// nor what it routes to. The canvas could always look the ends up in the
+    /// model and so looked correct; `get_pending` — the agent's view — could
+    /// not, and showed the verb alone. The deleted case is the one a lookup
+    /// can never serve: the link is gone from the planned model, so the layer
+    /// that still holds it is the only place its ends survive.
+    #[test]
+    fn resp_wsbj76_a_link_change_carries_both_of_its_ends() {
+        let base = |links: Vec<Link>| {
+            let mut m = ScryModel::new();
+            m.nodes.push(node("n1", "Hub", None));
+            m.nodes.push(node("n2", "Runner", None));
+            m.links = links;
+            m
+        };
+        let mut l = link("l1", "n1", "n2");
+        l.label = "Spawns change sessions from".into();
+
+        // Added.
+        let d = diff(&base(vec![]), &base(vec![l.clone()]));
+        let ec = find(&d, "l1");
+        assert_eq!(ec.from.as_deref(), Some("n1"));
+        assert_eq!(ec.to.as_deref(), Some("n2"));
+
+        // Reworded.
+        let mut reworded = l.clone();
+        reworded.label = "Spawns sessions for".into();
+        let d = diff(&base(vec![l.clone()]), &base(vec![reworded]));
+        let ec = find(&d, "l1");
+        assert_eq!(ec.from.as_deref(), Some("n1"));
+        assert_eq!(ec.to.as_deref(), Some("n2"));
+
+        // Deleted — the ends come from the side that still has the link.
+        let d = diff(&base(vec![l.clone()]), &base(vec![]));
+        let ec = find(&d, "l1");
+        assert!(ec.changes.contains(&Change::Deleted));
+        assert_eq!(
+            ec.from.as_deref(),
+            Some("n1"),
+            "a dropped link still names its source"
+        );
+        assert_eq!(ec.to.as_deref(), Some("n2"), "and its destination");
+
+        // Nothing but a link carries ends: they are a link's fact, and an
+        // absent field is how every other kind says so.
+        let d = diff(&ScryModel::new(), &base(vec![]));
+        for ec in &d.changes {
+            assert!(ec.from.is_none(), "{:?} carries no source", ec.kind);
+            assert!(ec.to.is_none(), "{:?} carries no destination", ec.kind);
+        }
     }
 
     #[test]

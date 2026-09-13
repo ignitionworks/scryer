@@ -51,6 +51,15 @@ export interface ElementChange {
    *  (this shape stays in lockstep with Rust `diff.rs`, which knows nothing
    *  of display markup). */
   label: string;
+  /** For a LINK: the ids of the two ends it joins, source then destination.
+   *
+   *  A link's label is a verb phrase — "Spawns change sessions from" — and
+   *  says nothing on its own about what is joined to what. The ends travel
+   *  WITH the change so no surface has to go back to the model for them, and
+   *  so a link the plan DROPPED still names them, which a lookup in the
+   *  planned model cannot do. Absent for everything that is not a link. */
+  from?: string;
+  to?: string;
   changes: Change[];
 }
 
@@ -144,7 +153,14 @@ function diffLinks(from: ScryModel, to: ScryModel, out: ModelDiff) {
   for (const [id, l] of toBy) {
     const prev = fromBy.get(id);
     if (!prev) {
-      out.changes.push({ kind: "link", id, label: l.label, changes: [{ type: "added" }] });
+      out.changes.push({
+        kind: "link",
+        id,
+        label: l.label,
+        from: l.src,
+        to: l.dst,
+        changes: [{ type: "added" }],
+      });
       continue;
     }
     const changes: Change[] = [];
@@ -152,11 +168,21 @@ function diffLinks(from: ScryModel, to: ScryModel, out: ModelDiff) {
       changes.push({ type: "repointed", srcFrom: prev.src, srcTo: l.src, dstFrom: prev.dst, dstTo: l.dst });
     reword(changes, "label", prev.label, l.label);
     reword(changes, "method", prev.method ?? "", l.method ?? "");
-    if (changes.length) out.changes.push({ kind: "link", id, label: l.label, changes });
+    if (changes.length)
+      out.changes.push({ kind: "link", id, label: l.label, from: l.src, to: l.dst, changes });
   }
   for (const [id, l] of fromBy)
     if (!toBy.has(id))
-      out.changes.push({ kind: "link", id, label: l.label, changes: [{ type: "deleted" }] });
+      // A DROPPED link: its ends come from the layer that still has it, which
+      // is the only place they survive at all.
+      out.changes.push({
+        kind: "link",
+        id,
+        label: l.label,
+        from: l.src,
+        to: l.dst,
+        changes: [{ type: "deleted" }],
+      });
 }
 
 function diffResponsibilities(from: ScryModel, to: ScryModel, out: ModelDiff) {

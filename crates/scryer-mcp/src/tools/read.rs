@@ -1370,7 +1370,33 @@ impl ScryerServer {
                         v["path"] = serde_json::Value::String(breadcrumb_of(owner));
                     }
                 }
-                ElementKind::Link | ElementKind::Group => {}
+                ElementKind::Link => {
+                    // A link's label is a verb phrase — "Spawns change sessions
+                    // from" — so on its own it names neither end and reads as a
+                    // sentence with its subject and object missing. The diff
+                    // carries the two ends now; spell them, by name rather than
+                    // by id, and file the entry under the source's breadcrumb
+                    // the way a node's own entry is filed.
+                    let name_of = |id: &str| -> String {
+                        planned
+                            .nodes
+                            .iter()
+                            .chain(model.nodes.iter())
+                            .find(|n| n.id == id)
+                            .map(|n| n.name.clone())
+                            .unwrap_or_else(|| id.to_string())
+                    };
+                    if let (Some(from), Some(to)) = (&ch.from, &ch.to) {
+                        v["label"] = serde_json::Value::String(format!(
+                            "{} → {}: {}",
+                            name_of(from),
+                            name_of(to),
+                            ch.label
+                        ));
+                        v["path"] = serde_json::Value::String(breadcrumb_of(from));
+                    }
+                }
+                ElementKind::Group => {}
             }
             if let Some(cid) = tagged {
                 v["change"] = serde_json::Value::String(cid.clone());
@@ -3046,6 +3072,111 @@ mod tests {
                 "{name} was named, not guessed"
             );
         }
+    }
+
+    /// resp-de0hs1, the write half: a write speaks about the project ONLY when
+    /// the path was guessed.
+    ///
+    /// Every session reads the status line after every write, so a line that
+    /// is always there is one nobody reads — and the guessed case is the one
+    /// that has to carry. A named call is told nothing it does not already
+    /// know; a defaulted one is told loudly, and told the remedy.
+    #[test]
+    fn resp_de0hs1_a_write_speaks_of_the_project_only_when_it_guessed() {
+        let (_server, dir, project, _model_ref) = locate_project();
+
+        let named = crate::helpers::resolve_model_ref(Some(&project)).unwrap();
+        assert!(
+            named.note().is_none(),
+            "a named project says nothing on a write"
+        );
+        let header = crate::helpers::status_header_named(&named).expect("a header");
+        assert!(
+            !header.contains("project"),
+            "and nothing rides the status line: {header}"
+        );
+
+        let _cwd = CwdGuard::to(dir.path());
+        let guessed = crate::helpers::resolve_model_ref(None).unwrap();
+        let note = guessed.note().expect("a guessed project speaks");
+        assert!(note.contains("DEFAULTED"), "{note}");
+        assert!(
+            note.contains("`project` was"),
+            "it names the remedy: {note}"
+        );
+        let header = crate::helpers::status_header_named(&guessed).expect("a header");
+        assert!(
+            header.contains("DEFAULTED"),
+            "and it rides the status line: {header}"
+        );
+    }
+
+    /// resp-wsbj76, at the surface the defect was actually seen on: an AGENT
+    /// reading `get_pending` gets a link entry that names both ends, by name,
+    /// and is filed under its source's breadcrumb the way a node's entry is.
+    /// Before the ends travelled with the change this read "Spawns change
+    /// sessions from" and nothing else — a sentence missing its subject and
+    /// its object.
+    #[test]
+    fn resp_wsbj76_get_pending_names_a_links_two_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut committed = ScryModel::new();
+        committed
+            .nodes
+            .push(node("sys", Kind::System, "Acme", None));
+        committed
+            .nodes
+            .push(node("hub", Kind::Container, "Hub", Some("sys")));
+        committed
+            .nodes
+            .push(node("run", Kind::Container, "Runner", Some("sys")));
+        scryer_core::write_model_at(&model_ref, &committed).unwrap();
+        scryer_core::ensure_planned_at(&model_ref).unwrap();
+
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        planned.links.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "link-1",
+                "src": "hub",
+                "dst": "run",
+                "label": "Spawns change sessions from",
+            }))
+            .unwrap(),
+        );
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+
+        let v = result_json(
+            &ScryerServer::new()
+                .get_pending(Parameters(GetPendingRequest {
+                    project: Some(dir.path().to_string_lossy().to_string()),
+                    change: None,
+                }))
+                .unwrap(),
+        );
+        let entry = v["changes"]
+            .as_array()
+            .expect("changes")
+            .iter()
+            .find(|c| c["kind"] == "link")
+            .expect("the link is pending");
+
+        assert_eq!(
+            entry["label"].as_str(),
+            Some("Hub → Runner: Spawns change sessions from"),
+            "both ends, by name, around the verb: {entry}"
+        );
+        assert_eq!(
+            entry["from"].as_str(),
+            Some("hub"),
+            "and the ids for a caller that wants them"
+        );
+        assert_eq!(entry["to"].as_str(), Some("run"));
+        assert_eq!(
+            entry["path"].as_str(),
+            Some("Acme / Hub"),
+            "filed under its source, as a node's own entry is"
+        );
     }
 
     /// System > Container (boundary src/**) > Component > symbol, with the

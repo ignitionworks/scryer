@@ -94,8 +94,8 @@
         },
         {
           "id": "resp-de0hs1",
-          "statement": "**When** a model answer is given — orient, read_model, get_pending, get_health and the plan writes — **name** the resolved project path it answered from, and **when** that path was defaulted from the process's working directory rather than named by the caller, **say** so.",
-          "lastTouchedAt": 1789334815
+          "statement": "**When** a model answer is given — orient, read_model, get_pending, get_health and the plan writes — **name** the resolved project path on every read, and **when** the path was defaulted from the process's working directory rather than named by the caller, **say** so on every answer, reads and writes alike.",
+          "lastTouchedAt": 1789337037
         }
       ]
     },
@@ -9638,6 +9638,11 @@
           "id": "resp-597",
           "statement": "Counts outstanding plan work at both altitudes the tool reports — diverging elements, and the node/group carriers they fold under",
           "lastTouchedAt": 1786009711
+        },
+        {
+          "id": "resp-wsbj76",
+          "statement": "**When** a link change is listed in the plan diff, **carry** its source and destination with it, so every surface names both ends and none has to reconstruct them.",
+          "lastTouchedAt": 1789337040
         }
       ]
     },
@@ -22591,6 +22596,20 @@
         "symbol": "watch"
       }
     ],
+    "resp-wsbj76": [
+      {
+        "pattern": "crates/scryer-core/src/diff.rs",
+        "symbol": "ElementChange"
+      },
+      {
+        "pattern": "crates/scryer-core/src/diff.rs",
+        "symbol": "diff_links"
+      },
+      {
+        "pattern": "src/planDiff.ts",
+        "symbol": "diffLinks"
+      }
+    ],
     "resp-wtzj6y": [
       {
         "pattern": "crates/scryer-app/src/commands/mod.rs",
@@ -24554,6 +24573,10 @@
       {
         "pattern": "crates/scryer-mcp/src/tools/read.rs",
         "symbol": "resp_de0hs1_an_answer_names_the_project_it_answered_from"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/read.rs",
+        "symbol": "resp_de0hs1_a_write_speaks_of_the_project_only_when_it_guessed"
       }
     ],
     "resp-dgxexx": [
@@ -24878,6 +24901,28 @@
       {
         "pattern": "crates/scryer-app/src/state.rs",
         "symbol": "a_model_file_changing_on_disk_is_announced_to_the_host"
+      }
+    ],
+    "resp-wsbj76": [
+      {
+        "pattern": "crates/scryer-core/src/diff.rs",
+        "symbol": "resp_wsbj76_a_link_change_carries_both_of_its_ends"
+      },
+      {
+        "pattern": "crates/scryer-mcp/src/tools/read.rs",
+        "symbol": "resp_wsbj76_get_pending_names_a_links_two_ends"
+      },
+      {
+        "pattern": "tests/linkEnds.test.tsx",
+        "symbol": "resp-wsbj76: an added link carries source and destination"
+      },
+      {
+        "pattern": "tests/linkEnds.test.tsx",
+        "symbol": "resp-wsbj76: a DROPPED link names the ends the plan no longer has"
+      },
+      {
+        "pattern": "tests/linkEnds.test.tsx",
+        "symbol": "resp-wsbj76: the Changes page row names the source rather than implying it"
       }
     ],
     "resp-wtzj6y": [

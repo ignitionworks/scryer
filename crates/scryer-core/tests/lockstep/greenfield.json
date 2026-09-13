@@ -47,9 +47,11 @@
             "type": "added"
           }
         ],
+        "from": "node-2",
         "id": "link-1",
         "kind": "link",
-        "label": "enqueues"
+        "label": "enqueues",
+        "to": "node-3"
       },
       {
         "changes": [

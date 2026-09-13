@@ -8,8 +8,7 @@ use std::collections::HashMap;
 /// to the agent. Hold the returned guard for the whole read-modify-write of a
 /// write tool so concurrent writers (parallel sessions, the canvas) serialize.
 pub(crate) fn lock_or_err(model_ref: &ModelRef) -> Result<ModelLock, CallToolResult> {
-    scryer_core::lock_model(model_ref)
-        .map_err(|e| CallToolResult::error(vec![Content::text(e)]))
+    scryer_core::lock_model(model_ref).map_err(|e| CallToolResult::error(vec![Content::text(e)]))
 }
 
 /// Strip empty values from a JSON tree to keep MCP responses compact.
@@ -110,10 +109,7 @@ pub(crate) fn outline_tree(model: &ScryModel, include_symbols: bool) -> Vec<serd
             .push(n);
     }
 
-    fn build(
-        node: &Node,
-        children_of: &HashMap<Option<&str>, Vec<&Node>>,
-    ) -> serde_json::Value {
+    fn build(node: &Node, children_of: &HashMap<Option<&str>, Vec<&Node>>) -> serde_json::Value {
         let kids: Vec<serde_json::Value> = children_of
             .get(&Some(node.id.as_str()))
             .map(|cs| cs.iter().map(|c| build(c, children_of)).collect())
@@ -222,7 +218,6 @@ pub(crate) fn restore_node_positions(model: &mut ScryModel, priors: &[&ScryModel
     }
 }
 
-
 /// Project root from request param, active model, or cwd.
 /// Build a committed-model event diff row for a responsibility — its statement,
 /// anchored to the first source location the model maps it to (if any).
@@ -286,11 +281,13 @@ pub(crate) fn resolve_model_ref(req_project: Option<&str>) -> Result<ResolvedPro
     let named = req_project.map(str::trim).filter(|p| !p.is_empty());
     let path = match named {
         Some(p) => std::path::PathBuf::from(p),
-        None => std::env::current_dir().map_err(|e| {
-            McpError::internal_error(format!("cannot read cwd: {}", e), None)
-        })?,
+        None => std::env::current_dir()
+            .map_err(|e| McpError::internal_error(format!("cannot read cwd: {}", e), None))?,
     };
-    Ok(ResolvedProject { model_ref: ModelRef::ProjectLocal(path), defaulted: named.is_none() })
+    Ok(ResolvedProject {
+        model_ref: ModelRef::ProjectLocal(path),
+        defaulted: named.is_none(),
+    })
 }
 
 /// WHICH model an answer is about, and how this process decided that.
@@ -336,19 +333,23 @@ impl ResolvedProject {
         self.model_ref.project_path().to_string_lossy().to_string()
     }
 
-    /// The phrase an answer carries: the path, and how it was arrived at. The
-    /// defaulted case names the remedy, because a session that did not know it
-    /// was guessing does not know what to do about it either.
-    pub(crate) fn note(&self) -> String {
-        if self.defaulted {
-            format!(
-                "project: {} (defaulted from this process's working directory — no `project` was \
-                 named; pass it to be sure which model you are reading)",
-                self.path()
-            )
-        } else {
-            format!("project: {}", self.path())
+    /// What a WRITE's status line says about which model it wrote — and only
+    /// when there is something to say.
+    ///
+    /// `None` for a call that named its project, because every session reads
+    /// this line after every write, and a line that is always there is one
+    /// nobody reads. The guessed case is the one that has to be loud, so it is
+    /// the only one that speaks, and it names the remedy: a session that did
+    /// not know it was guessing does not know what to do about it either.
+    pub(crate) fn note(&self) -> Option<String> {
+        if !self.defaulted {
+            return None;
         }
+        Some(format!(
+            "project DEFAULTED to {} from this process's working directory — no `project` was \
+             named; pass it to be sure which model you are writing to",
+            self.path()
+        ))
     }
 
     /// Stamp the same two facts onto a JSON answer, for the tools that speak
@@ -472,7 +473,10 @@ impl RespIdReminter {
                         .flat_map(|g| g.responsibilities.iter().map(move |r| (&g.id, r))),
                 );
             for (host, r) in hosted {
-                me.known.entry(r.id.clone()).or_default().insert(host.clone());
+                me.known
+                    .entry(r.id.clone())
+                    .or_default()
+                    .insert(host.clone());
             }
         }
         me
@@ -519,9 +523,13 @@ impl RespIdReminter {
             };
             let fresh = scryer_core::mint_id_from(
                 "resp",
-                self.known.keys().map(String::as_str).chain(self.used.iter().map(String::as_str)),
+                self.known
+                    .keys()
+                    .map(String::as_str)
+                    .chain(self.used.iter().map(String::as_str)),
             );
-            self.minted.push(format!("{host}: '{}' → {fresh} ({reason})", r.id));
+            self.minted
+                .push(format!("{host}: '{}' → {fresh} ({reason})", r.id));
             self.used.insert(fresh.clone());
             r.id = fresh;
         }
@@ -683,7 +691,9 @@ pub(crate) fn write_planned_tagged(
             if let Some(meta) = model.changes.iter().find(|c| c.id == cid) {
                 if meta.signed_off.is_some() {
                     use scryer_core::changes::Classification as C;
-                    for (key, class, snap) in scryer_core::changes::classify_against_signoff(model, meta) {
+                    for (key, class, snap) in
+                        scryer_core::changes::classify_against_signoff(model, meta)
+                    {
                         if !keys.contains(&key) && class != C::Dropped {
                             continue; // an older divergence, already reported
                         }
@@ -692,7 +702,9 @@ pub(crate) fn write_planned_tagged(
                                 "AMENDMENT: {key} differs from what was signed off in {cid} \
                                  (approved: \"{}\") — it will not fold; it lands as vagrant for \
                                  the developer's verdict at mark_implemented",
-                                snap.as_ref().and_then(|s| s.statement.as_deref()).unwrap_or("?")
+                                snap.as_ref()
+                                    .and_then(|s| s.statement.as_deref())
+                                    .unwrap_or("?")
                             ),
                             C::Added => format!(
                                 "ADDITION: {key} was not in {cid} at sign-off — it will not \
@@ -782,8 +794,9 @@ pub(crate) fn status_counts(model_ref: &ModelRef) -> Option<StatusCounts> {
     let pending = pending_change_count(&committed, &planned);
     let carriers = scryer_core::diff::plan_carrier_count(&committed, &planned);
     let open_changes = planned.changes.len();
-    let untested =
-        scryer_core::health::compute_health(&committed, Some(&planned), None).totals.untested;
+    let untested = scryer_core::health::compute_health(&committed, Some(&planned), None)
+        .totals
+        .untested;
     // Recorded test verdicts, re-verified against the tree (fingerprint
     // compare with an mtime fast path — cheap enough for every response).
     let verdicts = scryer_extract::test_status::test_statuses(model_ref).unwrap_or_default();
@@ -905,15 +918,20 @@ pub(crate) fn status_header(model_ref: &ModelRef) -> Option<String> {
     })
 }
 
-/// [`status_header`] for a write response, naming WHICH model was written.
+/// [`status_header`] for a write response, saying when the model written was
+/// not the one the caller named — because the caller named none.
 ///
 /// The loop state is only half of "where am I": a session that resolved the
 /// wrong project gets a perfectly accurate header about a model it did not
-/// mean to touch. So the write's own answer carries the path, and says when
-/// the path was guessed from the working directory rather than named.
+/// mean to touch. A call that named its project already knows the answer and
+/// is told nothing; the guessed case is the whole point, and adding it to
+/// every write instead would bury it in a line that never changes.
 pub(crate) fn status_header_named(project: &ResolvedProject) -> Option<String> {
     let head = status_header(project)?;
-    Some(format!("{head} · {}", project.note()))
+    match project.note() {
+        Some(note) => Some(format!("{head} · {note}")),
+        None => Some(head),
+    }
 }
 
 /// Which claim-keyed anchor map a batch of entries writes: implementation
