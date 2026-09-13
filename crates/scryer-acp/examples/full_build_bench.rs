@@ -26,7 +26,10 @@ fn pool_size(jobs: &[Job]) -> usize {
         return 1;
     }
     let average = jobs.iter().map(|j| j.payload_bytes).sum::<usize>() / jobs.len();
-    let cpu_cap = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 4);
+    let cpu_cap = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2)
+        .clamp(1, 4);
     let payload_cap = match average {
         0..=150_000 => 4,
         150_001..=450_000 => 3,
@@ -86,7 +89,9 @@ async fn run_session(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let project = std::env::args().nth(1).expect("usage: full_build_bench <scratch-project>");
+    let project = std::env::args()
+        .nth(1)
+        .expect("usage: full_build_bench <scratch-project>");
     let project_path = std::path::Path::new(&project);
     let mcp_binary = std::env::var("SCRYER_MCP").unwrap_or_else(|_| "scryer-mcp".into());
 
@@ -98,7 +103,10 @@ async fn main() {
         symbol_edges: ctx
             .symbol_edges
             .iter()
-            .map(|e| scryer_core::build_edges::CachedEdge { src: e.src.clone(), dst: e.dst.clone() })
+            .map(|e| scryer_core::build_edges::CachedEdge {
+                src: e.src.clone(),
+                dst: e.dst.clone(),
+            })
             .collect(),
     };
     scryer_core::build_edges::write_build_edges(project_path, &edges).expect("edge cache");
@@ -151,7 +159,11 @@ async fn main() {
         let evidence_json = serde_json::to_string(&evidence).unwrap();
         jobs.push(Job {
             id: id.clone(),
-            name: if name.is_empty() { format!("'{dir}'") } else { name.clone() },
+            name: if name.is_empty() {
+                format!("'{dir}'")
+            } else {
+                name.clone()
+            },
             payload_bytes: evidence_json.len(),
             work_units: evidence.work_units(),
             evidence_json,
@@ -159,16 +171,21 @@ async fn main() {
     }
     jobs.sort_by(|a, b| b.work_units.cmp(&a.work_units));
     let pool = pool_size(&jobs);
-    eprintln!("[bench] {} container job(s), pool {} (+1 system)", jobs.len(), pool);
+    eprintln!(
+        "[bench] {} container job(s), pool {} (+1 system)",
+        jobs.len(),
+        pool
+    );
 
     let settings = scryer_core::read_subagent_settings();
     let launch = scryer_acp::detect_available_agent_pref(&settings.agent).expect("agent on PATH");
     let (binary, kind, model_name, effort) = match launch {
         scryer_acp::AgentLaunch::Cli { binary, kind } => {
             let (m, e) = match kind {
-                scryer_acp::AgentKind::ClaudeCode => {
-                    (settings.claude.model.clone(), settings.claude.effort.clone())
-                }
+                scryer_acp::AgentKind::ClaudeCode => (
+                    settings.claude.model.clone(),
+                    settings.claude.effort.clone(),
+                ),
                 _ => (settings.codex.model.clone(), settings.codex.effort.clone()),
             };
             (binary, kind, m, e)
@@ -188,15 +205,37 @@ async fn main() {
         let results = results.clone();
         let runtime = runtime.clone();
         let (binary, kind, project, model_name, effort, mcp_binary) = (
-            binary.clone(), kind.clone(), project.clone(),
-            model_name.clone(), effort.clone(), mcp_binary.clone(),
+            binary.clone(),
+            kind.clone(),
+            project.clone(),
+            model_name.clone(),
+            effort.clone(),
+            mcp_binary.clone(),
         );
-        let prompt = scryer_acp::prompt::enrich_system_prompt(&project, &system_id, &structure_json);
+        let prompt =
+            scryer_acp::prompt::enrich_system_prompt(&project, &system_id, &structure_json);
         handles.push(tokio::spawn(async move {
             let _p = sem.acquire().await.unwrap();
             eprintln!("[bench] +{:>5.1}s start system pass", 0.0);
-            match run_session(&runtime, &binary, &kind, &project, &model_name, &effort, &mcp_binary, prompt, "Bench: system pass").await {
-                Ok((usage, secs)) => results.lock().await.push(("(system pass)".into(), secs, usage)),
+            match run_session(
+                &runtime,
+                &binary,
+                &kind,
+                &project,
+                &model_name,
+                &effort,
+                &mcp_binary,
+                prompt,
+                "Bench: system pass",
+            )
+            .await
+            {
+                Ok((usage, secs)) => {
+                    results
+                        .lock()
+                        .await
+                        .push(("(system pass)".into(), secs, usage))
+                }
                 Err(e) => eprintln!("[bench] system pass FAILED: {e}"),
             }
         }));
@@ -208,21 +247,43 @@ async fn main() {
         let results = results.clone();
         let runtime = runtime.clone();
         let (binary, kind, project, model_name, effort, mcp_binary) = (
-            binary.clone(), kind.clone(), project.clone(),
-            model_name.clone(), effort.clone(), mcp_binary.clone(),
+            binary.clone(),
+            kind.clone(),
+            project.clone(),
+            model_name.clone(),
+            effort.clone(),
+            mcp_binary.clone(),
         );
         let build_start = build_start;
         handles.push(tokio::spawn(async move {
-            let _p = sem.acquire_many(permits as u32).await.unwrap();
+            let _p = sem.acquire_many(permits).await.unwrap();
             eprintln!(
                 "[bench] +{:>5.1}s start '{}' ({} bytes, {} permits)",
-                build_start.elapsed().as_secs_f64(), job.name, job.payload_bytes, permits,
+                build_start.elapsed().as_secs_f64(),
+                job.name,
+                job.payload_bytes,
+                permits,
             );
             let prompt = scryer_acp::prompt::build_container_prompt(
-                &project, &job.name, &job.id, &job.evidence_json,
+                &project,
+                &job.name,
+                &job.id,
+                &job.evidence_json,
             );
             let label = format!("Bench: fill {}", job.name);
-            match run_session(&runtime, &binary, &kind, &project, &model_name, &effort, &mcp_binary, prompt, &label).await {
+            match run_session(
+                &runtime,
+                &binary,
+                &kind,
+                &project,
+                &model_name,
+                &effort,
+                &mcp_binary,
+                prompt,
+                &label,
+            )
+            .await
+            {
                 Ok((usage, secs)) => results.lock().await.push((job.name.clone(), secs, usage)),
                 Err(e) => eprintln!("[bench] '{}' FAILED: {e}", job.name),
             }
@@ -245,8 +306,11 @@ async fn main() {
         grand.add(usage);
         println!(
             "{:<28} {:>6.1}s   out {:>6}  cache-w {:>7}  cache-r {:>7}",
-            name, secs, usage.output_tokens,
-            usage.cache_creation_input_tokens, usage.cache_read_input_tokens,
+            name,
+            secs,
+            usage.output_tokens,
+            usage.cache_creation_input_tokens,
+            usage.cache_read_input_tokens,
         );
     }
     println!(

@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
 use agent_client_protocol::{
-    self as acp, Agent as _, CancelNotification, ClientSideConnection,
-    InitializeRequest, McpServer, McpServerStdio, NewSessionRequest, PromptRequest,
-    ProtocolVersion, StopReason,
+    self as acp, Agent as _, CancelNotification, ClientSideConnection, InitializeRequest,
+    McpServer, McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, StopReason,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -23,6 +22,12 @@ pub enum LaunchMode {
 }
 
 /// Commands sent to the runtime.
+///
+/// `Start` is far bigger than `Cancel`, and deliberately not boxed: one is
+/// sent per agent session — a human-scale rate — and it is the common variant,
+/// so boxing would add an allocation to the hot path to shrink a channel
+/// message nobody queues in bulk.
+#[allow(clippy::large_enum_variant)]
 enum RuntimeCommand {
     Start {
         agent_binary: String,
@@ -55,6 +60,12 @@ pub struct AcpRuntime {
     cmd_tx: mpsc::UnboundedSender<RuntimeCommand>,
 }
 
+impl Default for AcpRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AcpRuntime {
     pub fn new() -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -69,6 +80,12 @@ impl AcpRuntime {
     }
 
     /// Start a new sync session.
+    ///
+    /// The argument list is a launch DESCRIPTION — binary, mode, working
+    /// directory, model, effort, tools, prompt — and a struct holding exactly
+    /// these fields would be the same list with a name in front of it. Kept
+    /// flat until a second caller wants to pass one around.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_session(
         &self,
         agent_binary: String,
@@ -162,14 +179,37 @@ fn runtime_thread(
                     let tool_refs: Vec<&str> = allowed_tools.iter().map(|s| s.as_str()).collect();
                     let result = match mode {
                         LaunchMode::Cli { kind } => start_cli_session(
-                            &agent_binary, &kind, &cwd, &model_name, &effort, &mcp_binary,
-                            &prompt, &label, &session_id, &tool_refs, id, event_tx,
+                            &agent_binary,
+                            &kind,
+                            &cwd,
+                            &model_name,
+                            &effort,
+                            &mcp_binary,
+                            &prompt,
+                            &label,
+                            &session_id,
+                            &tool_refs,
+                            id,
+                            event_tx,
                             done_tx.clone(),
                         ),
-                        LaunchMode::Acp { kind } => start_acp_session(
-                            &agent_binary, &kind, &cwd, &model_name, &effort, &mcp_binary,
-                            &prompt, &label, &session_id, id, event_tx, done_tx.clone(),
-                        ).await,
+                        LaunchMode::Acp { kind } => {
+                            start_acp_session(
+                                &agent_binary,
+                                &kind,
+                                &cwd,
+                                &model_name,
+                                &effort,
+                                &mcp_binary,
+                                &prompt,
+                                &label,
+                                &session_id,
+                                id,
+                                event_tx,
+                                done_tx.clone(),
+                            )
+                            .await
+                        }
                     };
 
                     match result {
@@ -237,6 +277,9 @@ fn finish_manifest(
     }
 }
 
+/// Same launch description as [`AcpRuntime::start_session`], one layer down;
+/// see the note there.
+#[allow(clippy::too_many_arguments)]
 fn start_cli_session(
     agent_binary: &str,
     kind: &AgentKind,
@@ -270,9 +313,11 @@ fn start_cli_session(
                 }
             });
             cmd.arg("-p")
-                .arg("--output-format").arg("stream-json")
+                .arg("--output-format")
+                .arg("stream-json")
                 .arg("--verbose")
-                .arg("--effort").arg(effort);
+                .arg("--effort")
+                .arg(effort);
             if !model_name.is_empty() {
                 cmd.arg("--model").arg(model_name);
             }
@@ -288,7 +333,8 @@ fn start_cli_session(
                 .arg("--full-auto")
                 .arg("--json")
                 .arg("--ephemeral")
-                .arg("-c").arg(format!("model_reasoning_effort=\"{}\"", effort));
+                .arg("-c")
+                .arg(format!("model_reasoning_effort=\"{}\"", effort));
             if !model_name.is_empty() {
                 cmd.arg("-c").arg(format!("model=\"{}\"", model_name));
             }
@@ -298,7 +344,7 @@ fn start_cli_session(
         AgentKind::Other => {
             // Best-effort: pass prompt as last arg (unknown CLIs may not read
             // stdin — large prompts are unsupported here).
-            cmd.arg(&prompt);
+            cmd.arg(prompt);
             prompt_via_stdin = false;
         }
     }
@@ -318,7 +364,12 @@ fn start_cli_session(
     {
         #[allow(unused_imports)]
         use std::os::unix::process::CommandExt;
-        unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setpgid(0, 0);
+                Ok(())
+            });
+        }
     }
     #[cfg(windows)]
     {
@@ -327,7 +378,8 @@ fn start_cli_session(
         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("Failed to spawn {agent_binary}: {e}"))?;
 
     if prompt_via_stdin {
@@ -358,7 +410,15 @@ fn start_cli_session(
     // The transcript alone cannot say — the prompt went over stdin and the
     // session keeps no history of its own.
     let manifest_path = start_run_manifest(
-        cwd, id, session_id, label, agent_label(kind), model_name, effort, prompt, true,
+        cwd,
+        id,
+        session_id,
+        label,
+        agent_label(kind),
+        model_name,
+        effort,
+        prompt,
+        true,
     );
     // The agent reports its turn total once, at the end; keep the last value
     // seen so the record can close with what the run actually consumed.
@@ -421,7 +481,9 @@ fn start_cli_session(
             // our stdout/stderr pipe and keep it open after the agent itself
             // exits — so waiting for the streams to close can hang forever.
             // Read the streams concurrently, but stop as soon as the child exits.
-            let streams = async { tokio::join!(stdout_task, stderr_task); };
+            let streams = async {
+                tokio::join!(stdout_task, stderr_task);
+            };
             tokio::pin!(streams);
             let waiter = child.wait();
             tokio::pin!(waiter);
@@ -493,7 +555,11 @@ fn short_tool(name: &str) -> &str {
 
 /// Last two path segments, e.g. "/home/alex/p/src/App.tsx" -> "src/App.tsx".
 fn short_path(p: &str) -> String {
-    let parts: Vec<&str> = p.trim_end_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+    let parts: Vec<&str> = p
+        .trim_end_matches('/')
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
     match parts.as_slice() {
         [.., a, b] => format!("{}/{}", a, b),
         _ => p.to_string(),
@@ -504,7 +570,11 @@ fn short_path(p: &str) -> String {
 /// activity readout shows *what* the tool is acting on (which file, which node).
 fn tool_detail(input: &serde_json::Value) -> Option<String> {
     let obj = input.as_object()?;
-    if let Some(p) = obj.get("file_path").or_else(|| obj.get("path")).and_then(|v| v.as_str()) {
+    if let Some(p) = obj
+        .get("file_path")
+        .or_else(|| obj.get("path"))
+        .and_then(|v| v.as_str())
+    {
         if !p.is_empty() {
             return Some(short_path(p));
         }
@@ -578,7 +648,11 @@ fn summarize_event(line: &str) -> Option<String> {
                     let text = block.get("text")?.as_str()?;
                     let first = text.trim().lines().next().unwrap_or("").trim();
                     if !first.is_empty() {
-                        let truncated = if first.len() > 120 { format!("{}…", &first[..120]) } else { first.to_string() };
+                        let truncated = if first.len() > 120 {
+                            format!("{}…", &first[..120])
+                        } else {
+                            first.to_string()
+                        };
                         return Some(truncated);
                     }
                 }
@@ -633,14 +707,17 @@ fn acp_args(kind: &AcpKind, model_name: &str, effort: &str) -> Vec<String> {
 /// tool" into a message that names what to fix. Both files Copilot reads count.
 fn project_declares_scryer_mcp(cwd: &str) -> bool {
     let root = std::path::Path::new(cwd);
-    [root.join(".mcp.json"), root.join(".github").join("mcp.json")]
-        .iter()
-        .any(|p| {
-            std::fs::read_to_string(p)
-                .ok()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                .is_some_and(|v| v.pointer("/mcpServers/scryer").is_some())
-        })
+    [
+        root.join(".mcp.json"),
+        root.join(".github").join("mcp.json"),
+    ]
+    .iter()
+    .any(|p| {
+        std::fs::read_to_string(p)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .is_some_and(|v| v.pointer("/mcpServers/scryer").is_some())
+    })
 }
 
 #[cfg(test)]
@@ -737,11 +814,9 @@ async fn start_acp_session(
     });
 
     let _init = connection
-        .initialize(
-            InitializeRequest::new(ProtocolVersion::V1).client_info(
-                acp::Implementation::new("scryer", env!("CARGO_PKG_VERSION")).title("Scryer"),
-            ),
-        )
+        .initialize(InitializeRequest::new(ProtocolVersion::V1).client_info(
+            acp::Implementation::new("scryer", env!("CARGO_PKG_VERSION")).title("Scryer"),
+        ))
         .await
         .map_err(|e| format!("ACP initialize failed: {e}"))?;
 
@@ -780,7 +855,15 @@ async fn start_acp_session(
     // An ACP session tees no transcript — the protocol is stdout — so its run
     // record is the only trace of what it was asked to do.
     let manifest_path = start_run_manifest(
-        cwd, id, session_id, label, acp_agent_label(kind), model_name, effort, prompt, false,
+        cwd,
+        id,
+        session_id,
+        label,
+        acp_agent_label(kind),
+        model_name,
+        effort,
+        prompt,
+        false,
     );
 
     tokio::task::spawn_local(async move {
@@ -789,10 +872,8 @@ async fn start_acp_session(
         // agent the moment the session was handed back — the whole ACP path
         // died between `session/new` and the first prompt.
         let mut child = child;
-        let prompt_fut = connection.prompt(PromptRequest::new(
-            sid.clone(),
-            vec![prompt_text.into()],
-        ));
+        let prompt_fut =
+            connection.prompt(PromptRequest::new(sid.clone(), vec![prompt_text.into()]));
 
         tokio::select! {
             result = prompt_fut => {
@@ -852,10 +933,14 @@ async fn kill_process_tree(child: &mut tokio::process::Child, pid: Option<u32>) 
     #[cfg(unix)]
     if let Some(pid) = pid {
         // SIGTERM the process group for graceful shutdown
-        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGTERM); }
+        unsafe {
+            libc::killpg(pid as libc::pid_t, libc::SIGTERM);
+        }
         // Brief grace period, then force-kill
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL); }
+        unsafe {
+            libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+        }
         let _ = child.wait().await;
         return;
     }
@@ -882,7 +967,10 @@ async fn kill_process_tree(child: &mut tokio::process::Child, pid: Option<u32>) 
 mod session_tests {
     use super::*;
 
-    fn feed() -> (mpsc::UnboundedSender<AgentEvent>, mpsc::UnboundedReceiver<AgentEvent>) {
+    fn feed() -> (
+        mpsc::UnboundedSender<AgentEvent>,
+        mpsc::UnboundedReceiver<AgentEvent>,
+    ) {
         mpsc::unbounded_channel()
     }
 
@@ -895,7 +983,9 @@ mod session_tests {
     ) -> Result<String, String> {
         rt.start_session(
             binary.into(),
-            LaunchMode::Cli { kind: AgentKind::Other },
+            LaunchMode::Cli {
+                kind: AgentKind::Other,
+            },
             cwd.into(),
             String::new(),
             String::new(),
@@ -918,7 +1008,9 @@ mod session_tests {
         let rt = AcpRuntime::new();
 
         let (tx, mut rx) = feed();
-        start(&rt, "true", "the prompt it was given", &cwd, tx).await.unwrap();
+        start(&rt, "true", "the prompt it was given", &cwd, tx)
+            .await
+            .unwrap();
         while let Some(ev) = rx.recv().await {
             if matches!(ev, AgentEvent::Completed { .. }) {
                 break;
@@ -945,14 +1037,20 @@ mod session_tests {
         let rt = AcpRuntime::new();
 
         let (tx, _rx) = feed();
-        let err = start(&rt, "/nonexistent/agent-binary", "", &cwd, tx).await.unwrap_err();
+        let err = start(&rt, "/nonexistent/agent-binary", "", &cwd, tx)
+            .await
+            .unwrap_err();
         assert!(err.contains("Failed to spawn"), "{err}");
 
         let (tx, mut rx) = feed();
         let id = start(&rt, "true", "", &cwd, tx).await.unwrap();
         assert!(id.starts_with("sync-"), "{id}");
         loop {
-            match rx.recv().await.expect("event feed closed before the session ended") {
+            match rx
+                .recv()
+                .await
+                .expect("event feed closed before the session ended")
+            {
                 AgentEvent::Completed { stop_reason } => {
                     assert_eq!(stop_reason, "end_turn");
                     break;
@@ -979,13 +1077,20 @@ mod session_tests {
         rt.cancel().await.unwrap();
         for rx in [&mut rx1, &mut rx2] {
             loop {
-                match rx.recv().await.expect("event feed closed without a Cancelled") {
+                match rx
+                    .recv()
+                    .await
+                    .expect("event feed closed without a Cancelled")
+                {
                     AgentEvent::Cancelled => break,
                     _ => continue,
                 }
             }
         }
-        assert!(rt.cancel().await.is_err(), "no session may survive the cancel");
+        assert!(
+            rt.cancel().await.is_err(),
+            "no session may survive the cancel"
+        );
     }
 
     /// Killing a session takes down the agent's whole process group — the
@@ -998,7 +1103,10 @@ mod session_tests {
         let pidfile = tmp.path().join("grandchild.pid");
         let mut cmd = tokio::process::Command::new("sh");
         cmd.arg("-c")
-            .arg(format!("sleep 30 & echo $! > '{}'; wait", pidfile.display()))
+            .arg(format!(
+                "sleep 30 & echo $! > '{}'; wait",
+                pidfile.display()
+            ))
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true);
         unsafe {
@@ -1019,7 +1127,10 @@ mod session_tests {
         };
 
         kill_process_tree(&mut child, pid).await;
-        assert!(child.try_wait().unwrap().is_some(), "the agent process must be gone");
+        assert!(
+            child.try_wait().unwrap().is_some(),
+            "the agent process must be gone"
+        );
         let mut gone = false;
         for _ in 0..100 {
             if unsafe { libc::kill(grandchild, 0) } == -1 {
@@ -1037,6 +1148,9 @@ mod session_tests {
             .spawn()
             .unwrap();
         kill_process_tree(&mut child, None).await;
-        assert!(child.try_wait().unwrap().is_some(), "the fallback must kill the child");
+        assert!(
+            child.try_wait().unwrap().is_some(),
+            "the fallback must kill the child"
+        );
     }
 }

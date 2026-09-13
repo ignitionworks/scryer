@@ -11,7 +11,7 @@ const REJECT_TOOLS: &[&str] = &["get_task"];
 
 fn should_reject(title: &str) -> bool {
     let name = title.rsplit("__").next().unwrap_or(title);
-    REJECT_TOOLS.iter().any(|t| *t == name)
+    REJECT_TOOLS.contains(&name)
 }
 
 /// ACP Client implementation that auto-approves all tool calls
@@ -58,18 +58,15 @@ impl Client for ScryerClient {
         };
 
         let outcome = match option {
-            Some(opt) => acp::RequestPermissionOutcome::Selected(
-                SelectedPermissionOutcome::new(opt.option_id.clone()),
-            ),
+            Some(opt) => acp::RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                opt.option_id.clone(),
+            )),
             None => acp::RequestPermissionOutcome::Cancelled,
         };
         Ok(RequestPermissionResponse::new(outcome))
     }
 
-    async fn session_notification(
-        &self,
-        args: SessionNotification,
-    ) -> acp::Result<()> {
+    async fn session_notification(&self, args: SessionNotification) -> acp::Result<()> {
         match args.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let Some(text) = extract_text(&chunk.content) {
@@ -145,7 +142,10 @@ mod tests {
 
     fn selected_option(resp: &RequestPermissionResponse) -> String {
         let v = serde_json::to_value(resp).unwrap();
-        assert_eq!(v["outcome"]["outcome"], "selected", "an option must be selected: {v}");
+        assert_eq!(
+            v["outcome"]["outcome"], "selected",
+            "an option must be selected: {v}"
+        );
         v["outcome"]["optionId"].as_str().unwrap().to_string()
     }
 
@@ -154,10 +154,16 @@ mod tests {
     #[tokio::test]
     async fn a_get_task_permission_request_is_rejected() {
         let (client, _rx) = client();
-        let opts =
-            [("allow-always", "allow_always"), ("allow-once", "allow_once"), ("reject", "reject_once")];
+        let opts = [
+            ("allow-always", "allow_always"),
+            ("allow-once", "allow_once"),
+            ("reject", "reject_once"),
+        ];
         for title in ["get_task", "mcp__scryer__get_task"] {
-            let resp = client.request_permission(permission_request(title, &opts)).await.unwrap();
+            let resp = client
+                .request_permission(permission_request(title, &opts))
+                .await
+                .unwrap();
             assert_eq!(selected_option(&resp), "reject", "{title} must be rejected");
         }
     }
@@ -170,7 +176,11 @@ mod tests {
         let resp = client
             .request_permission(permission_request(
                 "mcp__scryer__replace_subtree",
-                &[("reject", "reject_once"), ("allow-once", "allow_once"), ("allow-always", "allow_always")],
+                &[
+                    ("reject", "reject_once"),
+                    ("allow-once", "allow_once"),
+                    ("allow-always", "allow_always"),
+                ],
             ))
             .await
             .unwrap();
