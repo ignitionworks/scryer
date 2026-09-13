@@ -158,12 +158,18 @@ fn committed_node_copy(
         // entry stays pending). Elements the plan no longer has at all are a
         // planned deletion and DO leave committed here.
         for r in &prior.responsibilities {
-            if n.responsibilities.iter().any(|x| x.id == r.id && !folds_resp(x)) {
+            if n.responsibilities
+                .iter()
+                .any(|x| x.id == r.id && !folds_resp(x))
+            {
                 copy.responsibilities.push(r.clone());
             }
         }
         for p in &prior.properties {
-            if n.properties.iter().any(|x| x.label == p.label && !folds_prop(x)) {
+            if n.properties
+                .iter()
+                .any(|x| x.label == p.label && !folds_prop(x))
+            {
                 copy.properties.push(p.clone());
             }
         }
@@ -284,11 +290,10 @@ pub fn commit_element_withholding(
                     // orphaning of item C. Scope removal to the subtree the plan
                     // AGREES is gone (absent from the plan), so a still-present
                     // child isn't clobbered into a phantom re-add.
-                    let removed: std::collections::HashSet<String> =
-                        drift::subtree_ids(&model, id)
-                            .into_iter()
-                            .filter(|nid| !planned.nodes.iter().any(|n| &n.id == nid))
-                            .collect();
+                    let removed: std::collections::HashSet<String> = drift::subtree_ids(&model, id)
+                        .into_iter()
+                        .filter(|nid| !planned.nodes.iter().any(|n| &n.id == nid))
+                        .collect();
                     deleted_node_resp_ids = model
                         .nodes
                         .iter()
@@ -574,9 +579,8 @@ pub fn commit_element_withholding(
     // actually folded, so vagrant claims AND claims tagged to another change
     // keep theirs (this fold was not their verdict).
     let ledger = p.change_map.clone();
-    let stays = |host_key: &str, elem_key: String| {
-        changes::foreign_to_host(&ledger, host_key, &elem_key)
-    };
+    let stays =
+        |host_key: &str, elem_key: String| changes::foreign_to_host(&ledger, host_key, &elem_key);
     if !purge_from_planned {
         match kind {
             diff::ElementKind::Node => {
@@ -639,7 +643,11 @@ pub fn commit_element_withholding(
                     .nodes
                     .iter_mut()
                     .flat_map(|n| n.responsibilities.iter_mut())
-                    .chain(p.groups.iter_mut().flat_map(|g| g.responsibilities.iter_mut()))
+                    .chain(
+                        p.groups
+                            .iter_mut()
+                            .flat_map(|g| g.responsibilities.iter_mut()),
+                    )
                     .find(|x| x.id == id)
                 {
                     plan_markers_cleared |= x.vagrant.take().is_some()
@@ -778,7 +786,9 @@ pub fn commit_plan_only_ancestors(
             break;
         }
         if !seen.insert(pid.clone()) {
-            return Err(format!("parent chain of '{node_id}' contains a cycle at '{pid}'"));
+            return Err(format!(
+                "parent chain of '{node_id}' contains a cycle at '{pid}'"
+            ));
         }
         match planned.nodes.iter().find(|n| n.id == pid) {
             Some(p) => {
@@ -809,7 +819,11 @@ pub fn commit_plan_only_ancestors(
     let mut planned_anchor_strip: Vec<String> = Vec::new();
     let mut planned_boundary_strip: Vec<String> = Vec::new();
     for aid in &chain {
-        let n = planned.nodes.iter().find(|n| &n.id == aid).expect("collected from planned");
+        let n = planned
+            .nodes
+            .iter()
+            .find(|n| &n.id == aid)
+            .expect("collected from planned");
         model.nodes.retain(|x| &x.id != aid);
         model.nodes.push(structure_only_copy(n));
         if let Some(locs) = planned.source_map.get(aid) {
@@ -894,8 +908,11 @@ pub fn commit_ready_dependents(r: &ModelRef, node_id: &str) -> Result<(), String
     let planned = read_planned_seeded_at(r)?;
     let plan = diff::diff(&committed, &planned);
 
-    let is_deletion =
-        |c: &diff::ElementChange| c.changes.iter().any(|ch| matches!(ch, diff::Change::Deleted));
+    let is_deletion = |c: &diff::ElementChange| {
+        c.changes
+            .iter()
+            .any(|ch| matches!(ch, diff::Change::Deleted))
+    };
 
     let ready_links: Vec<String> = plan
         .changes
@@ -924,9 +941,15 @@ pub fn commit_ready_dependents(r: &ModelRef, node_id: &str) -> Result<(), String
         // errored AFTER this node's own fold already committed: a partial success
         // reported as failure. Match all three residence checks it enforces.
         .filter(|g| {
-            g.member_ids.iter().all(|m| committed_ids.contains(m.as_str()))
-                && g.parent_node_id.as_deref().is_none_or(|p| committed_ids.contains(p))
-                && g.parent_group_id.as_deref().is_none_or(|p| committed_group_ids.contains(p))
+            g.member_ids
+                .iter()
+                .all(|m| committed_ids.contains(m.as_str()))
+                && g.parent_node_id
+                    .as_deref()
+                    .is_none_or(|p| committed_ids.contains(p))
+                && g.parent_group_id
+                    .as_deref()
+                    .is_none_or(|p| committed_group_ids.contains(p))
         })
         .map(|g| g.id.clone())
         .collect();
@@ -941,8 +964,8 @@ pub fn commit_ready_dependents(r: &ModelRef, node_id: &str) -> Result<(), String
 mod tests {
     use super::*;
     use crate::{
-        ensure_planned_at, plan_diff_at, read_planned_at, write_planned_at, Kind, Link,
-        Source, SourceLocation,
+        ensure_planned_at, plan_diff_at, read_planned_at, write_planned_at, Kind, Link, Source,
+        SourceLocation,
     };
 
     fn temp_ref() -> (tempfile::TempDir, ModelRef) {
@@ -961,11 +984,16 @@ mod tests {
         let (_dir, r) = temp_ref();
         let mut committed = ScryModel::new();
         let mut app = mk_node("app", "App", None);
-        app.responsibilities.push(mk_resp("resp-1", "serve the API"));
+        app.responsibilities
+            .push(mk_resp("resp-1", "serve the API"));
         committed.nodes.push(app);
-        committed
-            .boundaries
-            .insert("app".into(), vec![Source { pattern: "src/**".into(), comment: None }]);
+        committed.boundaries.insert(
+            "app".into(),
+            vec![Source {
+                pattern: "src/**".into(),
+                comment: None,
+            }],
+        );
         committed.source_map.insert(
             "resp-1".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "src/api.rs" })).unwrap()],
@@ -981,7 +1009,8 @@ mod tests {
         ensure_planned_at(&r).unwrap();
         let mut built = read_planned_at(&r).unwrap();
         let mut core = mk_node("core", "Core", Some("app"));
-        core.responsibilities.push(mk_resp("resp-2", "parse the input"));
+        core.responsibilities
+            .push(mk_resp("resp-2", "parse the input"));
         built.nodes.push(core);
         built.source_map.insert(
             "resp-2".into(),
@@ -990,10 +1019,22 @@ mod tests {
 
         let folded = fold_built_model(&r, &built).unwrap();
 
-        assert!(folded.boundaries.contains_key("app"), "committed boundary glob survives the fold");
-        assert!(folded.source_map.contains_key("resp-1"), "committed-only anchor survives the fold");
-        assert!(folded.test_map.contains_key("resp-1"), "committed-only test entry survives");
-        assert!(folded.source_map.contains_key("resp-2"), "the build's own anchor lands");
+        assert!(
+            folded.boundaries.contains_key("app"),
+            "committed boundary glob survives the fold"
+        );
+        assert!(
+            folded.source_map.contains_key("resp-1"),
+            "committed-only anchor survives the fold"
+        );
+        assert!(
+            folded.test_map.contains_key("resp-1"),
+            "committed-only test entry survives"
+        );
+        assert!(
+            folded.source_map.contains_key("resp-2"),
+            "the build's own anchor lands"
+        );
         let on_disk = read_model_at(&r).unwrap();
         assert!(on_disk.boundaries.contains_key("app"));
         assert!(on_disk.source_map.contains_key("resp-1"));
@@ -1005,7 +1046,10 @@ mod tests {
                 && planned.boundaries.is_empty(),
             "draft re-seeded clean — no shadow anchors"
         );
-        assert!(plan_diff_at(&r).unwrap().is_empty(), "no pending plan survives the build");
+        assert!(
+            plan_diff_at(&r).unwrap().is_empty(),
+            "no pending plan survives the build"
+        );
     }
 
     /// Test entries (claim → attached test) ride the fold in lockstep with
@@ -1032,8 +1076,12 @@ mod tests {
             .unwrap()
             .responsibilities
             .push(mk_resp("resp-1", "parse the input"));
-        planned.source_map.insert("resp-1".into(), loc("src/parse.rs"));
-        planned.test_map.insert("resp-1".into(), loc("tests/parse.rs"));
+        planned
+            .source_map
+            .insert("resp-1".into(), loc("src/parse.rs"));
+        planned
+            .test_map
+            .insert("resp-1".into(), loc("tests/parse.rs"));
         write_planned_at(&r, &planned).unwrap();
 
         commit_element(&r, diff::ElementKind::Responsibility, None, "resp-1").unwrap();
@@ -1122,13 +1170,23 @@ mod tests {
         write_planned_at(&r, &planned).unwrap();
 
         let err = commit_element(&r, diff::ElementKind::Link, None, "link-a-b").unwrap_err();
-        assert!(err.contains("'b'"), "error names the plan-only endpoint: {err}");
-        assert!(read_model_at(&r).unwrap().links.is_empty(), "nothing folded");
+        assert!(
+            err.contains("'b'"),
+            "error names the plan-only endpoint: {err}"
+        );
+        assert!(
+            read_model_at(&r).unwrap().links.is_empty(),
+            "nothing folded"
+        );
 
         // Endpoint first, then the link folds cleanly.
         commit_element(&r, diff::ElementKind::Node, None, "b").unwrap();
         commit_element(&r, diff::ElementKind::Link, None, "link-a-b").unwrap();
-        assert!(read_model_at(&r).unwrap().links.iter().any(|l| l.id == "link-a-b"));
+        assert!(read_model_at(&r)
+            .unwrap()
+            .links
+            .iter()
+            .any(|l| l.id == "link-a-b"));
     }
 
     /// A direct group fold must not reference plan-only members or parents —
@@ -1156,12 +1214,22 @@ mod tests {
         write_planned_at(&r, &planned).unwrap();
 
         let err = commit_element(&r, diff::ElementKind::Group, None, "grp").unwrap_err();
-        assert!(err.contains("'b'"), "error names the plan-only member: {err}");
-        assert!(read_model_at(&r).unwrap().groups.is_empty(), "nothing folded");
+        assert!(
+            err.contains("'b'"),
+            "error names the plan-only member: {err}"
+        );
+        assert!(
+            read_model_at(&r).unwrap().groups.is_empty(),
+            "nothing folded"
+        );
 
         commit_element(&r, diff::ElementKind::Node, None, "b").unwrap();
         commit_element(&r, diff::ElementKind::Group, None, "grp").unwrap();
-        assert!(read_model_at(&r).unwrap().groups.iter().any(|g| g.id == "grp"));
+        assert!(read_model_at(&r)
+            .unwrap()
+            .groups
+            .iter()
+            .any(|g| g.id == "grp"));
     }
 
     /// commit_ready_dependents must not pick a group whose members are all
@@ -1179,7 +1247,9 @@ mod tests {
         ensure_planned_at(&r).unwrap();
         let mut planned = read_planned_at(&r).unwrap();
         planned.nodes.push(mk_node("m", "Member", Some("root"))); // foldable: parent committed
-        planned.nodes.push(mk_node("anchor", "Anchor", Some("root"))); // stays plan-only
+        planned
+            .nodes
+            .push(mk_node("anchor", "Anchor", Some("root"))); // stays plan-only
         planned.groups.push(Group {
             id: "grp".into(),
             name: "G".into(),
@@ -1197,14 +1267,22 @@ mod tests {
         commit_element(&r, diff::ElementKind::Node, None, "m").unwrap();
         commit_ready_dependents(&r, "m").expect("must not fail on a not-yet-ready group");
         assert!(
-            !read_model_at(&r).unwrap().groups.iter().any(|g| g.id == "grp"),
+            !read_model_at(&r)
+                .unwrap()
+                .groups
+                .iter()
+                .any(|g| g.id == "grp"),
             "the group is skipped while its anchor is plan-only"
         );
 
         // Commit the anchor, sweep again: now every precondition holds, it folds.
         commit_element(&r, diff::ElementKind::Node, None, "anchor").unwrap();
         commit_ready_dependents(&r, "m").unwrap();
-        assert!(read_model_at(&r).unwrap().groups.iter().any(|g| g.id == "grp"));
+        assert!(read_model_at(&r)
+            .unwrap()
+            .groups
+            .iter()
+            .any(|g| g.id == "grp"));
     }
 
     /// A scoped responsibility fold is the explicit verdict: the PLAN copy's
@@ -1233,7 +1311,10 @@ mod tests {
 
         let committed = read_model_at(&r).unwrap();
         let c = &committed.nodes[0].responsibilities[0];
-        assert!(c.stale.is_none() && c.stale_proposal.is_none(), "committed entered clean");
+        assert!(
+            c.stale.is_none() && c.stale_proposal.is_none(),
+            "committed entered clean"
+        );
         let planned = read_planned_at(&r).unwrap();
         let p = &planned.nodes[0].responsibilities[0];
         assert!(
@@ -1271,15 +1352,31 @@ mod tests {
 
         let planned = read_planned_at(&r).unwrap();
         let n = &planned.nodes[0];
-        assert!(n.stale.is_none(), "the folded node's own drift flag clears in the plan");
-        let kept = n.responsibilities.iter().find(|x| x.id == "resp-1").unwrap();
-        assert!(kept.stale.is_none(), "the folded claim no longer awaits a verdict");
-        let vag = n.responsibilities.iter().find(|x| x.id == "resp-2").unwrap();
-        assert_eq!(vag.vagrant, Some(true), "the un-adjudicated vagrant claim stays pending");
         assert!(
-            !read_model_at(&r)
-                .unwrap()
-                .nodes[0]
+            n.stale.is_none(),
+            "the folded node's own drift flag clears in the plan"
+        );
+        let kept = n
+            .responsibilities
+            .iter()
+            .find(|x| x.id == "resp-1")
+            .unwrap();
+        assert!(
+            kept.stale.is_none(),
+            "the folded claim no longer awaits a verdict"
+        );
+        let vag = n
+            .responsibilities
+            .iter()
+            .find(|x| x.id == "resp-2")
+            .unwrap();
+        assert_eq!(
+            vag.vagrant,
+            Some(true),
+            "the un-adjudicated vagrant claim stays pending"
+        );
+        assert!(
+            !read_model_at(&r).unwrap().nodes[0]
                 .responsibilities
                 .iter()
                 .any(|x| x.id == "resp-2"),
@@ -1341,9 +1438,15 @@ mod tests {
         commit_element(&r, diff::ElementKind::Node, None, "n2").unwrap();
 
         let model = read_model_at(&r).unwrap();
-        assert_eq!(model.nodes.iter().find(|n| n.id == "n1").unwrap().name, "New");
+        assert_eq!(
+            model.nodes.iter().find(|n| n.id == "n1").unwrap().name,
+            "New"
+        );
         assert!(model.nodes.iter().any(|n| n.id == "n2"));
-        assert!(plan_diff_at(&r).unwrap().is_empty(), "plan clears after commit");
+        assert!(
+            plan_diff_at(&r).unwrap().is_empty(),
+            "plan clears after commit"
+        );
     }
 
     /// Committing a node that the draft dropped removes it from the model and
@@ -1365,7 +1468,10 @@ mod tests {
 
         let model = read_model_at(&r).unwrap();
         assert!(model.nodes.iter().any(|n| n.id == "n1"));
-        assert!(!model.nodes.iter().any(|n| n.id == "n2"), "n2 removed from model");
+        assert!(
+            !model.nodes.iter().any(|n| n.id == "n2"),
+            "n2 removed from model"
+        );
         assert!(plan_diff_at(&r).unwrap().is_empty());
     }
 
@@ -1404,7 +1510,13 @@ mod tests {
             "r-c".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "c.rs" })).unwrap()],
         );
-        m.boundaries.insert("c".into(), vec![Source { pattern: "c/**".into(), comment: None }]);
+        m.boundaries.insert(
+            "c".into(),
+            vec![Source {
+                pattern: "c/**".into(),
+                comment: None,
+            }],
+        );
         write_model_at(&r, &m).unwrap();
 
         // Plan: the whole `p` subtree deleted (mirrors delete_nodes on the plan).
@@ -1421,13 +1533,32 @@ mod tests {
         commit_element(&r, diff::ElementKind::Node, None, "p").unwrap();
 
         let model = read_model_at(&r).unwrap();
-        assert!(!model.nodes.iter().any(|n| n.id == "p" || n.id == "c"), "subtree removed");
-        assert!(model.nodes.iter().any(|n| n.id == "keep"), "untouched sibling kept");
+        assert!(
+            !model.nodes.iter().any(|n| n.id == "p" || n.id == "c"),
+            "subtree removed"
+        );
+        assert!(
+            model.nodes.iter().any(|n| n.id == "keep"),
+            "untouched sibling kept"
+        );
         assert!(model.links.is_empty(), "dangling link dropped");
-        assert_eq!(model.groups[0].member_ids, vec!["keep"], "dead group ref pruned");
-        assert!(!model.source_map.contains_key("r-c"), "orphaned anchor GC'd");
-        assert!(!model.boundaries.contains_key("c"), "deleted node's boundary GC'd");
-        assert!(plan_diff_at(&r).unwrap().is_empty(), "committed reconciled to the plan");
+        assert_eq!(
+            model.groups[0].member_ids,
+            vec!["keep"],
+            "dead group ref pruned"
+        );
+        assert!(
+            !model.source_map.contains_key("r-c"),
+            "orphaned anchor GC'd"
+        );
+        assert!(
+            !model.boundaries.contains_key("c"),
+            "deleted node's boundary GC'd"
+        );
+        assert!(
+            plan_diff_at(&r).unwrap().is_empty(),
+            "committed reconciled to the plan"
+        );
     }
 
     /// The delete cascade only removes what the plan AGREES is gone: a child kept
@@ -1445,14 +1576,22 @@ mod tests {
         ensure_planned_at(&r).unwrap();
         let mut planned = read_planned_at(&r).unwrap();
         planned.nodes.retain(|n| n.id != "p");
-        planned.nodes.iter_mut().find(|n| n.id == "c").unwrap().parent_id = None;
+        planned
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "c")
+            .unwrap()
+            .parent_id = None;
         write_planned_at(&r, &planned).unwrap();
 
         commit_element(&r, diff::ElementKind::Node, None, "p").unwrap();
 
         let model = read_model_at(&r).unwrap();
         assert!(!model.nodes.iter().any(|n| n.id == "p"), "parent deleted");
-        assert!(model.nodes.iter().any(|n| n.id == "c"), "kept child not clobbered");
+        assert!(
+            model.nodes.iter().any(|n| n.id == "c"),
+            "kept child not clobbered"
+        );
     }
 
     /// A plan-added container's boundary has a single home: folding the node
@@ -1467,9 +1606,13 @@ mod tests {
         ensure_planned_at(&r).unwrap();
         let mut planned = read_planned_at(&r).unwrap();
         planned.nodes.push(mk_node("box", "API", None));
-        planned
-            .boundaries
-            .insert("box".into(), vec![Source { pattern: "api/**".into(), comment: None }]);
+        planned.boundaries.insert(
+            "box".into(),
+            vec![Source {
+                pattern: "api/**".into(),
+                comment: None,
+            }],
+        );
         write_planned_at(&r, &planned).unwrap();
 
         commit_element(&r, diff::ElementKind::Node, None, "box").unwrap();
@@ -1477,12 +1620,19 @@ mod tests {
         // Committed now owns the boundary…
         let model = read_model_at(&r).unwrap();
         assert_eq!(
-            model.boundaries.get("box").expect("boundary folded into committed")[0].pattern,
+            model
+                .boundaries
+                .get("box")
+                .expect("boundary folded into committed")[0]
+                .pattern,
             "api/**"
         );
         // …and the draft no longer carries it (single home).
         let plan = read_planned_at(&r).unwrap();
-        assert!(!plan.boundaries.contains_key("box"), "boundary left the draft");
+        assert!(
+            !plan.boundaries.contains_key("box"),
+            "boundary left the draft"
+        );
         assert!(plan_diff_at(&r).unwrap().is_empty());
     }
 
@@ -1503,7 +1653,10 @@ mod tests {
 
         // Child first: rejected — its parent isn't committed yet.
         let err = commit_element(&r, diff::ElementKind::Node, None, "c").unwrap_err();
-        assert!(err.contains("parent 'p'"), "error names the missing parent: {err}");
+        assert!(
+            err.contains("parent 'p'"),
+            "error names the missing parent: {err}"
+        );
         assert!(
             !read_model_at(&r).unwrap().nodes.iter().any(|n| n.id == "c"),
             "child not committed while its parent is plan-only"
@@ -1532,15 +1685,22 @@ mod tests {
         ensure_planned_at(&r).unwrap();
         let mut planned = read_planned_at(&r).unwrap();
         let mut sys = mk_node("sys", "System", None);
-        sys.responsibilities.push(mk_resp("resp-s", "own the domain"));
+        sys.responsibilities
+            .push(mk_resp("resp-s", "own the domain"));
         let mut app = mk_node("app", "App", Some("sys"));
-        app.responsibilities.push(mk_resp("resp-a", "serve the api"));
+        app.responsibilities
+            .push(mk_resp("resp-a", "serve the api"));
         let mut leaf = mk_node("leaf", "Feature", Some("app"));
-        leaf.responsibilities.push(mk_resp("resp-l", "do the built thing"));
+        leaf.responsibilities
+            .push(mk_resp("resp-l", "do the built thing"));
         planned.nodes.extend([sys, app, leaf]);
-        planned
-            .boundaries
-            .insert("app".into(), vec![Source { pattern: "api/**".into(), comment: None }]);
+        planned.boundaries.insert(
+            "app".into(),
+            vec![Source {
+                pattern: "api/**".into(),
+                comment: None,
+            }],
+        );
         planned.source_map.insert(
             "app".into(),
             vec![SourceLocation {
@@ -1553,29 +1713,66 @@ mod tests {
         write_planned_at(&r, &planned).unwrap();
 
         let folded = commit_plan_only_ancestors(&r, "leaf", false).unwrap();
-        assert_eq!(folded, vec!["sys".to_string(), "app".to_string()], "root-ward order");
+        assert_eq!(
+            folded,
+            vec!["sys".to_string(), "app".to_string()],
+            "root-ward order"
+        );
 
         // Ancestors are committed as scaffolding: structure without claims.
         let model = read_model_at(&r).unwrap();
-        let sys = model.nodes.iter().find(|n| n.id == "sys").expect("sys committed");
-        let app = model.nodes.iter().find(|n| n.id == "app").expect("app committed");
-        assert!(sys.responsibilities.is_empty(), "unbuilt claims did not fold");
-        assert!(app.responsibilities.is_empty(), "unbuilt claims did not fold");
-        assert!(!model.nodes.iter().any(|n| n.id == "leaf"), "the target itself is not folded");
+        let sys = model
+            .nodes
+            .iter()
+            .find(|n| n.id == "sys")
+            .expect("sys committed");
+        let app = model
+            .nodes
+            .iter()
+            .find(|n| n.id == "app")
+            .expect("app committed");
+        assert!(
+            sys.responsibilities.is_empty(),
+            "unbuilt claims did not fold"
+        );
+        assert!(
+            app.responsibilities.is_empty(),
+            "unbuilt claims did not fold"
+        );
+        assert!(
+            !model.nodes.iter().any(|n| n.id == "leaf"),
+            "the target itself is not folded"
+        );
 
         // Structural anchors moved to their single committed home…
-        assert_eq!(model.boundaries.get("app").expect("boundary folded")[0].pattern, "api/**");
-        assert!(model.source_map.contains_key("app"), "declaration anchor folded");
+        assert_eq!(
+            model.boundaries.get("app").expect("boundary folded")[0].pattern,
+            "api/**"
+        );
+        assert!(
+            model.source_map.contains_key("app"),
+            "declaration anchor folded"
+        );
         let plan = read_planned_at(&r).unwrap();
-        assert!(!plan.boundaries.contains_key("app"), "boundary left the draft");
-        assert!(!plan.source_map.contains_key("app"), "anchor left the draft");
+        assert!(
+            !plan.boundaries.contains_key("app"),
+            "boundary left the draft"
+        );
+        assert!(
+            !plan.source_map.contains_key("app"),
+            "anchor left the draft"
+        );
 
         // …and the leaf now folds normally, carrying only its own built claim,
         // while the ancestors' unbuilt claims remain the pending plan work.
         commit_element(&r, diff::ElementKind::Node, None, "leaf").unwrap();
         let model = read_model_at(&r).unwrap();
         let leaf = model.nodes.iter().find(|n| n.id == "leaf").unwrap();
-        assert_eq!(leaf.responsibilities.len(), 1, "built claim folded with the leaf");
+        assert_eq!(
+            leaf.responsibilities.len(),
+            1,
+            "built claim folded with the leaf"
+        );
         assert_eq!(
             plan_diff_at(&r).unwrap().changes.len(),
             2,
@@ -1597,8 +1794,14 @@ mod tests {
         planned.nodes.push(mk_node("c", "Child", Some("p")));
         write_planned_at(&r, &planned).unwrap();
 
-        assert!(commit_plan_only_ancestors(&r, "c", false).unwrap().is_empty());
-        assert_eq!(read_model_at(&r).unwrap().nodes.len(), 1, "committed untouched");
+        assert!(commit_plan_only_ancestors(&r, "c", false)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            read_model_at(&r).unwrap().nodes.len(),
+            1,
+            "committed untouched"
+        );
     }
 
     /// A parent id in NEITHER layer is a dangling reference, not scaffolding —
@@ -1615,8 +1818,14 @@ mod tests {
         write_planned_at(&r, &planned).unwrap();
 
         let err = commit_plan_only_ancestors(&r, "c", false).unwrap_err();
-        assert!(err.contains("'ghost'"), "error names the dangling parent: {err}");
-        assert!(read_model_at(&r).unwrap().nodes.is_empty(), "nothing committed");
+        assert!(
+            err.contains("'ghost'"),
+            "error names the dangling parent: {err}"
+        );
+        assert!(
+            read_model_at(&r).unwrap().nodes.is_empty(),
+            "nothing committed"
+        );
     }
 
     /// A parent cycle in the plan terminates with an error instead of hanging —
@@ -1703,7 +1912,8 @@ mod tests {
         let (_dir, r) = temp_ref();
         let mut m = ScryModel::new();
         let mut n = mk_node("n", "Svc", None);
-        n.responsibilities.push(mk_resp("resp-1", "serves requests"));
+        n.responsibilities
+            .push(mk_resp("resp-1", "serves requests"));
         m.nodes.push(n);
         write_model_at(&r, &m).unwrap();
 
@@ -1733,7 +1943,11 @@ mod tests {
         let model = read_model_at(&r).unwrap();
         let cn = model.nodes.iter().find(|x| x.id == "n").unwrap();
         // The stale claim folded, with its drift markers cleared.
-        let r1 = cn.responsibilities.iter().find(|x| x.id == "resp-1").unwrap();
+        let r1 = cn
+            .responsibilities
+            .iter()
+            .find(|x| x.id == "resp-1")
+            .unwrap();
         assert_eq!(r1.stale, None, "stale flag cleared on fold");
         assert_eq!(r1.stale_proposal, None, "stale proposal cleared on fold");
         // The vagrant claim and property did NOT bypass review into committed.
@@ -1741,17 +1955,24 @@ mod tests {
             !cn.responsibilities.iter().any(|x| x.id == "resp-2"),
             "vagrant claim not silently committed"
         );
-        assert!(cn.properties.is_empty(), "vagrant property not silently committed");
+        assert!(
+            cn.properties.is_empty(),
+            "vagrant property not silently committed"
+        );
 
         // They stay in the plan, still pending an adopt/reject verdict.
         let plan = read_planned_at(&r).unwrap();
         let pn = plan.nodes.iter().find(|x| x.id == "n").unwrap();
         assert!(
-            pn.responsibilities.iter().any(|x| x.id == "resp-2" && x.vagrant == Some(true)),
+            pn.responsibilities
+                .iter()
+                .any(|x| x.id == "resp-2" && x.vagrant == Some(true)),
             "vagrant claim still pending in the plan"
         );
         assert!(
-            pn.properties.iter().any(|p| p.label == "region" && p.vagrant == Some(true)),
+            pn.properties
+                .iter()
+                .any(|p| p.label == "region" && p.vagrant == Some(true)),
             "vagrant property still pending in the plan"
         );
     }
@@ -1783,7 +2004,11 @@ mod tests {
         commit_element(&r, diff::ElementKind::Node, None, "a").unwrap();
         commit_ready_dependents(&r, "a").unwrap();
         assert!(
-            !read_model_at(&r).unwrap().links.iter().any(|l| l.id == "l1"),
+            !read_model_at(&r)
+                .unwrap()
+                .links
+                .iter()
+                .any(|l| l.id == "l1"),
             "link waits until both endpoints are committed"
         );
 
@@ -1792,10 +2017,17 @@ mod tests {
         commit_element(&r, diff::ElementKind::Node, None, "b").unwrap();
         commit_ready_dependents(&r, "b").unwrap();
         assert!(
-            read_model_at(&r).unwrap().links.iter().any(|l| l.id == "l1"),
+            read_model_at(&r)
+                .unwrap()
+                .links
+                .iter()
+                .any(|l| l.id == "l1"),
             "link folded once its second endpoint committed"
         );
-        assert!(plan_diff_at(&r).unwrap().is_empty(), "CLOSE loop terminates");
+        assert!(
+            plan_diff_at(&r).unwrap().is_empty(),
+            "CLOSE loop terminates"
+        );
     }
 
     /// Folding a group (once its members are committed) carries the group's own
@@ -1839,15 +2071,27 @@ mod tests {
         commit_ready_dependents(&r, "a").unwrap();
 
         let model = read_model_at(&r).unwrap();
-        let g = model.groups.iter().find(|g| g.id == "grp").expect("group folded in");
-        let folded = g.responsibilities.iter().find(|x| x.id == "g-resp").unwrap();
+        let g = model
+            .groups
+            .iter()
+            .find(|g| g.id == "grp")
+            .expect("group folded in");
+        let folded = g
+            .responsibilities
+            .iter()
+            .find(|x| x.id == "g-resp")
+            .unwrap();
         assert_eq!(folded.stale, None, "stale cleared on the folded claim");
         assert!(
             !g.responsibilities.iter().any(|x| x.id == "g-vagrant"),
             "vagrant claim did not bypass review into committed"
         );
         assert_eq!(
-            model.source_map.get("g-resp").expect("anchor carried across")[0].pattern,
+            model
+                .source_map
+                .get("g-resp")
+                .expect("anchor carried across")[0]
+                .pattern,
             "app/deploy.ts"
         );
 
@@ -1855,7 +2099,9 @@ mod tests {
         let plan = read_planned_at(&r).unwrap();
         let pg = plan.groups.iter().find(|g| g.id == "grp").unwrap();
         assert!(
-            pg.responsibilities.iter().any(|x| x.id == "g-vagrant" && x.vagrant == Some(true)),
+            pg.responsibilities
+                .iter()
+                .any(|x| x.id == "g-vagrant" && x.vagrant == Some(true)),
             "vagrant group claim still pending in the plan"
         );
     }
@@ -1871,7 +2117,9 @@ mod tests {
 
         // Committed: just a container.
         let mut m = ScryModel::new();
-        m.nodes.push(node(serde_json::json!({ "id": "c", "kind": "container", "name": "API" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "c", "kind": "container", "name": "API" }),
+        ));
         write_model_at(&r, &m).unwrap();
 
         // Plan: container + a new component + a new symbol carrying a claim,
@@ -1899,14 +2147,31 @@ mod tests {
         commit_element(&r, diff::ElementKind::Responsibility, None, "r1").unwrap();
 
         let model = read_model_at(&r).unwrap();
-        assert!(model.nodes.iter().any(|n| n.id == "comp"), "component folded in");
-        let sym = model.nodes.iter().find(|n| n.id == "sym").expect("symbol folded in");
-        assert!(sym.responsibilities.iter().any(|x| x.id == "r1"), "claim on the symbol");
+        assert!(
+            model.nodes.iter().any(|n| n.id == "comp"),
+            "component folded in"
+        );
+        let sym = model
+            .nodes
+            .iter()
+            .find(|n| n.id == "sym")
+            .expect("symbol folded in");
+        assert!(
+            sym.responsibilities.iter().any(|x| x.id == "r1"),
+            "claim on the symbol"
+        );
         assert_eq!(
-            model.source_map.get("r1").expect("anchor carried into committed")[0].pattern,
+            model
+                .source_map
+                .get("r1")
+                .expect("anchor carried into committed")[0]
+                .pattern,
             "api/admin.rs"
         );
-        assert!(plan_diff_at(&r).unwrap().is_empty(), "plan and model agree after the fold");
+        assert!(
+            plan_diff_at(&r).unwrap().is_empty(),
+            "plan and model agree after the fold"
+        );
     }
 
     /// Dedup invariant: a committed claim's anchor lives only in committed, so
@@ -1957,7 +2222,11 @@ mod tests {
             .expect("claim still committed");
         assert_eq!(resp.statement, "new wording", "the reword folded in");
         assert_eq!(
-            model.source_map.get("r1").expect("committed anchor preserved")[0].pattern,
+            model
+                .source_map
+                .get("r1")
+                .expect("committed anchor preserved")[0]
+                .pattern,
             "src/h.rs",
             "folding the reword must not unanchor the committed claim"
         );
@@ -1973,15 +2242,19 @@ mod tests {
 
         // Committed: a symbol carrying a claim, both anchored to code.
         let mut m = ScryModel::new();
-        m.nodes.push(node(serde_json::json!({ "id": "c", "kind": "container", "name": "API" })));
+        m.nodes.push(node(
+            serde_json::json!({ "id": "c", "kind": "container", "name": "API" }),
+        ));
         m.nodes.push(node(serde_json::json!({
             "id": "sym", "kind": "symbol", "name": "admin_handler", "parentId": "c",
             "responsibilities": [{ "id": "r1", "statement": "exposes admin endpoint" }],
         })));
-        let loc = |p: &str| vec![serde_json::from_value::<SourceLocation>(
-            serde_json::json!({ "pattern": p }),
-        )
-        .unwrap()];
+        let loc = |p: &str| {
+            vec![
+                serde_json::from_value::<SourceLocation>(serde_json::json!({ "pattern": p }))
+                    .unwrap(),
+            ]
+        };
         m.source_map.insert("sym".into(), loc("api/admin.rs")); // the node's decl anchor
         m.source_map.insert("r1".into(), loc("api/admin.rs")); // the claim's anchor
         write_model_at(&r, &m).unwrap();
@@ -1995,9 +2268,9 @@ mod tests {
 
         let model = read_model_at(&r).unwrap();
         assert!(!model.nodes.iter().any(|n| n.id == "sym"), "symbol deleted");
-        assert!(model.source_map.get("sym").is_none(), "node anchor GC'd");
+        assert!(!model.source_map.contains_key("sym"), "node anchor GC'd");
         assert!(
-            model.source_map.get("r1").is_none(),
+            !model.source_map.contains_key("r1"),
             "the deleted node's responsibility anchor must not be left orphaned"
         );
     }

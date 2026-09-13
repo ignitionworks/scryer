@@ -137,7 +137,11 @@ pub struct ModelHealth {
 /// canvas. Empty when the model has at most one such node (nothing to connect
 /// to). Sorted for a stable report.
 pub fn disconnected_nodes(model: &ScryModel) -> Vec<String> {
-    let non_symbol = model.nodes.iter().filter(|n| n.kind != Kind::Symbol).count();
+    let non_symbol = model
+        .nodes
+        .iter()
+        .filter(|n| n.kind != Kind::Symbol)
+        .count();
     if non_symbol <= 1 {
         return Vec::new();
     }
@@ -173,15 +177,18 @@ pub fn compute_health(
     let node_by_id: HashMap<&str, &crate::Node> =
         model.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let planned_parents: HashSet<&str> = planned
-        .map(|p| p.nodes.iter().filter_map(|n| n.parent_id.as_deref()).collect())
+        .map(|p| {
+            p.nodes
+                .iter()
+                .filter_map(|n| n.parent_id.as_deref())
+                .collect()
+        })
         .unwrap_or_default();
 
     // --- own counts per node ---------------------------------------------------
     let mut own: HashMap<&str, HealthCounts> = HashMap::new();
     for node in &model.nodes {
-        let is_leaf = children
-            .get(node.id.as_str())
-            .map_or(true, |c| c.is_empty())
+        let is_leaf = children.get(node.id.as_str()).is_none_or(|c| c.is_empty())
             && !planned_parents.contains(node.id.as_str());
         let external = node.external == Some(true);
         // Persons are actors and externals are out-of-system; neither is backed
@@ -199,7 +206,10 @@ pub fn compute_health(
             if resp.stale == Some(true) {
                 h.stale += 1;
             }
-            let has_test = model.test_map.get(&resp.id).is_some_and(|locs| !locs.is_empty());
+            let has_test = model
+                .test_map
+                .get(&resp.id)
+                .is_some_and(|locs| !locs.is_empty());
             if has_test {
                 h.tested += 1;
             }
@@ -267,7 +277,10 @@ pub fn compute_health(
             if resp.stale == Some(true) {
                 h.stale += 1;
             }
-            let has_test = model.test_map.get(&resp.id).is_some_and(|locs| !locs.is_empty());
+            let has_test = model
+                .test_map
+                .get(&resp.id)
+                .is_some_and(|locs| !locs.is_empty());
             if has_test {
                 h.tested += 1;
             }
@@ -309,13 +322,20 @@ pub fn compute_health(
         .filter(|n| {
             n.parent_id
                 .as_deref()
-                .map_or(true, |p| !node_by_id.contains_key(p))
+                .is_none_or(|p| !node_by_id.contains_key(p))
         })
         .map(|n| n.id.as_str())
         .collect();
     let mut visited: HashSet<&str> = HashSet::new();
     for root in &roots {
-        accumulate(root, &children, &own, &group_extra, &mut subtree, &mut visited);
+        accumulate(
+            root,
+            &children,
+            &own,
+            &group_extra,
+            &mut subtree,
+            &mut visited,
+        );
     }
     // Defensive: nodes trapped in a parent cycle never get visited above. Each
     // unvisited node seeds its own accumulation AND joins the totals — they
@@ -372,7 +392,11 @@ pub fn compute_health(
         );
     }
 
-    ModelHealth { nodes, totals, disconnected: disconnected_nodes(model) }
+    ModelHealth {
+        nodes,
+        totals,
+        disconnected: disconnected_nodes(model),
+    }
 }
 
 /// Does this status claim that code exists? Those are the claims that must
@@ -569,9 +593,7 @@ pub fn compute_completeness(
         // Leaf claims. A structural node's own responsibilities discharge through
         // its subtree, so only LEAF responsibilities (and a leaf's data shape) are
         // anchorable primitives.
-        let is_leaf = children
-            .get(node.id.as_str())
-            .map_or(true, |c| c.is_empty());
+        let is_leaf = children.get(node.id.as_str()).is_none_or(|c| c.is_empty());
         if is_leaf {
             for r in &node.responsibilities {
                 c.total += 1;
@@ -599,7 +621,7 @@ pub fn compute_completeness(
         .filter(|n| {
             n.parent_id
                 .as_deref()
-                .map_or(true, |p| !node_by_id.contains(p))
+                .is_none_or(|p| !node_by_id.contains(p))
         })
         .map(|n| n.id.as_str())
         .collect();
@@ -633,7 +655,13 @@ pub fn compute_completeness(
     }
     // Defensive: nodes trapped in a parent cycle never get visited above.
     for node in &model.nodes {
-        roll(node.id.as_str(), &children, &own, &mut subtree, &mut visited);
+        roll(
+            node.id.as_str(),
+            &children,
+            &own,
+            &mut subtree,
+            &mut visited,
+        );
     }
 
     // --- finalize percent -------------------------------------------------------
@@ -677,7 +705,10 @@ pub fn resolve_completeness(
         crate::ownership::BoundaryOwnership::from_boundaries(&authored.boundaries, &live);
     let mut real_boxes: HashSet<String> = HashSet::new();
     for n in &authored.nodes {
-        if authored.boundaries.get(&n.id).is_some_and(|b| !b.is_empty())
+        if authored
+            .boundaries
+            .get(&n.id)
+            .is_some_and(|b| !b.is_empty())
             && files.iter().any(|f| ownership.owns(&n.id, f))
         {
             real_boxes.insert(n.id.clone());
@@ -777,9 +808,13 @@ mod tests {
         let mut api = node("api", Kind::Container, None);
         api.responsibilities.push(resp("r1"));
         model.nodes.push(api);
-        model
-            .boundaries
-            .insert("api".into(), vec![crate::Source { pattern: "api/**".into(), comment: None }]);
+        model.boundaries.insert(
+            "api".into(),
+            vec![crate::Source {
+                pattern: "api/**".into(),
+                comment: None,
+            }],
+        );
 
         // The draft as `ensure_planned_at` seeds it: same nodes, boundaries CLEARED.
         let mut planned = model.clone();
@@ -812,8 +847,12 @@ mod tests {
         agent.responsibilities.push(resp("r-real"));
         agent.responsibilities.push(resp("r-fake"));
         planned.nodes.push(agent);
-        planned.source_map.insert("r-real".into(), vec![loc("agent/agent.py")]);
-        planned.source_map.insert("r-fake".into(), vec![loc("agent/openers.py")]);
+        planned
+            .source_map
+            .insert("r-real".into(), vec![loc("agent/agent.py")]);
+        planned
+            .source_map
+            .insert("r-fake".into(), vec![loc("agent/openers.py")]);
 
         let files: BTreeSet<String> = ["agent/agent.py".to_string()].into_iter().collect();
         let comp = resolve_completeness(&model, &planned, &files, &HashSet::new());
@@ -838,20 +877,30 @@ mod tests {
         leaf.responsibilities.push(resp("r-tested"));
         leaf.responsibilities.push(resp("r-untested"));
         m.nodes.push(leaf);
-        m.test_map.insert("r-struct".into(), vec![loc("tests/integration.rs")]);
-        m.test_map.insert("r-tested".into(), vec![loc("tests/unit.rs")]);
+        m.test_map
+            .insert("r-struct".into(), vec![loc("tests/integration.rs")]);
+        m.test_map
+            .insert("r-tested".into(), vec![loc("tests/unit.rs")]);
         m.test_map.insert("r-empty".into(), Vec::new()); // dangling/empty: never counts
 
         let h = compute_health(&m, None, None);
-        assert_eq!(h.nodes["leaf"].own.tested, 1, "the tested leaf claim counts");
         assert_eq!(
-            h.nodes["sys"].own.tested,
-            1,
+            h.nodes["leaf"].own.tested, 1,
+            "the tested leaf claim counts"
+        );
+        assert_eq!(
+            h.nodes["sys"].own.tested, 1,
             "a structural claim's integration test counts even though it is not anchorable"
         );
-        assert_eq!(h.nodes["sys"].subtree.tested, 2, "tested rolls up post-order");
+        assert_eq!(
+            h.nodes["sys"].subtree.tested, 2,
+            "tested rolls up post-order"
+        );
         assert_eq!(h.totals.tested, 2);
-        assert_eq!(h.totals.anchored, 0, "test attachment is a separate dimension from anchoring");
+        assert_eq!(
+            h.totals.anchored, 0,
+            "test attachment is a separate dimension from anchoring"
+        );
     }
 
     /// `testable` counts When/While/If claims on code-backed hosts (the EARS
@@ -875,13 +924,20 @@ mod tests {
         actor_claim.statement = "When curious, opens the chat".into();
         visitor.responsibilities.push(actor_claim);
         m.nodes.push(visitor);
-        m.test_map.insert("r-tested".into(), vec![loc("tests/webhook.rs")]);
+        m.test_map
+            .insert("r-tested".into(), vec![loc("tests/webhook.rs")]);
 
         let h = compute_health(&m, None, None);
         let own = &h.nodes["api"].own;
-        assert_eq!(own.testable, 2, "the When and If claims; the ubiquitous one needs judgment");
+        assert_eq!(
+            own.testable, 2,
+            "the When and If claims; the ubiquitous one needs judgment"
+        );
         assert_eq!(own.untested, 1, "only the If claim lacks a attached test");
-        assert_eq!(h.nodes["visitor"].own.testable, 0, "a person's claims are never code-backed");
+        assert_eq!(
+            h.nodes["visitor"].own.testable, 0,
+            "a person's claims are never code-backed"
+        );
         assert_eq!(h.totals.testable, 2);
         assert_eq!(h.totals.untested, 1);
     }
@@ -900,7 +956,10 @@ mod tests {
 
         let h = compute_health(&m, None, None);
         let sys_h = &h.nodes["sys"];
-        assert_eq!(sys_h.own.anchorable, 0, "system claims discharge structurally");
+        assert_eq!(
+            sys_h.own.anchorable, 0,
+            "system claims discharge structurally"
+        );
         assert_eq!(sys_h.own.unmapped, 0);
         // The leaf's unanchored claim is the real blind spot, and it rolls up.
         assert_eq!(h.nodes["leaf"].own.unmapped, 1);
@@ -925,7 +984,9 @@ mod tests {
 
         // With a design-ahead child in the plan: structural, no blind spot.
         let mut planned = m.clone();
-        planned.nodes.push(node("kid", Kind::Component, Some("box")));
+        planned
+            .nodes
+            .push(node("kid", Kind::Component, Some("box")));
         let h = compute_health(&m, Some(&planned), None);
         assert_eq!(h.nodes["box"].own.anchorable, 0);
         assert_eq!(h.nodes["box"].own.unmapped, 0);
@@ -963,7 +1024,10 @@ mod tests {
 
         let h = compute_health(&m, None, None);
         let dev_h = &h.nodes["dev"];
-        assert_eq!(dev_h.own.anchorable, 0, "a person's claims are not code-backed");
+        assert_eq!(
+            dev_h.own.anchorable, 0,
+            "a person's claims are not code-backed"
+        );
         assert_eq!(dev_h.own.unmapped, 0);
         assert_eq!(dev_h.own.responsibilities, 2);
     }
@@ -1008,7 +1072,8 @@ mod tests {
         assert_eq!(h.nodes["shape"].own.anchorable, 1);
         assert_eq!(h.nodes["shape"].own.unmapped, 1, "no definition anchor yet");
 
-        m.source_map.insert("shape".into(), vec![loc("src/types.ts")]);
+        m.source_map
+            .insert("shape".into(), vec![loc("src/types.ts")]);
         let h = compute_health(&m, None, None);
         assert_eq!(h.nodes["shape"].own.unmapped, 0);
     }
@@ -1022,10 +1087,14 @@ mod tests {
         let mut s = node("s", Kind::Symbol, Some("api"));
         s.responsibilities.push(resp("r-s"));
         m.nodes.push(s);
-        m.source_map.insert("r-s".into(), vec![loc("api/src/handler.rs")]);
+        m.source_map
+            .insert("r-s".into(), vec![loc("api/src/handler.rs")]);
         m.boundaries.insert(
             "api".into(),
-            vec![crate::Source { pattern: "api/**/*".into(), comment: None }],
+            vec![crate::Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
 
         let files: BTreeSet<String> = ["api/src/handler.rs", "api/src/dark.rs", "web/app.ts"]
@@ -1058,7 +1127,10 @@ mod tests {
 
         let h = compute_health(&m, None, None);
         assert_eq!(h.nodes["sys"].subtree.responsibilities, 1);
-        assert_eq!(h.nodes["sys"].subtree.anchorable, 0, "group claims are structural");
+        assert_eq!(
+            h.nodes["sys"].subtree.anchorable, 0,
+            "group claims are structural"
+        );
         assert_eq!(h.totals.responsibilities, 1);
     }
 
@@ -1081,7 +1153,10 @@ mod tests {
     }
 
     fn boundary(pattern: &str) -> Vec<crate::Source> {
-        vec![crate::Source { pattern: pattern.into(), comment: None }]
+        vec![crate::Source {
+            pattern: pattern.into(),
+            comment: None,
+        }]
     }
 
     /// Greenfield: a planned tree with nothing anchored reads 0%, not NaN —
@@ -1098,7 +1173,13 @@ mod tests {
 
         let rb = HashSet::new();
         let la = HashSet::new();
-        let comp = compute_completeness(&m, &AnchorFacts { real_boxes: &rb, live_anchors: &la });
+        let comp = compute_completeness(
+            &m,
+            &AnchorFacts {
+                real_boxes: &rb,
+                live_anchors: &la,
+            },
+        );
         // box(api) + r1 + r2 = 3 primitives, none anchored.
         assert_eq!(comp["api"].total, 3);
         assert_eq!(comp["api"].anchored, 0);
@@ -1120,7 +1201,13 @@ mod tests {
 
         let rb: HashSet<String> = ["api".to_string()].into_iter().collect();
         let la = HashSet::new();
-        let comp = compute_completeness(&m, &AnchorFacts { real_boxes: &rb, live_anchors: &la });
+        let comp = compute_completeness(
+            &m,
+            &AnchorFacts {
+                real_boxes: &rb,
+                live_anchors: &la,
+            },
+        );
         // 1 box + 3 leaf = 4 total, only the box anchored → 25%.
         assert_eq!(comp["api"].total, 4);
         assert_eq!(comp["api"].anchored, 1);
@@ -1140,7 +1227,13 @@ mod tests {
 
         let rb: HashSet<String> = ["api".to_string()].into_iter().collect();
         let la: HashSet<String> = ["r1".to_string()].into_iter().collect();
-        let comp = compute_completeness(&m, &AnchorFacts { real_boxes: &rb, live_anchors: &la });
+        let comp = compute_completeness(
+            &m,
+            &AnchorFacts {
+                real_boxes: &rb,
+                live_anchors: &la,
+            },
+        );
         assert_eq!(comp["api"].pct, Some(100));
     }
 
@@ -1154,7 +1247,13 @@ mod tests {
 
         let rb: HashSet<String> = ["api".to_string()].into_iter().collect();
         let la = HashSet::new();
-        let comp = compute_completeness(&m, &AnchorFacts { real_boxes: &rb, live_anchors: &la });
+        let comp = compute_completeness(
+            &m,
+            &AnchorFacts {
+                real_boxes: &rb,
+                live_anchors: &la,
+            },
+        );
         assert_eq!(comp["api"].leaf_total, 0);
         assert_eq!(comp["api"].anchored, 1);
         assert_eq!(comp["api"].total, 1);
@@ -1176,7 +1275,13 @@ mod tests {
 
         let rb: HashSet<String> = ["api".to_string()].into_iter().collect();
         let la: HashSet<String> = ["r-leaf".to_string()].into_iter().collect();
-        let comp = compute_completeness(&m, &AnchorFacts { real_boxes: &rb, live_anchors: &la });
+        let comp = compute_completeness(
+            &m,
+            &AnchorFacts {
+                real_boxes: &rb,
+                live_anchors: &la,
+            },
+        );
         // box(api) + leaf r-leaf = 2; r-struct excluded.
         assert_eq!(comp["api"].total, 2);
         assert_eq!(comp["api"].anchored, 2);
@@ -1194,7 +1299,13 @@ mod tests {
 
         let rb = HashSet::new();
         let la = HashSet::new();
-        let comp = compute_completeness(&m, &AnchorFacts { real_boxes: &rb, live_anchors: &la });
+        let comp = compute_completeness(
+            &m,
+            &AnchorFacts {
+                real_boxes: &rb,
+                live_anchors: &la,
+            },
+        );
         assert_eq!(comp["user"].total, 0);
         assert_eq!(comp["user"].pct, None);
     }
@@ -1217,7 +1328,10 @@ mod tests {
         // sys and api are wired by l1; the symbol is exempt; only the worker
         // container floats edgeless.
         assert_eq!(disconnected_nodes(&m), vec!["worker".to_string()]);
-        assert_eq!(compute_health(&m, None, None).disconnected, vec!["worker".to_string()]);
+        assert_eq!(
+            compute_health(&m, None, None).disconnected,
+            vec!["worker".to_string()]
+        );
     }
 
     #[test]

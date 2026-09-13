@@ -460,7 +460,12 @@ pub fn citations(text: &str) -> Vec<&str> {
 pub fn rules_index() -> String {
     let mut s = String::new();
     for r in RULES {
-        s.push_str(&format!("{} — {} [{}]\n", r.slug, r.title, r.tags.join(", ")));
+        s.push_str(&format!(
+            "{} — {} [{}]\n",
+            r.slug,
+            r.title,
+            r.tags.join(", ")
+        ));
     }
     s
 }
@@ -470,10 +475,10 @@ pub fn rules_index() -> String {
 /// never count as hits — before ranking existed, "the" alone dragged in
 /// every rule whose title contained it.
 const STOPWORDS: &[&str] = &[
-    "the", "a", "an", "and", "or", "for", "of", "to", "in", "on", "at", "with", "is", "are",
-    "be", "it", "its", "this", "that", "these", "those", "how", "what", "when", "where", "why",
-    "do", "does", "did", "can", "should", "must", "my", "our", "your", "their", "all", "any",
-    "per", "as", "by", "we", "you", "not", "no", "up", "out", "into", "from", "about",
+    "the", "a", "an", "and", "or", "for", "of", "to", "in", "on", "at", "with", "is", "are", "be",
+    "it", "its", "this", "that", "these", "those", "how", "what", "when", "where", "why", "do",
+    "does", "did", "can", "should", "must", "my", "our", "your", "their", "all", "any", "per",
+    "as", "by", "we", "you", "not", "no", "up", "out", "into", "from", "about",
 ];
 
 /// Look up rules by free-text topic, ranked by relevance — a whole task
@@ -532,7 +537,7 @@ pub fn lookup(topic: &str) -> Vec<&'static Rule> {
         scored.retain(|(c, _, _)| *c > 0);
     }
     // Stable sort: equal scores keep rule order.
-    scored.sort_by(|a, b| (b.0 * 2 + b.1).cmp(&(a.0 * 2 + a.1)));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0 * 2 + s.1));
     scored.into_iter().map(|(_, _, r)| r).collect()
 }
 
@@ -555,12 +560,18 @@ mod tests {
         for r in RULES {
             assert!(seen.insert(r.slug), "duplicate slug {}", r.slug);
             assert!(
-                r.slug.chars().all(|c| c.is_ascii_lowercase() || c == '-' || c.is_ascii_digit()),
+                r.slug
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '-' || c.is_ascii_digit()),
                 "slug {} is not kebab-case",
                 r.slug
             );
             assert_eq!(get(r.slug).map(|x| x.id), Some(r.id));
-            assert_eq!(get(&r.id.to_string()).map(|x| x.slug), Some(r.slug), "numeric alias");
+            assert_eq!(
+                get(&r.id.to_string()).map(|x| x.slug),
+                Some(r.slug),
+                "numeric alias"
+            );
         }
         assert!(get("no-such-rule").is_none());
     }
@@ -578,7 +589,9 @@ mod tests {
 
     #[test]
     fn lookup_matches_slug_words() {
-        assert!(lookup("post-flight").iter().any(|r| r.slug == "fold-post-flight"));
+        assert!(lookup("post-flight")
+            .iter()
+            .any(|r| r.slug == "fold-post-flight"));
         assert!(lookup("sign-off").iter().any(|r| r.slug == "sign-off"));
     }
 
@@ -622,11 +635,21 @@ mod tests {
         // rule the sentence is about must rank first despite the stopwords
         // and despite the concerns rule being dead last in rule order.
         let hits = lookup("tag the concerns for the model");
-        assert_eq!(hits.first().map(|r| r.id), Some(20), "concerns rule outranks stopword noise");
+        assert_eq!(
+            hits.first().map(|r| r.id),
+            Some(20),
+            "concerns rule outranks stopword noise"
+        );
 
         // Plural/stem forms reach the singular vocabulary.
-        assert!(lookup("links").iter().any(|r| r.id == 5), "links → link (one-link)");
-        assert!(lookup("groups").iter().any(|r| r.id == 4), "groups → group (groups)");
+        assert!(
+            lookup("links").iter().any(|r| r.id == 5),
+            "links → link (one-link)"
+        );
+        assert!(
+            lookup("groups").iter().any(|r| r.id == 4),
+            "groups → group (groups)"
+        );
     }
 
     #[test]

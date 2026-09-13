@@ -19,9 +19,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 /// first glob metacharacter. `**/*` → 0, `crates/core/**/*` → 11. The deepest
 /// (longest-prefix) matching boundary wins a file.
 pub fn pattern_specificity(pattern: &str) -> usize {
-    pattern
-        .find(|c: char| matches!(c, '*' | '?' | '[' | '{'))
-        .unwrap_or(pattern.len())
+    pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len())
 }
 
 /// Full ordering rank for contested files: literal-prefix length first,
@@ -115,7 +113,10 @@ impl BoundaryOwnership {
     /// by equally-specific boundaries is owned by all of them (a rare tie, e.g.
     /// two hand-authored identical globs).
     pub fn owns(&self, node_id: &str, file: &str) -> bool {
-        match (self.node_match(node_id, file), self.winning_specificity(file)) {
+        match (
+            self.node_match(node_id, file),
+            self.winning_specificity(file),
+        ) {
             (Some(mine), Some(win)) => mine == win,
             _ => false,
         }
@@ -132,13 +133,14 @@ impl BoundaryOwnership {
                 continue;
             };
             for n in &self.nodes {
-                if n
-                    .patterns
+                if n.patterns
                     .iter()
                     .filter(|(p, _)| p.matches(file))
                     .any(|(_, rank)| *rank == win)
                 {
-                    out.entry(n.node_id.clone()).or_default().push(file.to_string());
+                    out.entry(n.node_id.clone())
+                        .or_default()
+                        .push(file.to_string());
                 }
             }
         }
@@ -314,7 +316,10 @@ mod tests {
         );
         let own = BoundaryOwnership::new(&m);
         assert!(own.owns("core", "crates/core/lib.rs"));
-        assert!(!own.owns("ghost", "src/main.ts"), "dead boundary claims nothing");
+        assert!(
+            !own.owns("ghost", "src/main.ts"),
+            "dead boundary claims nothing"
+        );
         assert!(!own.owns("ghost", "crates/core/lib.rs"));
     }
 
@@ -330,8 +335,14 @@ mod tests {
         let m = model_with_boundaries(&[("root", "**/*"), ("core", "crates/core/**/*")]);
         let own = BoundaryOwnership::new(&m);
         let map = own.owned_by(["crates/core/lib.rs", "src/main.ts"]);
-        assert_eq!(map.get("core").map(|v| v.as_slice()), Some(&["crates/core/lib.rs".to_string()][..]));
-        assert_eq!(map.get("root").map(|v| v.as_slice()), Some(&["src/main.ts".to_string()][..]));
+        assert_eq!(
+            map.get("core").map(|v| v.as_slice()),
+            Some(&["crates/core/lib.rs".to_string()][..])
+        );
+        assert_eq!(
+            map.get("root").map(|v| v.as_slice()),
+            Some(&["src/main.ts".to_string()][..])
+        );
     }
 
     // --- owning_node_for_location ------------------------------------------------
@@ -352,11 +363,21 @@ mod tests {
     /// brand-new file is mapped to nothing.
     fn frontend_model() -> ScryModel {
         let mut m = ScryModel::new();
-        m.nodes.push(node("c", "container", "App Frontend", None, &[]));
-        m.nodes.push(node("comp", "component", "Workspace Chrome", Some("c"), &[]));
-        m.nodes.push(node("tb", "symbol", "TopBar", Some("comp"), &["r-tb"]));
-        m.nodes.push(node("ot", "symbol", "Other", Some("comp"), &["r-ot"]));
-        let loc = |f: &str| vec![serde_json::from_value(serde_json::json!({ "pattern": f })).unwrap()];
+        m.nodes
+            .push(node("c", "container", "App Frontend", None, &[]));
+        m.nodes.push(node(
+            "comp",
+            "component",
+            "Workspace Chrome",
+            Some("c"),
+            &[],
+        ));
+        m.nodes
+            .push(node("tb", "symbol", "TopBar", Some("comp"), &["r-tb"]));
+        m.nodes
+            .push(node("ot", "symbol", "Other", Some("comp"), &["r-ot"]));
+        let loc =
+            |f: &str| vec![serde_json::from_value(serde_json::json!({ "pattern": f })).unwrap()];
         m.source_map.insert("r-tb".into(), loc("src/TopBar.tsx"));
         m.source_map.insert("r-ot".into(), loc("src/Other.tsx"));
         m.boundaries.insert(
@@ -370,9 +391,15 @@ mod tests {
     fn routes_to_the_symbol_that_maps_the_file() {
         let m = frontend_model();
         // Named symbol → that symbol, not the reviewed container.
-        assert_eq!(owning_node_for_location(&m, "c", "src/TopBar.tsx", Some("TopBar")), "tb");
+        assert_eq!(
+            owning_node_for_location(&m, "c", "src/TopBar.tsx", Some("TopBar")),
+            "tb"
+        );
         // Even with no symbol, the only node mapping the file is the symbol.
-        assert_eq!(owning_node_for_location(&m, "c", "src/Other.tsx", None), "ot");
+        assert_eq!(
+            owning_node_for_location(&m, "c", "src/Other.tsx", None),
+            "ot"
+        );
     }
 
     #[test]
@@ -382,9 +409,15 @@ mod tests {
         // must route to that symbol, not fall back to the reviewed container.
         m.source_map.insert(
             "r-tb".into(),
-            vec![serde_json::from_value(serde_json::json!({ "pattern": "src/parsers/**/*.rs" })).unwrap()],
+            vec![
+                serde_json::from_value(serde_json::json!({ "pattern": "src/parsers/**/*.rs" }))
+                    .unwrap(),
+            ],
         );
-        assert_eq!(owning_node_for_location(&m, "c", "src/parsers/json.rs", None), "tb");
+        assert_eq!(
+            owning_node_for_location(&m, "c", "src/parsers/json.rs", None),
+            "tb"
+        );
     }
 
     #[test]
@@ -392,17 +425,27 @@ mod tests {
         let mut m = frontend_model();
         // Both symbols now map the SAME file; with no symbol cue, attach to the
         // component that owns them, not an arbitrary sibling.
-        let loc = |f: &str| vec![serde_json::from_value(serde_json::json!({ "pattern": f })).unwrap()];
+        let loc =
+            |f: &str| vec![serde_json::from_value(serde_json::json!({ "pattern": f })).unwrap()];
         m.source_map.insert("r-tb".into(), loc("src/shared.tsx"));
         m.source_map.insert("r-ot".into(), loc("src/shared.tsx"));
-        assert_eq!(owning_node_for_location(&m, "c", "src/shared.tsx", None), "comp");
+        assert_eq!(
+            owning_node_for_location(&m, "c", "src/shared.tsx", None),
+            "comp"
+        );
         // A symbol cue still disambiguates to the exact symbol.
-        assert_eq!(owning_node_for_location(&m, "c", "src/shared.tsx", Some("Other")), "ot");
+        assert_eq!(
+            owning_node_for_location(&m, "c", "src/shared.tsx", Some("Other")),
+            "ot"
+        );
     }
 
     #[test]
     fn unmapped_file_stays_on_the_reviewed_container() {
         let m = frontend_model();
-        assert_eq!(owning_node_for_location(&m, "c", "src/brand-new.tsx", Some("Thing")), "c");
+        assert_eq!(
+            owning_node_for_location(&m, "c", "src/brand-new.tsx", Some("Thing")),
+            "c"
+        );
     }
 }

@@ -53,7 +53,11 @@ pub enum ElementKind {
 /// A single divergence of `to` from `from` for one element. Several can stack on
 /// one element (e.g. a responsibility both `Moved` and `Reworded`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Change {
     /// Present in `to`, absent in `from`.
     Added,
@@ -159,7 +163,12 @@ pub fn pending_elements(committed: &ScryModel, planned: &ScryModel) -> Vec<Eleme
                     .nodes
                     .iter()
                     .flat_map(|n| n.responsibilities.iter())
-                    .chain(planned.groups.iter().flat_map(|g| g.responsibilities.iter()))
+                    .chain(
+                        planned
+                            .groups
+                            .iter()
+                            .flat_map(|g| g.responsibilities.iter()),
+                    )
                     .any(|r| r.id == ch.id && r.vagrant == Some(true)),
                 ElementKind::Property => ch.owner_id.as_deref().is_some_and(|oid| {
                     planned.nodes.iter().any(|n| {
@@ -267,7 +276,11 @@ pub fn plan_carrier_count(committed: &ScryModel, planned: &ScryModel) -> usize {
     // A carrier counts when it still holds a real (non-drift) plan change once
     // vagrant content is stripped — the `classifyPlan` null case dropped here.
     let carries = |is_node: bool, id: &str| -> bool {
-        let node = if is_node { node_by_id.get(id).copied() } else { None };
+        let node = if is_node {
+            node_by_id.get(id).copied()
+        } else {
+            None
+        };
         // A vagrant node's own change is code-first review, not a plan edit.
         let node_vagrant = node.is_some_and(|n| n.vagrant == Some(true));
         let own: Option<&[Change]> = if node_vagrant {
@@ -359,14 +372,27 @@ fn diff_nodes(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
                 // sets a node's altitude (parent/child legality), `external` flips
                 // anchorability and link legality. A change to either is real plan
                 // work, so surface it — otherwise it folds invisibly, or never.
-                reword(&mut changes, "kind", kind_label(prev.kind), kind_label(n.kind));
+                reword(
+                    &mut changes,
+                    "kind",
+                    kind_label(prev.kind),
+                    kind_label(n.kind),
+                );
                 // Normalize None and Some(false) — both "not external" — so only a
                 // genuine flip registers, never a serialization difference.
                 reword(
                     &mut changes,
                     "external",
-                    if prev.external == Some(true) { "true" } else { "false" },
-                    if n.external == Some(true) { "true" } else { "false" },
+                    if prev.external == Some(true) {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                    if n.external == Some(true) {
+                        "true"
+                    } else {
+                        "false"
+                    },
                 );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
@@ -568,7 +594,12 @@ fn diff_properties(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
             }),
             Some(prev) => {
                 let mut changes = Vec::new();
-                reword(&mut changes, "description", &prev.description, &p.description);
+                reword(
+                    &mut changes,
+                    "description",
+                    &prev.description,
+                    &p.description,
+                );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
                         kind: ElementKind::Property,
@@ -581,7 +612,7 @@ fn diff_properties(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
             }
         }
     }
-    for ((owner, label), _) in &from_by {
+    for (owner, label) in from_by.keys() {
         if !to_by.contains_key(&(owner.clone(), label.clone())) {
             out.changes.push(ElementChange {
                 kind: ElementKind::Property,
@@ -597,7 +628,9 @@ fn diff_properties(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
 /// A group's anchor — the node level or parent group it sits under. Prefer the
 /// parent group (nesting); fall back to the anchoring node level.
 fn group_owner(g: &crate::Group) -> Option<String> {
-    g.parent_group_id.clone().or_else(|| g.parent_node_id.clone())
+    g.parent_group_id
+        .clone()
+        .or_else(|| g.parent_node_id.clone())
 }
 
 fn diff_groups(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
@@ -825,7 +858,10 @@ mod tests {
         let mut same = node("a", "A", None);
         same.external = Some(false);
         to.nodes.push(same);
-        assert!(diff(&from, &to).is_empty(), "None and Some(false) must not differ");
+        assert!(
+            diff(&from, &to).is_empty(),
+            "None and Some(false) must not differ"
+        );
     }
 
     /// A canvas placement is pure cosmetics: dragging a node on the map must
@@ -838,7 +874,10 @@ mod tests {
         let mut placed = node("a", "A", None);
         placed.position = Some(crate::Position { x: 42.0, y: -7.0 });
         to.nodes.push(placed);
-        assert!(diff(&from, &to).is_empty(), "a drag must not enter the plan queue");
+        assert!(
+            diff(&from, &to).is_empty(),
+            "a drag must not enter the plan queue"
+        );
     }
 
     #[test]
@@ -1041,7 +1080,10 @@ mod tests {
             .into_iter()
             .map(|e| e.id)
             .collect();
-        assert!(!ids.iter().any(|i| i == "rv"), "vagrant content is not pending work: {ids:?}");
+        assert!(
+            !ids.iter().any(|i| i == "rv"),
+            "vagrant content is not pending work: {ids:?}"
+        );
         // Same plan, coarser altitude — and never the number an agent is given.
         assert_eq!(plan_carrier_count(&committed, &planned), 2);
     }

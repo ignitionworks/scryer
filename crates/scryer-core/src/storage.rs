@@ -36,7 +36,7 @@ fn check_version(v: &serde_json::Value) -> Result<(), String> {
 }
 
 pub fn read_model_raw_at(r: &ModelRef) -> Result<String, String> {
-    fs::read_to_string(&r.model_path()).map_err(|e| e.to_string())
+    fs::read_to_string(r.model_path()).map_err(|e| e.to_string())
 }
 
 pub fn read_model_at(r: &ModelRef) -> Result<ScryModel, String> {
@@ -157,8 +157,11 @@ fn stamp_touches(model: &mut ScryModel, prior: Option<&ScryModel>, now: u64) {
             p.nodes
                 .iter()
                 .map(|n| {
-                    let m: HashMap<&str, &Responsibility> =
-                        n.responsibilities.iter().map(|r| (r.id.as_str(), r)).collect();
+                    let m: HashMap<&str, &Responsibility> = n
+                        .responsibilities
+                        .iter()
+                        .map(|r| (r.id.as_str(), r))
+                        .collect();
                     (n.id.as_str(), m)
                 })
                 .collect()
@@ -169,8 +172,11 @@ fn stamp_touches(model: &mut ScryModel, prior: Option<&ScryModel>, now: u64) {
             p.nodes
                 .iter()
                 .map(|n| {
-                    let m: HashMap<&str, &SchemaProperty> =
-                        n.properties.iter().map(|pr| (pr.label.as_str(), pr)).collect();
+                    let m: HashMap<&str, &SchemaProperty> = n
+                        .properties
+                        .iter()
+                        .map(|pr| (pr.label.as_str(), pr))
+                        .collect();
                     (n.id.as_str(), m)
                 })
                 .collect()
@@ -181,8 +187,11 @@ fn stamp_touches(model: &mut ScryModel, prior: Option<&ScryModel>, now: u64) {
             p.groups
                 .iter()
                 .map(|g| {
-                    let m: HashMap<&str, &Responsibility> =
-                        g.responsibilities.iter().map(|r| (r.id.as_str(), r)).collect();
+                    let m: HashMap<&str, &Responsibility> = g
+                        .responsibilities
+                        .iter()
+                        .map(|r| (r.id.as_str(), r))
+                        .collect();
                     (g.id.as_str(), m)
                 })
                 .collect()
@@ -225,7 +234,7 @@ pub fn save_baseline_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
     let dir = r.dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(model).map_err(|e| e.to_string())?;
-    fs::write(&r.baseline_path(), json).map_err(|e| e.to_string())
+    fs::write(r.baseline_path(), json).map_err(|e| e.to_string())
 }
 
 // --- Reconcile (drift) sync anchor ---
@@ -260,7 +269,7 @@ pub fn write_sync_state(r: &ModelRef, state: &drift::SyncState) -> Result<(), St
 
 /// Read the baseline snapshot. Returns None if absent or version-mismatched.
 pub fn read_baseline_at(r: &ModelRef) -> Option<ScryModel> {
-    let raw = fs::read_to_string(&r.baseline_path()).ok()?;
+    let raw = fs::read_to_string(r.baseline_path()).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     if check_version(&v).is_err() {
         return None;
@@ -278,7 +287,7 @@ pub fn write_planned_raw_at(r: &ModelRef, data: &str) -> Result<(), String> {
     ensure_project_gitignore(&dir)?;
     let tmp = dir.join(".tmp.planned.scry");
     fs::write(&tmp, data).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &r.planned_path()).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, r.planned_path()).map_err(|e| e.to_string())?;
     // Concern-metadata write-through (plan → committed): a retag on an
     // already-built claim never folds (`diff` ignores `concern`), so it syncs
     // here — the choke point every plan write passes (canvas raw saves and
@@ -408,11 +417,16 @@ pub fn ensure_planned_at(r: &ModelRef) -> Result<(), String> {
 /// genuine plan-added anchors or a real conflict to surface, never silently
 /// picked. Returns whether anything was stripped.
 fn strip_shadow_entries(committed: &ScryModel, planned: &mut ScryModel) -> bool {
-    let before =
-        planned.source_map.len() + planned.test_map.len() + planned.boundaries.len();
-    planned.source_map.retain(|k, v| committed.source_map.get(k) != Some(v));
-    planned.test_map.retain(|k, v| committed.test_map.get(k) != Some(v));
-    planned.boundaries.retain(|k, v| committed.boundaries.get(k) != Some(v));
+    let before = planned.source_map.len() + planned.test_map.len() + planned.boundaries.len();
+    planned
+        .source_map
+        .retain(|k, v| committed.source_map.get(k) != Some(v));
+    planned
+        .test_map
+        .retain(|k, v| committed.test_map.get(k) != Some(v));
+    planned
+        .boundaries
+        .retain(|k, v| committed.boundaries.get(k) != Some(v));
     before != planned.source_map.len() + planned.test_map.len() + planned.boundaries.len()
 }
 
@@ -523,7 +537,12 @@ pub fn working_view(committed: &ScryModel, planned: &ScryModel) -> ScryModel {
         .nodes
         .iter()
         .flat_map(|n| n.responsibilities.iter())
-        .chain(planned.groups.iter().flat_map(|g| g.responsibilities.iter()))
+        .chain(
+            planned
+                .groups
+                .iter()
+                .flat_map(|g| g.responsibilities.iter()),
+        )
         .map(|r| r.id.as_str())
         .collect();
     // source_map is keyed by responsibility id or by a property-bearing node id
@@ -536,19 +555,25 @@ pub fn working_view(committed: &ScryModel, planned: &ScryModel) -> ScryModel {
         .collect();
     for (id, sources) in &committed.boundaries {
         if node_ids.contains(id.as_str()) {
-            view.boundaries.entry(id.clone()).or_insert_with(|| sources.clone());
+            view.boundaries
+                .entry(id.clone())
+                .or_insert_with(|| sources.clone());
         }
     }
     for (id, locs) in &committed.source_map {
         if resp_ids.contains(id.as_str()) || property_node_ids.contains(id.as_str()) {
-            view.source_map.entry(id.clone()).or_insert_with(|| locs.clone());
+            view.source_map
+                .entry(id.clone())
+                .or_insert_with(|| locs.clone());
         }
     }
     // test_map is keyed by responsibility id only (a test backs a claim,
     // never a declaration site).
     for (id, locs) in &committed.test_map {
         if resp_ids.contains(id.as_str()) {
-            view.test_map.entry(id.clone()).or_insert_with(|| locs.clone());
+            view.test_map
+                .entry(id.clone())
+                .or_insert_with(|| locs.clone());
         }
     }
     view
@@ -668,20 +693,29 @@ mod tests {
         let (_dir, r) = temp_ref();
         // Seed the draft: the first write has no prior, so it appends nothing.
         write_planned_at(&r, &one_resp_model("does X")).unwrap();
-        assert!(crate::history::read_history(&r).is_empty(), "the seeding write is silent");
+        assert!(
+            crate::history::read_history(&r).is_empty(),
+            "the seeding write is silent"
+        );
 
         // A named actor lands on the event.
         write_planned_as(&r, &one_resp_model("does Y"), Some("ada-fixture")).unwrap();
         let log = crate::history::read_history(&r);
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].kind, crate::history::EventKind::Plan);
-        assert_eq!(log[0].by, "ada-fixture", "the write's actor names its plan event");
+        assert_eq!(
+            log[0].by, "ada-fixture",
+            "the write's actor names its plan event"
+        );
 
         // No actor named: unattributed, which reads as the agent — unchanged.
         write_planned_at(&r, &one_resp_model("does Z")).unwrap();
         let log = crate::history::read_history(&r);
         assert_eq!(log.len(), 2);
-        assert_eq!(log[1].by, "agent", "an unattributed write still reads as the agent");
+        assert_eq!(
+            log[1].by, "agent",
+            "an unattributed write still reads as the agent"
+        );
     }
 
     /// Deleting a model must clear the draft and every derived fingerprint, not
@@ -730,7 +764,10 @@ mod tests {
         m.nodes.push(n2);
 
         let err = write_model_at(&r, &m).expect_err("duplicate resp id must be refused");
-        assert!(err.contains("globally unique"), "names the invariant: {err}");
+        assert!(
+            err.contains("globally unique"),
+            "names the invariant: {err}"
+        );
         assert!(err.contains("r1"), "names the colliding id: {err}");
         assert!(!r.model_path().exists(), "nothing was persisted");
     }
@@ -752,7 +789,8 @@ mod tests {
         let (_dir, r) = temp_ref();
         let mut committed = ScryModel::new();
         let mut node = mk_node("n1", "N", None);
-        node.responsibilities.push(mk_resp("resp-1", "authenticates requests"));
+        node.responsibilities
+            .push(mk_resp("resp-1", "authenticates requests"));
         committed.nodes.push(node);
         write_model_at(&r, &committed).unwrap();
 
@@ -788,12 +826,20 @@ mod tests {
         gone.responsibilities.push(mk_resp("resp-2", "goes"));
         committed.nodes.push(keep);
         committed.nodes.push(gone);
-        committed
-            .boundaries
-            .insert("keep".into(), vec![Source { pattern: "keep/**".into(), comment: None }]);
-        committed
-            .boundaries
-            .insert("gone".into(), vec![Source { pattern: "gone/**".into(), comment: None }]);
+        committed.boundaries.insert(
+            "keep".into(),
+            vec![Source {
+                pattern: "keep/**".into(),
+                comment: None,
+            }],
+        );
+        committed.boundaries.insert(
+            "gone".into(),
+            vec![Source {
+                pattern: "gone/**".into(),
+                comment: None,
+            }],
+        );
         committed.source_map.insert(
             "resp-1".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "keep.rs" })).unwrap()],
@@ -819,12 +865,30 @@ mod tests {
         planned.boundaries.clear();
 
         let view = working_view(&committed, &planned);
-        assert!(view.boundaries.contains_key("keep"), "live node's boundary overlays");
-        assert!(view.source_map.contains_key("resp-1"), "live claim's anchor overlays");
-        assert!(view.test_map.contains_key("resp-1"), "live claim's test entry overlays");
-        assert!(!view.boundaries.contains_key("gone"), "plan-deleted node's boundary does not");
-        assert!(!view.source_map.contains_key("resp-2"), "plan-deleted claim's anchor does not");
-        assert!(!view.test_map.contains_key("resp-2"), "plan-deleted claim's test entry does not");
+        assert!(
+            view.boundaries.contains_key("keep"),
+            "live node's boundary overlays"
+        );
+        assert!(
+            view.source_map.contains_key("resp-1"),
+            "live claim's anchor overlays"
+        );
+        assert!(
+            view.test_map.contains_key("resp-1"),
+            "live claim's test entry overlays"
+        );
+        assert!(
+            !view.boundaries.contains_key("gone"),
+            "plan-deleted node's boundary does not"
+        );
+        assert!(
+            !view.source_map.contains_key("resp-2"),
+            "plan-deleted claim's anchor does not"
+        );
+        assert!(
+            !view.test_map.contains_key("resp-2"),
+            "plan-deleted claim's test entry does not"
+        );
         let warnings = validate::validate(&view);
         assert!(
             warnings.iter().all(|w| !w.contains("unknown")),
@@ -843,7 +907,13 @@ mod tests {
         let mut a = mk_node("a", "A", None);
         a.responsibilities.push(mk_resp("resp-1", "do the thing"));
         m.nodes.push(a);
-        m.boundaries.insert("a".into(), vec![Source { pattern: "a/**".into(), comment: None }]);
+        m.boundaries.insert(
+            "a".into(),
+            vec![Source {
+                pattern: "a/**".into(),
+                comment: None,
+            }],
+        );
         m.source_map.insert(
             "resp-1".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "a.rs" })).unwrap()],
@@ -876,7 +946,13 @@ mod tests {
         };
         let mut m = ScryModel::new();
         m.nodes.push(mk_node("a", "A", None));
-        m.boundaries.insert("a".into(), vec![Source { pattern: "a/**".into(), comment: None }]);
+        m.boundaries.insert(
+            "a".into(),
+            vec![Source {
+                pattern: "a/**".into(),
+                comment: None,
+            }],
+        );
         m.source_map.insert("resp-1".into(), loc("same.rs"));
         m.source_map.insert("resp-2".into(), loc("committed.rs"));
         m.test_map.insert("resp-1".into(), loc("same_test.rs"));
@@ -885,22 +961,41 @@ mod tests {
         // A pre-seeding draft: full shadow of committed, plus one diverged entry
         // and one genuinely plan-added anchor.
         let mut planned = m.clone();
-        planned.source_map.insert("resp-2".into(), loc("diverged.rs"));
-        planned.source_map.insert("resp-3".into(), loc("plan-added.rs"));
+        planned
+            .source_map
+            .insert("resp-2".into(), loc("diverged.rs"));
+        planned
+            .source_map
+            .insert("resp-3".into(), loc("plan-added.rs"));
         let json = serde_json::to_string_pretty(&planned).unwrap();
         write_planned_raw_at(&r, &json).unwrap();
 
-        assert!(heal_shadow_draft(&r).unwrap(), "a dirty draft reports healed");
+        assert!(
+            heal_shadow_draft(&r).unwrap(),
+            "a dirty draft reports healed"
+        );
         let healed = read_planned_at(&r).unwrap();
-        assert!(!healed.source_map.contains_key("resp-1"), "value-equal shadow stripped");
-        assert!(!healed.test_map.contains_key("resp-1"), "value-equal test-entry shadow stripped");
-        assert!(!healed.boundaries.contains_key("a"), "value-equal boundary stripped");
+        assert!(
+            !healed.source_map.contains_key("resp-1"),
+            "value-equal shadow stripped"
+        );
+        assert!(
+            !healed.test_map.contains_key("resp-1"),
+            "value-equal test-entry shadow stripped"
+        );
+        assert!(
+            !healed.boundaries.contains_key("a"),
+            "value-equal boundary stripped"
+        );
         assert_eq!(
             healed.source_map.get("resp-2"),
             Some(&loc("diverged.rs")),
             "a diverged value is never silently dropped"
         );
-        assert!(healed.source_map.contains_key("resp-3"), "plan-added anchor survives");
+        assert!(
+            healed.source_map.contains_key("resp-3"),
+            "plan-added anchor survives"
+        );
         assert!(!heal_shadow_draft(&r).unwrap(), "second pass is a no-op");
     }
 
@@ -958,13 +1053,29 @@ mod tests {
             });
             m.source_map.insert(
                 format!("resp-{i}"),
-                vec![SourceLocation { pattern: format!("src/{i}.rs"), symbol: None, line: None, end_line: None }],
+                vec![SourceLocation {
+                    pattern: format!("src/{i}.rs"),
+                    symbol: None,
+                    line: None,
+                    end_line: None,
+                }],
             );
             m.test_map.insert(
                 format!("resp-{i}"),
-                vec![SourceLocation { pattern: format!("tests/{i}.rs"), symbol: None, line: None, end_line: None }],
+                vec![SourceLocation {
+                    pattern: format!("tests/{i}.rs"),
+                    symbol: None,
+                    line: None,
+                    end_line: None,
+                }],
             );
-            m.boundaries.insert(id, vec![Source { pattern: format!("src/{i}/**/*"), comment: None }]);
+            m.boundaries.insert(
+                id,
+                vec![Source {
+                    pattern: format!("src/{i}/**/*"),
+                    comment: None,
+                }],
+            );
         }
         write_model_at(&r, &m).unwrap();
         let first = std::fs::read_to_string(r.model_path()).unwrap();
@@ -972,7 +1083,10 @@ mod tests {
         let again = read_model_at(&r).unwrap();
         write_model_at(&r, &again).unwrap();
         let second = std::fs::read_to_string(r.model_path()).unwrap();
-        assert_eq!(first, second, "the file must not reshuffle when nothing changed");
+        assert_eq!(
+            first, second,
+            "the file must not reshuffle when nothing changed"
+        );
         assert!(
             first.find("\"node-1\"").unwrap() < first.find("\"node-2\"").unwrap(),
             "keys are written in sorted order"
@@ -1020,9 +1134,12 @@ mod tests {
         });
 
         let m = read_model_at(&r).unwrap();
-        assert_eq!(m.nodes.len(), N, "every concurrent write landed (no lost updates)");
-        let ids: std::collections::HashSet<&str> =
-            m.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(
+            m.nodes.len(),
+            N,
+            "every concurrent write landed (no lost updates)"
+        );
+        let ids: std::collections::HashSet<&str> = m.nodes.iter().map(|n| n.id.as_str()).collect();
         assert_eq!(ids.len(), N, "all minted ids are unique (no collision)");
     }
 
@@ -1132,7 +1249,10 @@ mod tests {
 
         let err = read_model_at(&r).unwrap_err();
         assert!(err.contains("'0.1'"), "names the file's version: {err}");
-        assert!(err.contains(SCRY_VERSION), "names the required version: {err}");
+        assert!(
+            err.contains(SCRY_VERSION),
+            "names the required version: {err}"
+        );
 
         // A missing version field is refused the same way.
         std::fs::write(r.model_path(), r#"{ "nodes": [], "links": [] }"#).unwrap();

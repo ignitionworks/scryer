@@ -230,10 +230,7 @@ pub fn validate(model: &ScryModel) -> Vec<String> {
                 Some(member) => {
                     member_kinds.insert(kind_name(&member.kind));
                 }
-                None => warnings.push(format!(
-                    "Group {} member '{}' is not a node",
-                    g.id, mid
-                )),
+                None => warnings.push(format!("Group {} member '{}' is not a node", g.id, mid)),
             }
         }
         if member_kinds.len() > 1 {
@@ -270,18 +267,29 @@ pub fn validate(model: &ScryModel) -> Vec<String> {
     let mut resp_hosts: HashMap<&str, Vec<&str>> = HashMap::new();
     for n in &model.nodes {
         for r in &n.responsibilities {
-            resp_hosts.entry(r.id.as_str()).or_default().push(n.id.as_str());
+            resp_hosts
+                .entry(r.id.as_str())
+                .or_default()
+                .push(n.id.as_str());
         }
     }
     for g in &model.groups {
         for r in &g.responsibilities {
-            resp_hosts.entry(r.id.as_str()).or_default().push(g.id.as_str());
+            resp_hosts
+                .entry(r.id.as_str())
+                .or_default()
+                .push(g.id.as_str());
         }
     }
     let mut collisions: Vec<String> = Vec::new();
     for (rid, hosts) in &resp_hosts {
         // Distinct hosts only — a repeat on one host is already reported above.
-        let mut distinct: Vec<&str> = hosts.iter().copied().collect::<HashSet<&str>>().into_iter().collect();
+        let mut distinct: Vec<&str> = hosts
+            .iter()
+            .copied()
+            .collect::<HashSet<&str>>()
+            .into_iter()
+            .collect();
         if distinct.len() > 1 {
             distinct.sort_unstable();
             collisions.push(format!(
@@ -427,23 +435,39 @@ pub fn structural_violations(model: &ScryModel) -> Vec<String> {
         let mut per_host: HashSet<&str> = HashSet::new();
         for r in &n.responsibilities {
             if !per_host.insert(r.id.as_str()) {
-                out.push(format!("Duplicate responsibility id '{}' on node {}", r.id, n.id));
+                out.push(format!(
+                    "Duplicate responsibility id '{}' on node {}",
+                    r.id, n.id
+                ));
             }
-            resp_hosts.entry(r.id.as_str()).or_default().push(n.id.as_str());
+            resp_hosts
+                .entry(r.id.as_str())
+                .or_default()
+                .push(n.id.as_str());
         }
     }
     for g in &model.groups {
         let mut per_host: HashSet<&str> = HashSet::new();
         for r in &g.responsibilities {
             if !per_host.insert(r.id.as_str()) {
-                out.push(format!("Duplicate responsibility id '{}' on group {}", r.id, g.id));
+                out.push(format!(
+                    "Duplicate responsibility id '{}' on group {}",
+                    r.id, g.id
+                ));
             }
-            resp_hosts.entry(r.id.as_str()).or_default().push(g.id.as_str());
+            resp_hosts
+                .entry(r.id.as_str())
+                .or_default()
+                .push(g.id.as_str());
         }
     }
     for (rid, hosts) in &resp_hosts {
-        let mut distinct: Vec<&str> =
-            hosts.iter().copied().collect::<HashSet<&str>>().into_iter().collect();
+        let mut distinct: Vec<&str> = hosts
+            .iter()
+            .copied()
+            .collect::<HashSet<&str>>()
+            .into_iter()
+            .collect();
         if distinct.len() > 1 {
             distinct.sort_unstable();
             out.push(format!(
@@ -562,10 +586,7 @@ fn check_disconnected(model: &ScryModel) -> Vec<String> {
         let owned: HashSet<&str> = model
             .nodes
             .iter()
-            .filter(|n| {
-                n.parent_id.as_deref() == Some(parent.id.as_str())
-                    && n.kind == child_kind
-            })
+            .filter(|n| n.parent_id.as_deref() == Some(parent.id.as_str()) && n.kind == child_kind)
             .map(|n| n.id.as_str())
             .collect();
         if owned.is_empty() {
@@ -576,8 +597,7 @@ fn check_disconnected(model: &ScryModel) -> Vec<String> {
         // itself and the parent's parent.
         let mut refs: HashSet<&str> = HashSet::new();
         for l in &model.links {
-            let touches_child =
-                owned.contains(l.src.as_str()) || owned.contains(l.dst.as_str());
+            let touches_child = owned.contains(l.src.as_str()) || owned.contains(l.dst.as_str());
             if !touches_child {
                 continue;
             }
@@ -615,7 +635,10 @@ fn check_disconnected(model: &ScryModel) -> Vec<String> {
 /// Why a link is illegal. Carries node ids; resolve names via `describe_violation`.
 pub enum LinkViolation {
     /// One endpoint is an ancestor of the other — containment, not a relationship.
-    Containment { ancestor: String, descendant: String },
+    Containment {
+        ancestor: String,
+        descendant: String,
+    },
     /// Same depth, different parents — the two never share a diagram.
     SameLevelDifferentParent,
     /// A deeper→shallower link with no authorizing link from the deeper node's
@@ -709,9 +732,9 @@ pub fn link_violation(model: &ScryModel, src: &str, dst: &str) -> Option<LinkVio
     }
     let (deeper, other) = if dsrc > ddst { (src, dst) } else { (dst, src) };
     // `deeper` is strictly deeper than `other`, so it has a parent.
-    let parent = match parent_of(model, deeper) {
-        Some(p) => p.to_string(),
-        None => return None,
+    let parent = {
+        let p = parent_of(model, deeper)?;
+        p.to_string()
     };
     if !linked_either(model, &parent, other) {
         return Some(LinkViolation::UnauthorizedCrossLevel {
@@ -760,12 +783,7 @@ pub fn link_targets_for(model: &ScryModel, id: &str) -> Vec<String> {
 
 /// Human-readable, corrective explanation of a `LinkViolation`. Shared by
 /// `add_links` (rejection) and `validate` (warning).
-pub fn describe_violation(
-    model: &ScryModel,
-    src: &str,
-    dst: &str,
-    v: &LinkViolation,
-) -> String {
+pub fn describe_violation(model: &ScryModel, src: &str, dst: &str, v: &LinkViolation) -> String {
     match v {
         LinkViolation::Containment {
             ancestor,
@@ -848,7 +866,9 @@ pub fn validate_coverage(model: &ScryModel, project_path: &Path) -> Vec<String> 
     // Check A: uncovered manifest directories
     for (dir, filename) in &manifest_dirs {
         let prefix = format!("{}/", dir);
-        let covered = all_patterns.iter().any(|p| p.starts_with(&prefix) || p == dir);
+        let covered = all_patterns
+            .iter()
+            .any(|p| p.starts_with(&prefix) || p == dir);
         if !covered {
             warnings.push(format!(
                 "Manifest directory '{}/' (contains {}) is not covered by any source map entry \
@@ -885,10 +905,12 @@ pub fn validate_coverage(model: &ScryModel, project_path: &Path) -> Vec<String> 
     let mut dir_to_containers: HashMap<String, HashSet<&str>> = HashMap::new();
 
     let mut record_pattern = |pattern: &str, node_id: &str| {
-        let Some(&container_id) = container_of.get(node_id) else { return };
+        let Some(&container_id) = container_of.get(node_id) else {
+            return;
+        };
         // Extract meaningful directory prefix (up to first glob or the parent dir)
         let effective = pattern
-            .find(|c: char| c == '*' || c == '?' || c == '{')
+            .find(['*', '?', '{'])
             .map(|i| &pattern[..i])
             .unwrap_or(pattern);
         let dir_prefix = if effective.ends_with('/') {
@@ -912,7 +934,11 @@ pub fn validate_coverage(model: &ScryModel, project_path: &Path) -> Vec<String> 
     let resp_to_node: HashMap<&str, &str> = model
         .nodes
         .iter()
-        .flat_map(|n| n.responsibilities.iter().map(move |r| (r.id.as_str(), n.id.as_str())))
+        .flat_map(|n| {
+            n.responsibilities
+                .iter()
+                .map(move |r| (r.id.as_str(), n.id.as_str()))
+        })
         .collect();
     let node_ids_set: HashSet<&str> = model.nodes.iter().map(|n| n.id.as_str()).collect();
     for (key, locs) in &model.source_map {
@@ -1003,9 +1029,15 @@ mod resp_id_tests {
         })));
 
         let warnings = validate(&m);
-        let hits: Vec<&String> =
-            warnings.iter().filter(|w| w.contains("globally unique")).collect();
-        assert_eq!(hits.len(), 1, "exactly one collision warning, got: {warnings:?}");
+        let hits: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("globally unique"))
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "exactly one collision warning, got: {warnings:?}"
+        );
         let w = hits[0];
         assert!(w.contains("resp-1"), "names the colliding id: {w}");
         assert!(
@@ -1036,9 +1068,13 @@ mod resp_id_tests {
             "id": "node-2", "kind": "container", "name": "Dup", "parentId": "node-1",
         })));
         let v = structural_violations(&m);
-        assert!(v.iter().any(|w| w.contains("Duplicate node id: node-2")), "{v:?}");
         assert!(
-            v.iter().any(|w| w.contains("globally unique") && w.contains("resp-1")),
+            v.iter().any(|w| w.contains("Duplicate node id: node-2")),
+            "{v:?}"
+        );
+        assert!(
+            v.iter()
+                .any(|w| w.contains("globally unique") && w.contains("resp-1")),
             "{v:?}"
         );
     }
@@ -1058,7 +1094,11 @@ mod resp_id_tests {
             "id": "node-2", "kind": "container", "name": "API", "parentId": "node-1",
             "responsibilities": [{ "id": "resp-2", "statement": "b" }]
         })));
-        assert!(structural_violations(&m).is_empty(), "{:?}", structural_violations(&m));
+        assert!(
+            structural_violations(&m).is_empty(),
+            "{:?}",
+            structural_violations(&m)
+        );
     }
 
     /// Responsibility ids that are unique across hosts raise no collision warning.
@@ -1100,10 +1140,20 @@ mod resp_id_tests {
         );
 
         let warnings = validate(&m);
-        let hits: Vec<&String> =
-            warnings.iter().filter(|w| w.contains("no directory prefix")).collect();
-        assert_eq!(hits.len(), 1, "only the whole-repo glob warns: {warnings:?}");
-        assert!(hits[0].contains("**/*") && hits[0].contains("Acme"), "{}", hits[0]);
+        let hits: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("no directory prefix"))
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "only the whole-repo glob warns: {warnings:?}"
+        );
+        assert!(
+            hits[0].contains("**/*") && hits[0].contains("Acme"),
+            "{}",
+            hits[0]
+        );
     }
 }
 
@@ -1156,11 +1206,15 @@ mod disconnect_tests {
         );
         let warnings = validate(&m);
         assert!(
-            warnings.iter().any(|w| w.contains("Test map") && w.contains("r-ghost")),
+            warnings
+                .iter()
+                .any(|w| w.contains("Test map") && w.contains("r-ghost")),
             "unknown test key flagged: {warnings:?}"
         );
         assert!(
-            !warnings.iter().any(|w| w.contains("Test map") && w.contains("'r-0'")),
+            !warnings
+                .iter()
+                .any(|w| w.contains("Test map") && w.contains("'r-0'")),
             "a live claim's test entry is quiet: {warnings:?}"
         );
     }
@@ -1173,7 +1227,9 @@ mod disconnect_tests {
         let m = model_with_symbols(5);
         let warnings = validate(&m);
         assert!(
-            !warnings.iter().any(|w| w.contains("disconnected") && w.contains("symbol")),
+            !warnings
+                .iter()
+                .any(|w| w.contains("disconnected") && w.contains("symbol")),
             "no per-symbol disconnect noise: {warnings:?}"
         );
     }
@@ -1187,13 +1243,17 @@ mod disconnect_tests {
         // Link sym-0 to the container: legal only via reference propagation,
         // but here nothing makes "API" a reference on the symbol view, so the
         // link renders nowhere at sym-0's level.
-        m.links.push(serde_json::from_value(serde_json::json!({
-            "id": "l1", "src": "sym-0", "dst": "cont", "label": "uses"
-        })).unwrap());
+        m.links.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "l1", "src": "sym-0", "dst": "cont", "label": "uses"
+            }))
+            .unwrap(),
+        );
         let warnings = validate(&m);
         assert!(
-            warnings.iter().any(|w| w.contains("has links but none at this level")
-                && w.contains("helper_0")),
+            warnings
+                .iter()
+                .any(|w| w.contains("has links but none at this level") && w.contains("helper_0")),
             "invisible-link symbols still flagged: {warnings:?}"
         );
     }
@@ -1228,7 +1288,10 @@ mod disconnect_tests {
                 && w.contains("'Search' (component)"),
             "names every culprit with its kind: {w}"
         );
-        assert!(w.contains("component view of 'API'"), "scoped to the view: {w}");
+        assert!(
+            w.contains("component view of 'API'"),
+            "scoped to the view: {w}"
+        );
     }
 
     /// A single linkless node keeps the singular wording and gains the view
@@ -1248,16 +1311,21 @@ mod disconnect_tests {
         m.nodes.push(node(serde_json::json!({
             "id": "c2", "kind": "component", "name": "Billing", "parentId": "cont",
         })));
-        m.links.push(serde_json::from_value(serde_json::json!({
-            "id": "l1", "src": "c2", "dst": "c1", "label": "bills via"
-        })).unwrap());
+        m.links.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "l1", "src": "c2", "dst": "c1", "label": "bills via"
+            }))
+            .unwrap(),
+        );
         // c1/c2 are connected; add a third that isn't.
         m.nodes.push(node(serde_json::json!({
             "id": "c3", "kind": "component", "name": "Search", "parentId": "cont",
         })));
         let warnings = validate(&m);
-        let hits: Vec<&String> =
-            warnings.iter().filter(|w| w.contains("has no links")).collect();
+        let hits: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("has no links"))
+            .collect();
         assert_eq!(hits.len(), 1, "{warnings:?}");
         assert!(
             hits[0].contains("'Search' (component) has no links")

@@ -74,7 +74,10 @@ fn is_false(b: &bool) -> bool {
 /// other than the change's author. False for every model that carries no
 /// policy — the default, and the only behaviour upstream has.
 pub fn requires_countersigned_folds(model: &ScryModel) -> bool {
-    model.policy.as_ref().is_some_and(|p| p.require_countersigned_folds)
+    model
+        .policy
+        .as_ref()
+        .is_some_and(|p| p.require_countersigned_folds)
 }
 
 /// One open change in the plan's registry.
@@ -349,15 +352,21 @@ pub fn sign_off_for(
         .filter(|(_, v)| v.as_str() == change_id)
         .map(|(k, _)| k.clone())
         .collect();
-    let entries: BTreeMap<String, SignedEntry> =
-        keys.iter().map(|k| (k.clone(), signed_entry(model, k))).collect();
+    let entries: BTreeMap<String, SignedEntry> = keys
+        .iter()
+        .map(|k| (k.clone(), signed_entry(model, k)))
+        .collect();
     let n = entries.len();
     let meta = model
         .changes
         .iter_mut()
         .find(|c| c.id == change_id)
         .ok_or_else(|| format!("no open change '{change_id}'"))?;
-    let named = |s: Option<&str>| s.map(str::trim).filter(|a| !a.is_empty()).map(str::to_string);
+    let named = |s: Option<&str>| {
+        s.map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_string)
+    };
     let (by, on_behalf_of) = match named(actor) {
         // A named signer owns the whole attribution, proxy or not.
         Some(by) => (Some(by), named(on_behalf_of)),
@@ -377,7 +386,13 @@ pub fn sign_off_for(
         (None, Some(prev)) => prev.staled_by.clone(),
         _ => None,
     };
-    meta.signed_off = Some(SignOff { at: now, by, on_behalf_of, staled_by, entries });
+    meta.signed_off = Some(SignOff {
+        at: now,
+        by,
+        on_behalf_of,
+        staled_by,
+        entries,
+    });
     Ok(n)
 }
 
@@ -439,8 +454,11 @@ pub fn restamp_signoffs_as(model: &mut ScryModel, now: u64, actor: Option<&str>)
             (Some(w), Some(s)) if w != s
         );
         if someone_else {
-            if let Some(snap) =
-                model.changes.iter_mut().find(|c| c.id == cid).and_then(|c| c.signed_off.as_mut())
+            if let Some(snap) = model
+                .changes
+                .iter_mut()
+                .find(|c| c.id == cid)
+                .and_then(|c| c.signed_off.as_mut())
             {
                 snap.staled_by = writer.clone();
             }
@@ -463,7 +481,9 @@ pub fn classify_against_signoff(
     model: &ScryModel,
     meta: &ChangeMeta,
 ) -> Vec<(String, Classification, Option<SignedEntry>)> {
-    let Some(snap) = &meta.signed_off else { return Vec::new() };
+    let Some(snap) = &meta.signed_off else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     let mut tagged: Vec<&String> = model
         .change_map
@@ -481,7 +501,7 @@ pub fn classify_against_signoff(
         }
     }
     for (key, was) in &snap.entries {
-        if !tagged.iter().any(|k| *k == key) {
+        if !tagged.contains(&key) {
             out.push((key.clone(), Classification::Dropped, Some(was.clone())));
         }
     }
@@ -537,7 +557,11 @@ pub fn parse_key(key: &str) -> Option<(ElementKind, Option<String>, String)> {
         "resp" => Some((ElementKind::Responsibility, None, rest.to_string())),
         "prop" => {
             let (owner, label) = rest.split_once(':')?;
-            Some((ElementKind::Property, Some(owner.to_string()), label.to_string()))
+            Some((
+                ElementKind::Property,
+                Some(owner.to_string()),
+                label.to_string(),
+            ))
         }
         _ => None,
     }
@@ -755,8 +779,11 @@ pub fn gc(committed: &ScryModel, planned: &mut ScryModel) -> Gc {
     if planned.change_map.is_empty() && planned.changes.is_empty() {
         return Gc::default();
     }
-    let valid: HashSet<String> =
-        diff(committed, planned).changes.iter().map(key_for).collect();
+    let valid: HashSet<String> = diff(committed, planned)
+        .changes
+        .iter()
+        .map(key_for)
+        .collect();
     let before = planned.change_map.len();
     let mut candidates: HashSet<String> = HashSet::new();
     planned.change_map.retain(|k, v| {
@@ -773,8 +800,13 @@ pub fn gc(committed: &ScryModel, planned: &mut ScryModel) -> Gc {
         .filter(|c| candidates.contains(&c.id) && !live.contains(&c.id))
         .cloned()
         .collect();
-    planned.changes.retain(|c| !closed.iter().any(|x| x.id == c.id));
-    Gc { pruned: before - planned.change_map.len(), closed }
+    planned
+        .changes
+        .retain(|c| !closed.iter().any(|x| x.id == c.id));
+    Gc {
+        pruned: before - planned.change_map.len(),
+        closed,
+    }
 }
 
 /// Close an EMPTY open change by hand — the escape hatch for a stranded
@@ -819,7 +851,9 @@ pub fn close_change(r: &ModelRef, change_id: &str) -> Result<ChangeMeta, String>
 /// looked. Best-effort like every history append: a log failure must never
 /// abort the sign-off it describes.
 pub fn record_signed_off(r: &ModelRef, meta: &ChangeMeta) {
-    let Some(snap) = meta.signed_off.as_ref() else { return };
+    let Some(snap) = meta.signed_off.as_ref() else {
+        return;
+    };
     let ev = HistoryEvent::new(snap.at, EventKind::Change, "", "signed off")
         .with_change(&meta.id)
         .with_rows(vec![EventRow::new("✓", meta.rationale.clone())])
@@ -853,16 +887,27 @@ mod tests {
     fn sign_off_records_the_actor_who_gave_the_go_ahead() {
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new")]);
         let cid = open_change(&mut plan, "the change", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &cid);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &cid,
+        );
 
         sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
-        assert_eq!(plan.changes[0].signed_off.as_ref().unwrap().by.as_deref(), Some("jesseh"));
+        assert_eq!(
+            plan.changes[0].signed_off.as_ref().unwrap().by.as_deref(),
+            Some("jesseh")
+        );
 
         // A canvas save re-stamps with no actor: the signature survives.
         restamp_signoffs(&mut plan, 300);
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert_eq!(snap.at, 300);
-        assert_eq!(snap.by.as_deref(), Some("jesseh"), "a re-stamp never erases who signed");
+        assert_eq!(
+            snap.by.as_deref(),
+            Some("jesseh"),
+            "a re-stamp never erases who signed"
+        );
 
         // Unattributed sign-off: recorded, never refused.
         let mut plain = model_with_resps(&[("r1", "exists")]);
@@ -891,13 +936,22 @@ mod tests {
         assert!(!requires_countersigned_folds(&model), "no policy = off");
         write_model_at(&r, &model).unwrap();
         let raw = std::fs::read_to_string(r.model_path()).unwrap();
-        assert!(!raw.contains("policy"), "an unset policy leaves no trace in the file: {raw}");
+        assert!(
+            !raw.contains("policy"),
+            "an unset policy leaves no trace in the file: {raw}"
+        );
         assert!(!requires_countersigned_folds(&read_model_at(&r).unwrap()));
 
         // Opting in survives the committed write that strips change state.
-        model.policy = Some(Policy { require_countersigned_folds: true });
+        model.policy = Some(Policy {
+            require_countersigned_folds: true,
+        });
         let cid = open_change(&mut model, "not the committed layer's business", 100);
-        tag(&mut model, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+        tag(
+            &mut model,
+            &[element_key(ElementKind::Responsibility, None, "r1")],
+            &cid,
+        );
         write_model_at(&r, &model).unwrap();
         let back = read_model_at(&r).unwrap();
         assert!(back.changes.is_empty(), "the ledger is still stripped");
@@ -910,15 +964,15 @@ mod tests {
         model.policy = Some(Policy::default());
         write_model_at(&r, &model).unwrap();
         assert!(!requires_countersigned_folds(&read_model_at(&r).unwrap()));
-        assert!(!std::fs::read_to_string(r.model_path()).unwrap().contains("requireCountersigned"));
+        assert!(!std::fs::read_to_string(r.model_path())
+            .unwrap()
+            .contains("requireCountersigned"));
 
         // Upstream's shape (no `policy` key) still loads.
         let legacy: ScryModel =
             serde_json::from_str(r#"{"version":"1","nodes":[],"links":[]}"#).unwrap();
         assert!(!requires_countersigned_folds(&legacy));
     }
-
-
 
     /// resp-7xts3y — a sign-off leaves its own record on the timeline, naming
     /// the actor who signed and, when they signed as someone's proxy, the
@@ -935,37 +989,71 @@ mod tests {
         let tmp = tempdir().unwrap();
         let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
         let signed_off = |r: &ModelRef| -> Vec<crate::history::HistoryEvent> {
-            read_history(r).into_iter().filter(|e| e.driver == "signed off").collect()
+            read_history(r)
+                .into_iter()
+                .filter(|e| e.driver == "signed off")
+                .collect()
         };
 
         let mut plan = model_with_resps(&[("r1", "exists")]);
         let cid = open_change(&mut plan, "the rationale that outlives the change", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r1")],
+            &cid,
+        );
 
         // A host's agent signs for the developer.
-        sign_off_for(&mut plan, &cid, 200, Some("claude-session-7"), Some("jesseh")).unwrap();
+        sign_off_for(
+            &mut plan,
+            &cid,
+            200,
+            Some("claude-session-7"),
+            Some("jesseh"),
+        )
+        .unwrap();
         record_signed_off(&r, &plan.changes[0]);
         let log = signed_off(&r);
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].by, "claude-session-7", "the signer");
-        assert_eq!(log[0].on_behalf_of.as_deref(), Some("jesseh"), "the person it was for");
+        assert_eq!(
+            log[0].on_behalf_of.as_deref(),
+            Some("jesseh"),
+            "the person it was for"
+        );
         assert_eq!(log[0].change_id.as_deref(), Some(cid.as_str()));
-        assert_eq!(log[0].at, 200, "stamped when the signature was, not when it was logged");
-        assert_eq!(log[0].rows[0].text, "the rationale that outlives the change");
+        assert_eq!(
+            log[0].at, 200,
+            "stamped when the signature was, not when it was logged"
+        );
+        assert_eq!(
+            log[0].rows[0].text,
+            "the rationale that outlives the change"
+        );
 
         // A direct sign-off is nobody's proxy, and says so by saying nothing.
         let mut direct = model_with_resps(&[("r1", "exists")]);
         let dir2 = tempdir().unwrap();
         let r2 = ModelRef::ProjectLocal(dir2.path().to_path_buf());
         let cid2 = open_change(&mut direct, "signed by the developer themselves", 100);
-        tag(&mut direct, &[element_key(ElementKind::Responsibility, None, "r1")], &cid2);
+        tag(
+            &mut direct,
+            &[element_key(ElementKind::Responsibility, None, "r1")],
+            &cid2,
+        );
         sign_off_as(&mut direct, &cid2, 200, Some("jesseh")).unwrap();
         record_signed_off(&r2, &direct.changes[0]);
         let log = signed_off(&r2);
         assert_eq!(log[0].by, "jesseh");
-        assert!(log[0].on_behalf_of.is_none(), "not a proxy, so there is nobody to name");
+        assert!(
+            log[0].on_behalf_of.is_none(),
+            "not a proxy, so there is nobody to name"
+        );
         let raw = std::fs::read_to_string(r2.history_path()).unwrap();
-        assert!(!raw.contains("onBehalfOf"), "a direct sign-off writes no key at all: {raw}");
+        assert!(
+            !raw.contains("onBehalfOf"),
+            "a direct sign-off writes no key at all: {raw}"
+        );
 
         // A change nobody signed records nothing — there is no decision yet.
         let dir3 = tempdir().unwrap();
@@ -976,13 +1064,11 @@ mod tests {
         assert!(signed_off(&r3).is_empty());
 
         // An event written before the field existed still loads.
-        let legacy: crate::history::HistoryEvent = serde_json::from_str(
-            r#"{"at":1,"driver":"signed off","kind":"change","nodeId":""}"#,
-        )
-        .unwrap();
+        let legacy: crate::history::HistoryEvent =
+            serde_json::from_str(r#"{"at":1,"driver":"signed off","kind":"change","nodeId":""}"#)
+                .unwrap();
         assert!(legacy.on_behalf_of.is_none());
     }
-
 
     /// resp-pt49rq — the staleness names the hand that caused it. A signer
     /// told only "your approval is out of date" has to go looking; told "sam's
@@ -995,21 +1081,38 @@ mod tests {
     fn resp_pt49rq_a_staled_sign_off_names_the_write_that_staled_it() {
         let mut plan = model_with_resps(&[("r1", "the sentence jesseh approved")]);
         let cid = open_change(&mut plan, "the change", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r1")],
+            &cid,
+        );
         sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
         plan.nodes[0].responsibilities[0].statement = "a sentence they never read".into();
 
         restamp_signoffs_as(&mut plan, 300, Some("sam"));
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert!(snap.is_stale());
-        assert_eq!(snap.staled_by.as_deref(), Some("sam"), "the hand that moved the plan");
-        assert_eq!(snap.by.as_deref(), Some("jesseh"), "still jesseh's approval, not sam's");
+        assert_eq!(
+            snap.staled_by.as_deref(),
+            Some("sam"),
+            "the hand that moved the plan"
+        );
+        assert_eq!(
+            snap.by.as_deref(),
+            Some("jesseh"),
+            "still jesseh's approval, not sam's"
+        );
 
         // The last hand to move it is the one named: a signer chasing this
         // wants whoever wrote most recently, not whoever wrote first.
         restamp_signoffs_as(&mut plan, 400, Some("bea"));
         assert_eq!(
-            plan.changes[0].signed_off.as_ref().unwrap().staled_by.as_deref(),
+            plan.changes[0]
+                .signed_off
+                .as_ref()
+                .unwrap()
+                .staled_by
+                .as_deref(),
             Some("bea")
         );
 
@@ -1038,7 +1141,11 @@ mod tests {
         let signed_plan = || {
             let mut plan = model_with_resps(&[("r1", approved)]);
             let cid = open_change(&mut plan, "the change", 100);
-            tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+            tag(
+                &mut plan,
+                &[element_key(ElementKind::Responsibility, None, "r1")],
+                &cid,
+            );
             sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
             (plan, cid)
         };
@@ -1068,9 +1175,20 @@ mod tests {
         assert!(out.restamped.is_empty());
         let snap = theirs.changes[0].signed_off.as_ref().unwrap();
         assert!(snap.is_stale(), "the signature is flagged for a re-request");
-        assert_eq!(snap.staled_by.as_deref(), Some("sam"), "and says whose write did it");
-        assert_eq!(snap.at, 200, "and not re-dated: jesseh signed then, not now");
-        assert_eq!(snap.by.as_deref(), Some("jesseh"), "nor re-attributed to the writer");
+        assert_eq!(
+            snap.staled_by.as_deref(),
+            Some("sam"),
+            "and says whose write did it"
+        );
+        assert_eq!(
+            snap.at, 200,
+            "and not re-dated: jesseh signed then, not now"
+        );
+        assert_eq!(
+            snap.by.as_deref(),
+            Some("jesseh"),
+            "nor re-attributed to the writer"
+        );
         assert_eq!(
             snap.entries.values().next().unwrap().statement.as_deref(),
             Some(approved),
@@ -1091,14 +1209,24 @@ mod tests {
         let (mut unsigned, ucid) = {
             let mut plan = model_with_resps(&[("r1", approved)]);
             let cid = open_change(&mut plan, "nobody signed by name", 100);
-            tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+            tag(
+                &mut plan,
+                &[element_key(ElementKind::Responsibility, None, "r1")],
+                &cid,
+            );
             sign_off(&mut plan, &cid, 200).unwrap();
             (plan, cid)
         };
-        assert_eq!(restamp_signoffs_as(&mut unsigned, 300, Some("sam")).restamped, vec![ucid]);
+        assert_eq!(
+            restamp_signoffs_as(&mut unsigned, 300, Some("sam")).restamped,
+            vec![ucid]
+        );
         assert!(!unsigned.changes[0].signed_off.as_ref().unwrap().is_stale());
         restamp_signoffs_as(&mut theirs, 500, Some("sam"));
-        assert!(theirs.changes[0].signed_off.as_ref().unwrap().is_stale(), "staled again");
+        assert!(
+            theirs.changes[0].signed_off.as_ref().unwrap().is_stale(),
+            "staled again"
+        );
         restamp_signoffs_as(&mut theirs, 600, None);
         assert!(
             theirs.changes[0].signed_off.as_ref().unwrap().is_stale(),
@@ -1122,13 +1250,32 @@ mod tests {
     fn resp_k4yw29_a_proxy_sign_off_records_the_signer_and_the_person_it_is_for() {
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new")]);
         let cid = open_change(&mut plan, "the change", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &cid);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &cid,
+        );
 
         // The host's agent signs for the developer.
-        sign_off_for(&mut plan, &cid, 200, Some("claude-session-7"), Some("jesseh")).unwrap();
+        sign_off_for(
+            &mut plan,
+            &cid,
+            200,
+            Some("claude-session-7"),
+            Some("jesseh"),
+        )
+        .unwrap();
         let snap = plan.changes[0].signed_off.clone().unwrap();
-        assert_eq!(snap.by.as_deref(), Some("claude-session-7"), "the SIGNER is the actor");
-        assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"), "the person it is for");
+        assert_eq!(
+            snap.by.as_deref(),
+            Some("claude-session-7"),
+            "the SIGNER is the actor"
+        );
+        assert_eq!(
+            snap.on_behalf_of.as_deref(),
+            Some("jesseh"),
+            "the person it is for"
+        );
         assert_eq!(snap.entries.len(), 1, "it is still a real snapshot");
 
         // A canvas save re-stamps unattributed: both halves survive.
@@ -1136,20 +1283,32 @@ mod tests {
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert_eq!(snap.at, 300);
         assert_eq!(snap.by.as_deref(), Some("claude-session-7"));
-        assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"), "a re-stamp is not a disavowal");
+        assert_eq!(
+            snap.on_behalf_of.as_deref(),
+            Some("jesseh"),
+            "a re-stamp is not a disavowal"
+        );
 
         // A named signer owns the whole attribution: signing directly over a
         // proxy signature clears the person, it does not inherit them.
         sign_off_for(&mut plan, &cid, 400, Some("jesseh"), None).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert_eq!(snap.by.as_deref(), Some("jesseh"));
-        assert!(snap.on_behalf_of.is_none(), "a direct sign-off is nobody's proxy");
+        assert!(
+            snap.on_behalf_of.is_none(),
+            "a direct sign-off is nobody's proxy"
+        );
 
         // The plain call is a direct sign-off.
         let mut direct = model_with_resps(&[("r1", "exists")]);
         let cid = open_change(&mut direct, "direct", 100);
         sign_off_as(&mut direct, &cid, 200, Some("jesseh")).unwrap();
-        assert!(direct.changes[0].signed_off.as_ref().unwrap().on_behalf_of.is_none());
+        assert!(direct.changes[0]
+            .signed_off
+            .as_ref()
+            .unwrap()
+            .on_behalf_of
+            .is_none());
 
         // Upstream's shape (no `onBehalfOf`) still loads.
         let legacy: SignOff = serde_json::from_str(r#"{"at":1,"by":"jesseh"}"#).unwrap();
@@ -1182,14 +1341,26 @@ mod tests {
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new A"), ("r3", "new B")]);
         let a = open_change(&mut plan, "track vagrant properties too", 100);
         let b = open_change(&mut plan, "second workstream", 200);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &a);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r3")], &b);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &a,
+        );
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r3")],
+            &b,
+        );
         write_planned_at(&r, &plan).unwrap();
 
         commit_element(&r, ElementKind::Responsibility, None, "r2").unwrap();
 
         let planned = read_planned_at(&r).unwrap();
-        assert_eq!(planned.changes.len(), 1, "the emptied change left the registry");
+        assert_eq!(
+            planned.changes.len(),
+            1,
+            "the emptied change left the registry"
+        );
         assert_eq!(planned.changes[0].id, b);
         assert_eq!(
             planned.change_map.keys().collect::<Vec<_>>(),
@@ -1198,8 +1369,10 @@ mod tests {
         let committed = read_model_at(&r).unwrap();
         assert!(committed.changes.is_empty() && committed.change_map.is_empty());
 
-        let closes: Vec<_> =
-            read_history(&r).into_iter().filter(|e| e.kind == EventKind::Change).collect();
+        let closes: Vec<_> = read_history(&r)
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Change)
+            .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(a.as_str()));
         assert_eq!(closes[0].driver, "folded");
@@ -1217,7 +1390,11 @@ mod tests {
 
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new A")]);
         let tagged = open_change(&mut plan, "doomed", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &tagged);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &tagged,
+        );
         let fresh = open_change(&mut plan, "not yet written", 150);
         write_planned_at(&r, &plan).unwrap();
 
@@ -1230,10 +1407,15 @@ mod tests {
 
         let planned = read_planned_at(&r).unwrap();
         assert_eq!(planned.changes.len(), 1);
-        assert_eq!(planned.changes[0].id, fresh, "the never-tagged change is not GC bait");
+        assert_eq!(
+            planned.changes[0].id, fresh,
+            "the never-tagged change is not GC bait"
+        );
         assert!(planned.change_map.is_empty());
-        let closes: Vec<_> =
-            read_history(&r).into_iter().filter(|e| e.kind == EventKind::Change).collect();
+        let closes: Vec<_> = read_history(&r)
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Change)
+            .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(tagged.as_str()));
         assert_eq!(closes[0].driver, "abandoned");
@@ -1277,7 +1459,11 @@ mod tests {
             ],
             &a,
         );
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r3")], &b);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r3")],
+            &b,
+        );
         write_planned_at(&r, &plan).unwrap();
 
         commit_element(&r, ElementKind::Node, None, "n2").unwrap();
@@ -1308,7 +1494,11 @@ mod tests {
 
         let mut built = model_with_resps(&[("r1", "exists"), ("r2", "built")]);
         let id = open_change(&mut built, "the build task", 100);
-        tag(&mut built, &[element_key(ElementKind::Responsibility, None, "r2")], &id);
+        tag(
+            &mut built,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &id,
+        );
 
         fold_built_model(&r, &built).unwrap();
 
@@ -1316,8 +1506,10 @@ mod tests {
         assert!(committed.changes.is_empty() && committed.change_map.is_empty());
         let planned = read_planned_at(&r).unwrap();
         assert!(planned.changes.is_empty() && planned.change_map.is_empty());
-        let closes: Vec<_> =
-            read_history(&r).into_iter().filter(|e| e.kind == EventKind::Change).collect();
+        let closes: Vec<_> = read_history(&r)
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Change)
+            .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(id.as_str()));
     }
@@ -1333,21 +1525,35 @@ mod tests {
 
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new A")]);
         let tagged = open_change(&mut plan, "real work", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &tagged);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &tagged,
+        );
         let stranded = open_change(&mut plan, "opened then orphaned", 200);
         write_planned_at(&r, &plan).unwrap();
 
-        assert!(close_change(&r, &tagged).unwrap_err().contains("1 tagged entry"));
-        assert!(close_change(&r, "chg-99").unwrap_err().contains("no open change"));
+        assert!(close_change(&r, &tagged)
+            .unwrap_err()
+            .contains("1 tagged entry"));
+        assert!(close_change(&r, "chg-99")
+            .unwrap_err()
+            .contains("no open change"));
 
         let meta = close_change(&r, &stranded).unwrap();
         assert_eq!(meta.rationale, "opened then orphaned");
         let planned = read_planned_at(&r).unwrap();
-        assert_eq!(planned.changes.len(), 1, "only the tagged change remains open");
+        assert_eq!(
+            planned.changes.len(),
+            1,
+            "only the tagged change remains open"
+        );
         assert_eq!(planned.changes[0].id, tagged);
 
-        let closes: Vec<_> =
-            read_history(&r).into_iter().filter(|e| e.kind == EventKind::Change).collect();
+        let closes: Vec<_> = read_history(&r)
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Change)
+            .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(stranded.as_str()));
         assert_eq!(closes[0].driver, "abandoned");
@@ -1400,11 +1606,14 @@ mod tests {
         let keys = vec!["resp:r1".to_string(), "resp:r2".to_string()];
         assert!(tag(&mut m, &keys, "chg-1").is_empty());
         // Same change re-tagging is not a conflict.
-        assert!(tag(&mut m, &keys[..1].to_vec(), "chg-1").is_empty());
+        assert!(tag(&mut m, &keys[..1], "chg-1").is_empty());
         let conflicts = tag(&mut m, &keys, "chg-2");
         assert_eq!(
             conflicts,
-            vec![("resp:r1".into(), "chg-1".into()), ("resp:r2".into(), "chg-1".into())]
+            vec![
+                ("resp:r1".into(), "chg-1".into()),
+                ("resp:r2".into(), "chg-1".into())
+            ]
         );
         assert_eq!(m.change_map["resp:r1"], "chg-2");
     }
@@ -1429,11 +1638,19 @@ mod tests {
 
         let out = retag(&committed, &mut plan, &["n1".into()], Some(&right)).unwrap();
 
-        assert_eq!(out.moved.len(), 2, "both claims under the node moved: {:?}", out.moved);
+        assert_eq!(
+            out.moved.len(),
+            2,
+            "both claims under the node moved: {:?}",
+            out.moved
+        );
         assert!(out.unmatched.is_empty());
         assert_eq!(plan.change_map["resp:r2"], right);
         assert_eq!(plan.change_map["resp:r3"], right);
-        assert!(out.moved.iter().all(|(_, from)| from.as_deref() == Some(wrong.as_str())));
+        assert!(out
+            .moved
+            .iter()
+            .all(|(_, from)| from.as_deref() == Some(wrong.as_str())));
     }
 
     /// The other three target forms: one element by its own id, a whole change
@@ -1445,7 +1662,11 @@ mod tests {
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new A"), ("r3", "new B")]);
         let a = open_change(&mut plan, "change A", 100);
         let b = open_change(&mut plan, "change B", 200);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &a);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &a,
+        );
         // r3 stays unfiled.
 
         // One element by id, into B.
@@ -1453,14 +1674,18 @@ mod tests {
         assert_eq!(out.moved, vec![("resp:r3".to_string(), None)]);
 
         // A whole change: everything filed under A joins B.
-        let out = retag(&committed, &mut plan, &[a.clone()], Some(&b)).unwrap();
+        let out = retag(&committed, &mut plan, std::slice::from_ref(&a), Some(&b)).unwrap();
         assert_eq!(out.moved, vec![("resp:r2".to_string(), Some(a.clone()))]);
         assert_eq!(plan.change_map["resp:r2"], b);
 
         // Detach everything under B back to unfiled.
-        let out = retag(&committed, &mut plan, &[b.clone()], None).unwrap();
+        let out = retag(&committed, &mut plan, std::slice::from_ref(&b), None).unwrap();
         assert_eq!(out.moved.len(), 2);
-        assert!(plan.change_map.is_empty(), "detached keys leave the map: {:?}", plan.change_map);
+        assert!(
+            plan.change_map.is_empty(),
+            "detached keys leave the map: {:?}",
+            plan.change_map
+        );
 
         // And now "unfiled" is what names them.
         let out = retag(&committed, &mut plan, &["unfiled".into()], Some(&a)).unwrap();
@@ -1475,7 +1700,11 @@ mod tests {
         let committed = model_with_resps(&[("r1", "exists")]);
         let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "new A")]);
         let a = open_change(&mut plan, "change A", 100);
-        tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r2")], &a);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &a,
+        );
 
         // r1 is committed and unchanged — it carries no pending entry.
         let out = retag(&committed, &mut plan, &["r1".into(), "r2".into()], Some(&a)).unwrap();
@@ -1493,28 +1722,39 @@ mod tests {
     fn sign_off_classifies_later_edits_against_the_snapshot() {
         let mut plan = model_with_resps(&[("r1", "does one"), ("r2", "does two")]);
         let cid = open_change(&mut plan, "two claims", 1);
-        tag(&mut plan, &["resp:r1".to_string(), "resp:r2".to_string()], &cid);
+        tag(
+            &mut plan,
+            &["resp:r1".to_string(), "resp:r2".to_string()],
+            &cid,
+        );
         assert_eq!(sign_off(&mut plan, &cid, 2).unwrap(), 2);
         let meta = plan.changes[0].clone();
         assert_eq!(meta.signed_off.as_ref().unwrap().at, 2);
         assert_eq!(
-            meta.signed_off.as_ref().unwrap().entries["resp:r1"].statement.as_deref(),
+            meta.signed_off.as_ref().unwrap().entries["resp:r1"]
+                .statement
+                .as_deref(),
             Some("does one")
         );
-        assert!(classify_against_signoff(&plan, &meta).is_empty(), "nothing moved yet");
+        assert!(
+            classify_against_signoff(&plan, &meta).is_empty(),
+            "nothing moved yet"
+        );
 
         // Reword r1, add r3, drop r2.
         plan.nodes[0].responsibilities[0].statement = "does one differently".into();
         plan.nodes[0].responsibilities.retain(|r| r.id != "r2");
         plan.change_map.remove("resp:r2");
-        plan.nodes[0]
-            .responsibilities
-            .push(serde_json::from_value(serde_json::json!({ "id": "r3", "statement": "does three" })).unwrap());
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(serde_json::json!({ "id": "r3", "statement": "does three" }))
+                .unwrap(),
+        );
         tag(&mut plan, &["resp:r3".to_string()], &cid);
 
         let mut out = classify_against_signoff(&plan, &meta);
         out.sort_by(|a, b| a.0.cmp(&b.0));
-        let kinds: Vec<(String, Classification)> = out.iter().map(|(k, c, _)| (k.clone(), *c)).collect();
+        let kinds: Vec<(String, Classification)> =
+            out.iter().map(|(k, c, _)| (k.clone(), *c)).collect();
         assert_eq!(
             kinds,
             vec![
@@ -1524,9 +1764,18 @@ mod tests {
             ]
         );
         // The snapshot travels with the amendment so a reject can restore it.
-        assert_eq!(out[0].2.as_ref().unwrap().statement.as_deref(), Some("does one"));
-        assert_eq!(classify_key(&plan, "resp:r1").unwrap().1, Classification::Amended);
-        assert_eq!(classify_key(&plan, "resp:r3").unwrap().1, Classification::Added);
+        assert_eq!(
+            out[0].2.as_ref().unwrap().statement.as_deref(),
+            Some("does one")
+        );
+        assert_eq!(
+            classify_key(&plan, "resp:r1").unwrap().1,
+            Classification::Amended
+        );
+        assert_eq!(
+            classify_key(&plan, "resp:r3").unwrap().1,
+            Classification::Added
+        );
         assert!(classify_key(&plan, "resp:nope").is_none());
     }
 
@@ -1536,13 +1785,22 @@ mod tests {
     #[test]
     fn entry_hash_ignores_cosmetics_but_sees_a_move() {
         let mut plan = model_with_resps(&[("r1", "does one")]);
-        plan.nodes.push(serde_json::from_value(serde_json::json!({ "id": "n2", "kind": "component", "name": "D" })).unwrap());
+        plan.nodes.push(
+            serde_json::from_value(
+                serde_json::json!({ "id": "n2", "kind": "component", "name": "D" }),
+            )
+            .unwrap(),
+        );
         let before = entry_hash(&plan, "resp:r1").unwrap();
         plan.nodes[0].responsibilities[0].concern = Some("auth".into());
         plan.nodes[0].responsibilities[0].directives = vec!["must log".into()];
         plan.nodes[0].responsibilities[0].last_touched_at = Some(99);
         plan.nodes[0].icon = Some("Box".into());
-        assert_eq!(entry_hash(&plan, "resp:r1").unwrap().hash, before.hash, "cosmetic edits are not content");
+        assert_eq!(
+            entry_hash(&plan, "resp:r1").unwrap().hash,
+            before.hash,
+            "cosmetic edits are not content"
+        );
 
         let r = plan.nodes[0].responsibilities.remove(0);
         plan.nodes[1].responsibilities.push(r);
@@ -1564,13 +1822,36 @@ mod tests {
         tag(&mut plan, &["resp:r2".to_string()], &unsigned);
         sign_off(&mut plan, &signed, 2).unwrap();
         plan.nodes[0].responsibilities[0].statement = "does one, the dev's way".into();
-        let meta = plan.changes.iter().find(|c| c.id == signed).cloned().unwrap();
-        assert_eq!(classify_against_signoff(&plan, &meta).len(), 1, "diverges before the re-stamp");
+        let meta = plan
+            .changes
+            .iter()
+            .find(|c| c.id == signed)
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            classify_against_signoff(&plan, &meta).len(),
+            1,
+            "diverges before the re-stamp"
+        );
 
         assert_eq!(restamp_signoffs(&mut plan, 3), 1);
-        let meta = plan.changes.iter().find(|c| c.id == signed).cloned().unwrap();
-        assert!(classify_against_signoff(&plan, &meta).is_empty(), "the dev's edit is intent");
+        let meta = plan
+            .changes
+            .iter()
+            .find(|c| c.id == signed)
+            .cloned()
+            .unwrap();
+        assert!(
+            classify_against_signoff(&plan, &meta).is_empty(),
+            "the dev's edit is intent"
+        );
         assert_eq!(meta.signed_off.as_ref().unwrap().at, 3);
-        assert!(plan.changes.iter().find(|c| c.id == unsigned).unwrap().signed_off.is_none());
+        assert!(plan
+            .changes
+            .iter()
+            .find(|c| c.id == unsigned)
+            .unwrap()
+            .signed_off
+            .is_none());
     }
 }
