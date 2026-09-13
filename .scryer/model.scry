@@ -9791,6 +9791,12 @@
           "statement": "**Carry** a project-level policy on whether a fold requires a countersignature by a team member other than the author, defaulting to off so a solo user and upstream are unaffected.",
           "concern": "oversight",
           "lastTouchedAt": 1789209137
+        },
+        {
+          "id": "resp-gc5m1s",
+          "statement": "**When** a plan write names an actor other than the one who signed a change off, **mark** that sign-off stale rather than re-stamping it, so an approval never silently covers text its signer has not seen; **while** the write's actor is the signer, or either is unnamed, **re-stamp** as before.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789317763
         }
       ]
     },
@@ -22246,6 +22252,16 @@
         "symbol": "DiagramCardMarks"
       }
     ],
+    "resp-gc5m1s": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "restamp_signoffs_as"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "write_planned"
+      }
+    ],
     "resp-h36w17": [
       {
         "pattern": "crates/scryer-app/src/router/http.rs",
@@ -24438,6 +24454,16 @@
       {
         "pattern": "tests/annotations.test.ts",
         "symbol": "gives a node ONE highlight — the loudest tone wins"
+      }
+    ],
+    "resp-gc5m1s": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "resp_gc5m1s_a_plan_write_by_someone_other_than_the_signer_stales_the_sign_off"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "resp_gc5m1s_a_save_by_someone_other_than_the_signer_stales_the_sign_off"
       }
     ],
     "resp-h36w17": [

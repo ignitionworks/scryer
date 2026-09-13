@@ -120,6 +120,18 @@ pub struct SignOff {
     /// existed, so upstream's models still load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_behalf_of: Option<String>,
+    /// The plan moved on under SOMEONE ELSE'S hand since this signature: the
+    /// snapshot below is still the text [`SignOff::by`] approved, but it is no
+    /// longer the text the plan holds, and the signer has not seen the
+    /// difference ([`restamp_signoffs_as`]). A surface shows it so a
+    /// re-request can follow; nothing gates on it.
+    ///
+    /// FALSE IS THE ABSENCE OF THE FIELD, and only a write that names an actor
+    /// other than the signer can ever set it. A solo user has one hand, and an
+    /// unattributed write — the desktop's canvas save — is the behaviour that
+    /// shipped before this existed, so neither ever writes the key.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stale: bool,
     /// Element key ([`element_key`]) → the entry's signed content.
     #[serde(default)]
     pub entries: BTreeMap<String, SignedEntry>,
@@ -344,7 +356,15 @@ pub fn sign_off_for(
             None => (None, None),
         },
     };
-    meta.signed_off = Some(SignOff { at: now, by, on_behalf_of, entries });
+    // A NAMED signature is a fresh approval and clears staleness: whoever is
+    // signing has just looked. An unattributed re-stamp carries it, for the
+    // same reason it carries the signer — an anonymous save must not be able
+    // to launder away the fact that someone else moved the plan.
+    let stale = match (named(actor), meta.signed_off.as_ref()) {
+        (None, Some(prev)) => prev.stale,
+        _ => false,
+    };
+    meta.signed_off = Some(SignOff { at: now, by, on_behalf_of, stale, entries });
     Ok(n)
 }
 
@@ -363,6 +383,61 @@ pub fn restamp_signoffs(model: &mut ScryModel, now: u64) -> usize {
         let _ = sign_off(model, cid, now);
     }
     signed.len()
+}
+
+/// What [`restamp_signoffs_as`] did, change by change.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Restamp {
+    /// Changes re-stamped against the plan as written — the writer's own
+    /// approvals, which their edit is by definition.
+    pub restamped: Vec<String>,
+    /// Changes whose signature the write made [`SignOff::stale`] instead.
+    pub staled: Vec<String>,
+}
+
+/// [`restamp_signoffs`], asking WHOSE hand wrote the plan.
+///
+/// The re-stamp exists because a developer's own edit is intent: the snapshot
+/// follows it, so their next fold sees no amendment. That reasoning holds for
+/// exactly one person — the one who signed. A plan a COLLEAGUE rewrote is a
+/// plan the signer has not seen, and re-stamping it would silently extend
+/// their approval over someone else's sentences. So a write by any other named
+/// actor leaves the snapshot where it is and marks the signature stale, which
+/// a surface shows and a re-request answers.
+///
+/// UNCHANGED FOR ONE PAIR OF HANDS. It takes two named, different identities
+/// to stale anything: a write with no actor (the desktop canvas, and every
+/// plain `scryer-core` caller) re-stamps as it always has, and so does a
+/// signature nobody signed by name. A solo user never meets this.
+pub fn restamp_signoffs_as(model: &mut ScryModel, now: u64, actor: Option<&str>) -> Restamp {
+    fn named(s: Option<&str>) -> Option<&str> {
+        s.map(str::trim).filter(|a| !a.is_empty())
+    }
+    let writer = named(actor).map(str::to_string);
+    let signed: Vec<(String, Option<String>)> = model
+        .changes
+        .iter()
+        .filter_map(|c| c.signed_off.as_ref().map(|s| (c.id.clone(), s.by.clone())))
+        .collect();
+    let mut out = Restamp::default();
+    for (cid, signer) in signed {
+        let someone_else = matches!(
+            (writer.as_deref(), named(signer.as_deref())),
+            (Some(w), Some(s)) if w != s
+        );
+        if someone_else {
+            if let Some(snap) =
+                model.changes.iter_mut().find(|c| c.id == cid).and_then(|c| c.signed_off.as_mut())
+            {
+                snap.stale = true;
+            }
+            out.staled.push(cid);
+        } else {
+            let _ = sign_off_as(model, &cid, now, writer.as_deref());
+            out.restamped.push(cid);
+        }
+    }
+    out
 }
 
 /// Every entry of a signed-off change that does NOT read as untouched intent:
@@ -808,6 +883,94 @@ mod tests {
         let legacy: ScryModel =
             serde_json::from_str(r#"{"version":"1","nodes":[],"links":[]}"#).unwrap();
         assert!(!requires_countersigned_folds(&legacy));
+    }
+
+
+    /// resp-gc5m1s — a plan write re-stamps the signature it belongs to and
+    /// stales the ones it does not. The signer's own edit is intent, exactly
+    /// as before; a colleague's edit is a plan the signer has not seen, so the
+    /// snapshot stays where their approval left it and the signature is
+    /// flagged for a re-request. It takes TWO named, different identities:
+    /// unattributed writes, and signatures nobody signed by name, re-stamp as
+    /// they always have, which is every solo user and the desktop canvas.
+    #[test]
+    fn resp_gc5m1s_a_plan_write_by_someone_other_than_the_signer_stales_the_sign_off() {
+        let approved = "the sentence jesseh approved";
+        let signed_plan = || {
+            let mut plan = model_with_resps(&[("r1", approved)]);
+            let cid = open_change(&mut plan, "the change", 100);
+            tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+            sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
+            (plan, cid)
+        };
+        let reworded = |plan: &mut ScryModel| {
+            plan.nodes[0].responsibilities[0].statement = "a sentence they never read".into();
+        };
+
+        // The signer's own save: re-stamped, as it always was.
+        let (mut mine, cid) = signed_plan();
+        reworded(&mut mine);
+        let out = restamp_signoffs_as(&mut mine, 300, Some("jesseh"));
+        assert_eq!(out.restamped, vec![cid.clone()]);
+        assert!(out.staled.is_empty());
+        let snap = mine.changes[0].signed_off.as_ref().unwrap();
+        assert_eq!(snap.at, 300, "the snapshot followed the edit");
+        assert!(!snap.stale, "their own edit is intent, not a surprise");
+        assert!(
+            classify_against_signoff(&mine, &mine.changes[0]).is_empty(),
+            "so nothing reads as an amendment at the next fold"
+        );
+
+        // A colleague's save: the approval stays where it was, and says so.
+        let (mut theirs, cid) = signed_plan();
+        reworded(&mut theirs);
+        let out = restamp_signoffs_as(&mut theirs, 300, Some("sam"));
+        assert_eq!(out.staled, vec![cid.clone()]);
+        assert!(out.restamped.is_empty());
+        let snap = theirs.changes[0].signed_off.as_ref().unwrap();
+        assert!(snap.stale, "the signature is flagged for a re-request");
+        assert_eq!(snap.at, 200, "and not re-dated: jesseh signed then, not now");
+        assert_eq!(snap.by.as_deref(), Some("jesseh"), "nor re-attributed to the writer");
+        assert_eq!(
+            snap.entries.values().next().unwrap().statement.as_deref(),
+            Some(approved),
+            "the snapshot still holds what they actually approved"
+        );
+
+        // jesseh looks and signs again: a named signature is a fresh approval.
+        sign_off_as(&mut theirs, &cid, 400, Some("jesseh")).unwrap();
+        assert!(!theirs.changes[0].signed_off.as_ref().unwrap().stale);
+
+        // Neither hand named: today's behaviour, untouched. An anonymous save
+        // does not stale, and does not launder an existing staleness either.
+        let (mut solo, _) = signed_plan();
+        reworded(&mut solo);
+        let out = restamp_signoffs_as(&mut solo, 300, None);
+        assert_eq!(out.restamped.len(), 1);
+        assert!(!solo.changes[0].signed_off.as_ref().unwrap().stale);
+        let (mut unsigned, ucid) = {
+            let mut plan = model_with_resps(&[("r1", approved)]);
+            let cid = open_change(&mut plan, "nobody signed by name", 100);
+            tag(&mut plan, &[element_key(ElementKind::Responsibility, None, "r1")], &cid);
+            sign_off(&mut plan, &cid, 200).unwrap();
+            (plan, cid)
+        };
+        assert_eq!(restamp_signoffs_as(&mut unsigned, 300, Some("sam")).restamped, vec![ucid]);
+        assert!(!unsigned.changes[0].signed_off.as_ref().unwrap().stale);
+        restamp_signoffs_as(&mut theirs, 500, Some("sam"));
+        assert!(theirs.changes[0].signed_off.as_ref().unwrap().stale, "staled again");
+        restamp_signoffs_as(&mut theirs, 600, None);
+        assert!(
+            theirs.changes[0].signed_off.as_ref().unwrap().stale,
+            "an unattributed save cannot clear what a named one set"
+        );
+
+        // Off is the ABSENCE of the key: a plan nobody staled is byte-identical
+        // to one written before the field existed, and upstream's still loads.
+        let json = serde_json::to_string(&solo).unwrap();
+        assert!(!json.contains("stale"), "{json}");
+        let legacy: SignOff = serde_json::from_str(r#"{"at":1,"entries":{}}"#).unwrap();
+        assert!(!legacy.stale);
     }
 
     /// resp-k4yw29 — a sign-off one actor makes FOR another person records

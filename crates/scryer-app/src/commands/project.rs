@@ -135,22 +135,15 @@ pub fn write_planned(
     // empty ledger and wipe what the caller is holding.
     scryer_core::carry_change_state_at(&r, &mut plan);
 
-    // A canvas save is the DEVELOPER editing the plan — intent by definition.
-    // Re-stamp every signed-off change's snapshot, against the plan AS MERGED,
-    // so their edits never read as the agent's amendments at the next fold,
-    // naming the actor who saved.
-    let signed: Vec<String> = plan
-        .changes
-        .iter()
-        .filter(|c| c.signed_off.is_some())
-        .map(|c| c.id.clone())
-        .collect();
-    if !signed.is_empty() {
-        let now = scryer_core::drift::now_secs();
-        for cid in &signed {
-            let _ = scryer_core::changes::sign_off_as(&mut plan, cid, now, actor);
-        }
-    }
+    // A canvas save is the DEVELOPER editing the plan — intent by definition,
+    // so every signed-off change's snapshot follows it and their own edits
+    // never read as the agent's amendments at the next fold.
+    //
+    // For the developer who SIGNED. A plan someone else rewrote is a plan the
+    // signer has not seen, and re-stamping it would quietly stretch their
+    // approval over sentences they never read; those signatures go stale here
+    // instead, against the plan AS MERGED and naming the actor who saved.
+    scryer_core::changes::restamp_signoffs_as(&mut plan, scryer_core::drift::now_secs(), actor);
 
     let json = serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?;
     scryer_core::write_planned_raw_at(&r, &json)?;
@@ -458,6 +451,76 @@ mod tests {
         close_change(&state, &path, &another, None).unwrap();
         let log = scryer_core::history::read_history(&r);
         assert_eq!(log.last().unwrap().by, "agent");
+    }
+
+
+    /// resp-gc5m1s — the same rule at the seam a team actually writes through:
+    /// a save by the developer who signed follows their approval, a save by
+    /// anyone else leaves it where it was and marks it stale. The snapshot,
+    /// not the claim, is what moves: the reworded text lands either way.
+    #[test]
+    fn resp_gc5m1s_a_save_by_someone_other_than_the_signer_stales_the_sign_off() {
+        let (_dir, state, path) = project();
+        let r = state.model_ref(&path).unwrap();
+
+        let approved = "**When** asked, **answer** the thing jesseh approved";
+        let mut plan = scryer_core::read_planned_at(&r).unwrap();
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(serde_json::json!({ "id": "resp-1", "statement": approved }))
+                .unwrap(),
+        );
+        let cid = scryer_core::changes::open_change(&mut plan, "the change", 100);
+        scryer_core::changes::tag(&mut plan, &["resp:resp-1".to_string()], &cid);
+        scryer_core::write_planned_at(&r, &plan).unwrap();
+        sign_off_change(&state, &path, &cid, Some("jesseh")).unwrap();
+        let signed_at = scryer_core::read_planned_at(&r).unwrap().changes[0]
+            .signed_off
+            .as_ref()
+            .unwrap()
+            .at;
+
+        // A colleague rewords the claim and saves.
+        let reworded = |state: &AppState, path: &str, who: Option<&str>, stmt: &str| {
+            let read = read_planned(state, path).unwrap();
+            let mut plan: scryer_core::ScryModel = serde_json::from_str(&read.data).unwrap();
+            plan.nodes[0].responsibilities[0].statement = stmt.into();
+            let data = serde_json::to_string(&plan).unwrap();
+            write_planned(state, path, &data, Some(&read.revision), who).unwrap();
+        };
+        reworded(&state, &path, Some("sam"), "**When** asked, **answer** something else");
+
+        let plan = scryer_core::read_planned_at(&r).unwrap();
+        let snap = plan.changes[0].signed_off.as_ref().unwrap();
+        assert!(snap.stale, "jesseh has not seen what sam wrote");
+        assert_eq!(snap.at, signed_at, "their signature is not re-dated by someone else's save");
+        assert_eq!(snap.by.as_deref(), Some("jesseh"), "nor re-attributed");
+        assert_eq!(
+            snap.entries["resp:resp-1"].statement.as_deref(),
+            Some(approved),
+            "the snapshot still holds the approved text, so the fold still sees the amendment"
+        );
+
+        // jesseh saves their own edit: intent, as it always was.
+        reworded(&state, &path, Some("jesseh"), "**When** asked, **answer** jesseh's own wording");
+        let plan = scryer_core::read_planned_at(&r).unwrap();
+        let snap = plan.changes[0].signed_off.as_ref().unwrap();
+        assert!(!snap.stale, "the signer's own save is not a surprise to them");
+        assert!(snap.at >= signed_at);
+        assert_eq!(
+            snap.entries["resp:resp-1"].statement.as_deref(),
+            Some("**When** asked, **answer** jesseh's own wording"),
+            "and the snapshot followed it"
+        );
+
+        // The desktop names nobody, and behaves exactly as it did before.
+        reworded(&state, &path, None, "**When** asked, **answer** after a canvas save");
+        let plan = scryer_core::read_planned_at(&r).unwrap();
+        let snap = plan.changes[0].signed_off.as_ref().unwrap();
+        assert!(!snap.stale);
+        assert_eq!(
+            snap.entries["resp:resp-1"].statement.as_deref(),
+            Some("**When** asked, **answer** after a canvas save")
+        );
     }
 
     /// A plan write that changes what the plan CLAIMS leaves its trace: one
