@@ -4486,6 +4486,11 @@
           "id": "resp-z5zzvj",
           "statement": "**When** a change's sign-off names who signed it and, for a proxy signature, the person it was given for, **show** both, so a reader tells \"signed off by X for Y\" from \"signed off by Y\".",
           "lastTouchedAt": 1789318269
+        },
+        {
+          "id": "resp-h4rf4g",
+          "statement": "**While** a change's sign-off is stale, **show** it as needing re-signing beside the signature, naming who moved the plan.",
+          "lastTouchedAt": 1789318676
         }
       ]
     },
@@ -9802,6 +9807,12 @@
           "statement": "**When** a plan write names an actor other than the one who signed a change off, **mark** that sign-off stale rather than re-stamping it, so an approval never silently covers text its signer has not seen; **while** the write's actor is the signer, or either is unnamed, **re-stamp** as before.",
           "concern": "oversight",
           "lastTouchedAt": 1789317763
+        },
+        {
+          "id": "resp-pt49rq",
+          "statement": "**When** a plan write stales a sign-off, **record** the actor whose write did it, so a reader learns who moved the plan under the signer.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789318671
         }
       ]
     },
@@ -22294,6 +22305,16 @@
         "symbol": "wanted_projects"
       }
     ],
+    "resp-h4rf4g": [
+      {
+        "pattern": "src/ledger.ts",
+        "symbol": "staleNote"
+      },
+      {
+        "pattern": "src/special/ChangesPage.tsx",
+        "symbol": "ChangeSection"
+      }
+    ],
     "resp-h9rkbc": [
       {
         "pattern": "crates/scryer-extract/src/test_status.rs",
@@ -22386,6 +22407,16 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "classify_against_signoff"
+      }
+    ],
+    "resp-pt49rq": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "SignOff"
+      },
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "restamp_signoffs_as"
       }
     ],
     "resp-q2kvek": [
@@ -24536,6 +24567,16 @@
         "symbol": "a_client_naming_no_project_is_streamed_nothing"
       }
     ],
+    "resp-h4rf4g": [
+      {
+        "pattern": "tests/signature.test.ts",
+        "symbol": "resp-h4rf4g: a stale signature says it needs re-signing, and who moved the plan"
+      },
+      {
+        "pattern": "tests/signature.test.ts",
+        "symbol": "resp-h4rf4g: the Changes page renders it beside the signature"
+      }
+    ],
     "resp-h9rkbc": [
       {
         "pattern": "crates/scryer-extract/src/test_status.rs",
@@ -24624,6 +24665,16 @@
       {
         "pattern": "crates/scryer-core/src/changes.rs",
         "symbol": "sign_off_classifies_later_edits_against_the_snapshot"
+      }
+    ],
+    "resp-pt49rq": [
+      {
+        "pattern": "crates/scryer-core/src/changes.rs",
+        "symbol": "resp_pt49rq_a_staled_sign_off_names_the_write_that_staled_it"
+      },
+      {
+        "pattern": "crates/scryer-app/src/commands/project.rs",
+        "symbol": "resp_gc5m1s_a_save_by_someone_other_than_the_signer_stales_the_sign_off"
       }
     ],
     "resp-q2kvek": [

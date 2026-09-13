@@ -496,7 +496,8 @@ mod tests {
 
         let plan = scryer_core::read_planned_at(&r).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
-        assert!(snap.stale, "jesseh has not seen what sam wrote");
+        assert!(snap.is_stale(), "jesseh has not seen what sam wrote");
+        assert_eq!(snap.staled_by.as_deref(), Some("sam"), "and the plan says whose save did it");
         assert_eq!(snap.at, signed_at, "their signature is not re-dated by someone else's save");
         assert_eq!(snap.by.as_deref(), Some("jesseh"), "nor re-attributed");
         assert_eq!(
@@ -509,7 +510,7 @@ mod tests {
         reworded(&state, &path, Some("jesseh"), "**When** asked, **answer** jesseh's own wording");
         let plan = scryer_core::read_planned_at(&r).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
-        assert!(!snap.stale, "the signer's own save is not a surprise to them");
+        assert!(!snap.is_stale(), "the signer's own save is not a surprise to them");
         assert!(snap.at >= signed_at);
         assert_eq!(
             snap.entries["resp:resp-1"].statement.as_deref(),
@@ -521,7 +522,7 @@ mod tests {
         reworded(&state, &path, None, "**When** asked, **answer** after a canvas save");
         let plan = scryer_core::read_planned_at(&r).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
-        assert!(!snap.stale);
+        assert!(!snap.is_stale());
         assert_eq!(
             snap.entries["resp:resp-1"].statement.as_deref(),
             Some("**When** asked, **answer** after a canvas save")

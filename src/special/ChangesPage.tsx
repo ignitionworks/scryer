@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 import { useToast } from "../Toast";
-import { Check, CornerDownRight, GitCompare, X } from "lucide-react";
+import { AlertTriangle, Check, CornerDownRight, GitCompare, X } from "lucide-react";
 import type { ChangeRevision } from "../hooks/useModelStorage";
 import type { ScryModel, Node } from "../viewmodel";
 import type { Change, ElementChange, ModelDiff } from "../planDiff";
 import { CHANGE_COLOR, type ChangeKind, collectPlanEntries, type LinkChange, MARK_META, type PlanEntry } from "../changeMarks";
 import { DIFF_ANCHOR, DIFF_TINT, DiffRow } from "../diffkit";
 import { ANCHOR_CALM, StatementText } from "../markup";
-import { entryChanges, signatureLabel, type SignOff } from "../ledger";
+import { entryChanges, signatureLabel, staleNote, type SignOff } from "../ledger";
 import { relativeTime } from "../history";
 import { BTN, BTN_ICON, LINK, WordDiffText } from "../pagekit";
 import { SpecialBody, SpecialHeader, timeLabel } from "./shell";
@@ -616,14 +616,28 @@ function ChangeSection({
             )}
           </span>
         )}
+        {/* A stale signature is not a signature on what the plan now says, so
+            it does not get to wear the approved hue. Amber is the app's
+            "structure moved under you" colour, and that is exactly what
+            happened. Naming the hand turns "go look" into "go ask". */}
+        {signedOff?.staledBy && (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 text-xs text-amber-700 dark:text-amber-400"
+            title={`${staleNote(signedOff)}, so this sign-off no longer covers what the plan says. Re-sign to approve it as it stands.`}
+          >
+            <AlertTriangle className="h-3 w-3" /> Needs re-signing — {staleNote(signedOff)}
+          </span>
+        )}
         {id && onSignOff && (
           <button
             type="button"
             className={BTN}
             title={
-              signedOff
-                ? "Snapshot the plan as it stands now — your own edits since count as intent"
-                : "Snapshot this change's entries so anything the agent rewords or adds afterwards waits for your verdict"
+              signedOff?.staledBy
+                ? `Approve the plan as it stands — ${staleNote(signedOff)}`
+                : signedOff
+                  ? "Snapshot the plan as it stands now — your own edits since count as intent"
+                  : "Snapshot this change's entries so anything the agent rewords or adds afterwards waits for your verdict"
             }
             onClick={onSignOff}
           >

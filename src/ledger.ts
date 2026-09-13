@@ -44,11 +44,19 @@ export interface SignOff {
    *  the agent in `by` and the developer here. Both names or neither: a reader
    *  shown only one cannot tell "X signed for Y" from "Y signed". */
   onBehalfOf?: string;
-  /** The plan moved on under someone else's hand since this signature, so the
-   *  snapshot is no longer what the plan holds and the signer has not seen the
-   *  difference. Only a write by an actor other than the signer sets it. */
-  stale?: boolean;
+  /** WHOSE plan write moved the plan on since this signature, so the snapshot
+   *  is no longer what the plan holds and the signer has not seen the
+   *  difference. The name is the flag — only a write by an actor other than
+   *  the signer sets it, and it never says "stale" without saying by whom. */
+  staledBy?: string;
   entries: Record<string, SignedEntry>;
+}
+
+/** What a stale signature needs said: who moved the plan out from under it.
+ *  `null` when the signature still covers what the plan holds — which is every
+ *  signature in a project only one person writes to. */
+export function staleNote(signedOff: SignOff | undefined): string | null {
+  return signedOff?.staledBy ? `${signedOff.staledBy} has edited the plan since` : null;
 }
 
 /** How a sign-off reads to a person: "jesseh", or "claude-session-7 for

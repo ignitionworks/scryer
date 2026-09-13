@@ -4932,6 +4932,11 @@
           "id": "resp-z5zzvj",
           "statement": "**When** a change's sign-off names who signed it and, for a proxy signature, the person it was given for, **show** both, so a reader tells \"signed off by X for Y\" from \"signed off by Y\".",
           "lastTouchedAt": 1789317216
+        },
+        {
+          "id": "resp-h4rf4g",
+          "statement": "**While** a change's sign-off is stale, **show** it as needing re-signing beside the signature, naming who moved the plan.",
+          "lastTouchedAt": 1789318478
         }
       ]
     },
@@ -10525,6 +10530,12 @@
           "statement": "**When** a plan write names an actor other than the one who signed a change off, **mark** that sign-off stale rather than re-stamping it, so an approval never silently covers text its signer has not seen; **while** the write's actor is the signer, or either is unnamed, **re-stamp** as before.",
           "concern": "oversight",
           "lastTouchedAt": 1789317113
+        },
+        {
+          "id": "resp-pt49rq",
+          "statement": "**When** a plan write stales a sign-off, **record** the actor whose write did it, so a reader learns who moved the plan under the signer.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789318478
         }
       ]
     },
