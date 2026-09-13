@@ -16,6 +16,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayRoot } from "./host";
 import { AlertTriangle, X } from "lucide-react";
 import { BTN, BTN_ICON } from "./pagekit";
 
@@ -57,6 +58,7 @@ function AgentFailureModal({
   failure: AgentFailure;
   onClose: () => void;
 }) {
+  const overlayRoot = useOverlayRoot();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -66,7 +68,7 @@ function AgentFailureModal({
   }, [onClose]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+    <div className="absolute inset-0 z-[1000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[3px]" onClick={onClose} />
       <div className="relative w-[460px] max-w-[90vw] rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
@@ -111,6 +113,6 @@ function AgentFailureModal({
         </div>
       </div>
     </div>,
-    document.body,
+    overlayRoot,
   );
 }

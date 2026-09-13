@@ -13493,6 +13493,11 @@
           "id": "resp-svcshp",
           "statement": "**When** a host supplies the engine service's transport, **speak** the shapes the service answers with for read_planned and write_planned, remembering the revision per project, so the app is unchanged; sending the base revision stays off unless the host turns it on.",
           "lastTouchedAt": 1789183769
+        },
+        {
+          "id": "resp-rw7xhr",
+          "statement": "**While** mounted in a host's pane, **confine** every full-surface overlay to the mount root the bridge provides rather than the window, so a guest never covers its host's chrome.",
+          "lastTouchedAt": 1789318022
         }
       ]
     }
@@ -22410,6 +22415,20 @@
         "symbol": "project_clj_header"
       }
     ],
+    "resp-rw7xhr": [
+      {
+        "pattern": "src/host/overlayRoot.tsx",
+        "symbol": "OverlayRootProvider"
+      },
+      {
+        "pattern": "src/host/overlayRoot.tsx",
+        "symbol": "useOverlayRoot"
+      },
+      {
+        "pattern": "src/SearchPalette.tsx",
+        "symbol": "SearchPalette"
+      }
+    ],
     "resp-s34tcm": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -24596,6 +24615,20 @@
       {
         "pattern": "crates/scryer-extract/src/manifest.rs",
         "symbol": "clojure_source_roots_read_from_declared_manifests"
+      }
+    ],
+    "resp-rw7xhr": [
+      {
+        "pattern": "tests/overlayRoot.test.tsx",
+        "symbol": "resp-rw7xhr: an overlay mounted in a bounded root lands inside it, not on the body"
+      },
+      {
+        "pattern": "tests/overlayRoot.test.tsx",
+        "symbol": "resp-rw7xhr: with no mount root above it, an overlay falls back to the body"
+      },
+      {
+        "pattern": "tests/hostBridge.test.ts",
+        "symbol": "resp-rw7xhr: no full-surface overlay is fixed to the window"
       }
     ],
     "resp-s34tcm": [

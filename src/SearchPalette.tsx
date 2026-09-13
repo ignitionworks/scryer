@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayRoot } from "./host";
 import { FolderOpen, Link2, Search, type LucideProps } from "lucide-react";
 import type { ScryModel, Node, Group } from "./viewmodel";
 import { kindIcon, typeTag } from "./kindIcon";
@@ -131,6 +132,7 @@ export function SearchPalette({
   onSelectGroup: (id: string) => void;
   onClose: () => void;
 }) {
+  const overlayRoot = useOverlayRoot();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -249,7 +251,7 @@ export function SearchPalette({
   const q = query.trim().toLowerCase();
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex justify-center bg-black/30 pt-[12vh]">
+    <div className="absolute inset-0 z-[1000] flex justify-center bg-black/30 pt-[12vh]">
       <div
         ref={containerRef}
         className="flex h-fit max-h-[60vh] w-[480px] max-w-[90vw] flex-col overflow-hidden rounded-lg border border-[var(--border-strong)] bg-[var(--surface-raised)] shadow-2xl"
@@ -330,6 +332,6 @@ export function SearchPalette({
         </ul>
       </div>
     </div>,
-    document.body,
+    overlayRoot,
   );
 }

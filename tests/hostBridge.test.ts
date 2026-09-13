@@ -806,6 +806,42 @@ describe("resp-4cjjcp — laying out to the pane, not the window", () => {
     expect(top).toContain("@container flex h-9 shrink-0 items-center");
   });
 
+  it("resp-rw7xhr: no full-surface overlay is fixed to the window", () => {
+    // `fixed` is measured against the VIEWPORT whatever pane the app was given,
+    // so a modal that wants the whole surface would draw across a host's whole
+    // window — its chrome, its menus, everything beside the pane. The four
+    // full-surface overlays lay out `absolute inset-0` inside the mount root
+    // instead, which standalone IS the window and in a pane is the pane.
+    const offenders = sources().filter((f) => /\bfixed inset-0\b/.test(readFileSync(f, "utf8")));
+    expect(offenders).toEqual([]);
+
+    for (const f of [
+      "SearchPalette.tsx",
+      "SettingsPanel.tsx",
+      "AgentLaunchConfirm.tsx",
+      "AgentFailure.tsx",
+    ]) {
+      const text = read(f);
+      expect(text, f).toContain("absolute inset-0 z-[1000]");
+      // Portalled to the mount root, not to the body — `inset-0` under an
+      // unpositioned body is the viewport again, which is what this undoes.
+      expect(text, f).toContain("useOverlayRoot()");
+      expect(text, f).toContain("    overlayRoot,\n  );");
+    }
+
+    // The root itself: positioned, so it is the containing block those measure
+    // against, and sized by its parent rather than by the window.
+    const mount = read("host/overlayRoot.tsx");
+    expect(mount).toContain('className="relative h-full w-full"');
+
+    // The coordinate-positioned popovers are NOT this: they place themselves
+    // from a `getBoundingClientRect`, which is viewport coordinates, so `fixed`
+    // on the body is what they need and they are left alone.
+    for (const f of ["ContextMenu.tsx", "IconPicker.tsx", "ConfirmPopover.tsx"]) {
+      expect(read(f), f).toContain("document.body");
+    }
+  });
+
   it("resp-4cjjcp: keeps the bar's overlay out of the bar's containment", () => {
     // A size container is a containment context, so it becomes the containing
     // block for a `position: fixed` descendant. The context menu is positioned

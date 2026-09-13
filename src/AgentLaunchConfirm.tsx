@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayRoot } from "./host";
 import { X } from "lucide-react";
 import { AGENT_LABEL, type ResolvedLaunch } from "./SettingsPanel";
 import type { LaunchSettings } from "./hooks/useLaunchSettings";
@@ -78,6 +79,7 @@ export function AgentLaunchConfirm({
   onConfirm: (dontAskAgain: boolean) => void;
   onCancel: () => void;
 }) {
+  const overlayRoot = useOverlayRoot();
   const [dontAsk, setDontAsk] = useState(false);
 
   useEffect(() => {
@@ -89,7 +91,7 @@ export function AgentLaunchConfirm({
   }, [onCancel]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+    <div className="absolute inset-0 z-[1000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[3px]" onClick={onCancel} />
       <div className="relative w-[420px] max-w-[90vw] rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
@@ -161,6 +163,6 @@ export function AgentLaunchConfirm({
         </div>
       </div>
     </div>,
-    document.body,
+    overlayRoot,
   );
 }

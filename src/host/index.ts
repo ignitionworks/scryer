@@ -12,6 +12,7 @@ export { createHostBridge, type WiredHostBridge } from "./bridge";
 export { isStaleRevision, serviceInvoke, type HostInvoke, type ServiceInvokeOptions } from "./commands";
 export { assignRef, HostBridgeProvider, useHostBridge } from "./context";
 export { changeElementId, claimHost, NAV_FLASH_DELAY_MS, resolveNav } from "./navigation";
+export { OverlayRootProvider, useOverlayRoot } from "./overlayRoot";
 export { hostSelection, sameSelection } from "./selection";
 export {
   applyHostTheme,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useOverlayRoot } from "./host";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, X } from "lucide-react";
 import { Input, Select } from "./ui";
@@ -116,6 +117,7 @@ export function SettingsPanel({
   /** Current project, when one is open — enables the per-project session-hooks action. */
   projectPath?: string | null;
 }) {
+  const overlayRoot = useOverlayRoot();
   const [settings, setSettings] = useState<SubagentSettings>(SUBAGENT_DEFAULTS);
   const [detected, setDetected] = useState<Detected>({
     claude: false,
@@ -156,7 +158,7 @@ export function SettingsPanel({
   const resolvedAgent = resolveLaunch(settings, detected).agent;
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+    <div className="absolute inset-0 z-[1000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[3px]" onClick={onClose} />
       <div className="relative w-[440px] max-w-[90vw] rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
@@ -305,7 +307,7 @@ export function SettingsPanel({
         </div>
       </div>
     </div>,
-    document.body,
+    overlayRoot,
   );
 }
 

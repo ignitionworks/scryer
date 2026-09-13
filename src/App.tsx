@@ -69,6 +69,7 @@ import {
 import type { Editor } from "./editor";
 import {
   HostBridgeProvider,
+  OverlayRootProvider,
   useHostBridge,
   useHostBridgeWiring,
   useHostOpener,
@@ -101,13 +102,15 @@ export default function App({
 
   return (
     <ErrorBoundary>
-      <HostBridgeProvider hostBridge={hostBridge}>
-        <ToastProvider>
-          <AgentFailureProvider>
-            <AppBody />
-          </AgentFailureProvider>
-        </ToastProvider>
-      </HostBridgeProvider>
+      <OverlayRootProvider>
+        <HostBridgeProvider hostBridge={hostBridge}>
+          <ToastProvider>
+            <AgentFailureProvider>
+              <AppBody />
+            </AgentFailureProvider>
+          </ToastProvider>
+        </HostBridgeProvider>
+      </OverlayRootProvider>
     </ErrorBoundary>
   );
 }
