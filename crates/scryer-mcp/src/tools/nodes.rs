@@ -4768,8 +4768,8 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let cid = countersign_project(&model_ref, true);
         let author = author_of(&model_ref, &cid);
-        assert_ne!(author, "claude-session-7");
-        sign_as(&model_ref, &cid, "claude-session-7", Some("jesseh"));
+        assert_ne!(author, "agent-session-7");
+        sign_as(&model_ref, &cid, "agent-session-7", Some("jesseh"));
 
         // Recorded as a proxy before the fold ever looks at it.
         let signed = scryer_core::read_planned_at(&model_ref)
@@ -4779,13 +4779,13 @@ mod tests {
             .find(|c| c.id == cid)
             .and_then(|c| c.signed_off.clone())
             .expect("signed");
-        assert_eq!(signed.by.as_deref(), Some("claude-session-7"));
+        assert_eq!(signed.by.as_deref(), Some("agent-session-7"));
         assert_eq!(signed.on_behalf_of.as_deref(), Some("jesseh"));
 
         let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
         assert!(
             text.contains(&format!(
-                "COUNTERSIGNED {cid} by claude-session-7 on behalf of jesseh"
+                "COUNTERSIGNED {cid} by agent-session-7 on behalf of jesseh"
             )),
             "the fold names the proxy it folded on: {text}"
         );
@@ -4878,7 +4878,7 @@ mod tests {
         });
 
         // The host runs its agent for jesseh, and the agent signs.
-        let text = as_actor_for(Some("claude-session-7"), Some("jesseh"), || {
+        let text = as_actor_for(Some("agent-session-7"), Some("jesseh"), || {
             tool_text(
                 &server
                     .sign_off(Parameters(SignOffRequest {
@@ -4889,7 +4889,7 @@ mod tests {
             )
         });
         assert!(
-            text.contains("Signed by claude-session-7 on behalf of jesseh"),
+            text.contains("Signed by agent-session-7 on behalf of jesseh"),
             "{text}"
         );
 
@@ -4897,7 +4897,7 @@ mod tests {
             .into_iter()
             .find(|e| e.driver == "signed off")
             .expect("the approval is on the timeline");
-        assert_eq!(approval.by, "claude-session-7", "the actor that signed");
+        assert_eq!(approval.by, "agent-session-7", "the actor that signed");
         assert_eq!(
             approval.on_behalf_of.as_deref(),
             Some("jesseh"),
@@ -4913,7 +4913,7 @@ mod tests {
             .find(|c| c.id == cid)
             .and_then(|c| c.signed_off.clone())
             .expect("signed off");
-        assert_eq!(snap.by.as_deref(), Some("claude-session-7"));
+        assert_eq!(snap.by.as_deref(), Some("agent-session-7"));
         assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"));
 
         // A developer signing for themselves names nobody else, anywhere.
@@ -4973,6 +4973,183 @@ mod tests {
             author_one_claim(&ScryerServer::new(), &project2, "Verifies the token")
         });
         assert_eq!(author_of(&model_ref2, &cid2), "agent");
+    }
+
+    // ---- resp-j4jxfr / resp-ff5mea / resp-a3axy5: the actor word stays
+    // generic, and the person the agent acted for travels with the act.
+
+    /// Set variables around `body` and put them back afterwards — for naming a
+    /// session's SURROUNDINGS, which is exactly what must never reach a record.
+    fn with_env<T>(vars: &[(&str, &str)], body: impl FnOnce() -> T) -> T {
+        let prior: Vec<_> = vars
+            .iter()
+            .map(|(k, _)| (*k, std::env::var(k).ok()))
+            .collect();
+        for (k, v) in vars {
+            std::env::set_var(k, v);
+        }
+        let out = body();
+        for (k, v) in &prior {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        out
+    }
+
+    /// resp-j4jxfr: a session that names no actor of its own signs as the
+    /// AGENT, whatever it happens to be running inside.
+    ///
+    /// A session is launched by some product, and that product leaves its name
+    /// all over the environment. None of it is an identity anyone asserted: a
+    /// record naming the harness answers "which tool ran?" where the reader
+    /// asked "who decided?", and it dates the model to whatever was fashionable
+    /// the week it was written. The engine reads WHO from the two variables a
+    /// host sets on purpose and from nothing else.
+    #[test]
+    fn resp_j4jxfr_a_session_records_the_agent_not_what_it_runs_inside() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = countersign_project_for_mcp(&model_ref);
+
+        // Distinctive values, so scanning what was written for them means
+        // something. `CLAUDE_CODE=1` rides along set but unscanned: a bare
+        // flag is unsearchable, and it is the names beside it that could leak.
+        let surroundings = [
+            ("HAPI_SESSION_ID", "sess-a1b2c3"),
+            ("HAPI_AGENT_NAME", "some-harness"),
+            ("CLAUDE_CODE", "1"),
+            ("CLAUDE_CODE_ENTRYPOINT", "some-entrypoint"),
+            ("CLAUDE_MODEL", "some-model"),
+        ];
+        let cid = with_env(&surroundings, || {
+            as_actor_for(None, None, || {
+                let server = ScryerServer::new();
+                let cid = author_one_claim(&server, &project, "Verifies the token");
+                server
+                    .sign_off(Parameters(SignOffRequest {
+                        project: project.clone(),
+                        change_id: Some(cid.clone()),
+                    }))
+                    .unwrap();
+                cid
+            })
+        });
+
+        let approval = scryer_core::history::read_history(&model_ref)
+            .into_iter()
+            .find(|e| e.driver == "signed off")
+            .expect("the approval is on the timeline");
+        assert_eq!(
+            approval.by, "agent",
+            "no actor was asserted, so the act is the agent's"
+        );
+        assert!(
+            approval.on_behalf_of.is_none(),
+            "and it was nobody's proxy — a session cannot claim to speak for a person"
+        );
+
+        // Nothing the session ran inside got into the plan write either.
+        assert_eq!(author_of(&model_ref, &cid), "agent");
+
+        // Not just the fields we thought to check: nothing anywhere in what
+        // was written names the surroundings.
+        let log = std::fs::read_to_string(model_ref.history_path()).unwrap();
+        let plan = std::fs::read_to_string(model_ref.planned_path()).unwrap();
+        for (key, value) in surroundings.into_iter().filter(|(_, v)| v.len() > 1) {
+            for (what, text) in [("history", &log), ("plan", &plan)] {
+                assert!(
+                    !text.contains(value),
+                    "{what} names {key}'s value — a record must not learn a name from the environment"
+                );
+            }
+        }
+    }
+
+    /// resp-ff5mea: a committed-model event the agent recorded FOR a person
+    /// names the person beside the actor.
+    ///
+    /// The sign-off already recorded both (resp-7xts3y); every other act — a
+    /// fold, a drift reconcile, a move, a birth — named the actor alone, so a
+    /// fold an agent made on a developer's say-so was indistinguishable from
+    /// one it made on its own authority.
+    #[test]
+    fn resp_ff5mea_a_recorded_event_names_the_person_the_agent_acted_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        as_actor_for(Some("agent"), Some("jesseh"), || {
+            crate::helpers::record_event(
+                &model_ref,
+                scryer_core::history::HistoryEvent::new(
+                    1,
+                    scryer_core::history::EventKind::Impl,
+                    "vt",
+                    "build",
+                ),
+            )
+        });
+        // The agent acting alone is nobody's proxy and says so by saying
+        // nothing — unchanged for a solo invocation.
+        as_actor_for(Some("agent"), None, || {
+            crate::helpers::record_event(
+                &model_ref,
+                scryer_core::history::HistoryEvent::new(
+                    2,
+                    scryer_core::history::EventKind::Impl,
+                    "vt",
+                    "build",
+                ),
+            )
+        });
+
+        let log = scryer_core::history::read_history(&model_ref);
+        assert_eq!(log[0].by, "agent");
+        assert_eq!(
+            log[0].on_behalf_of.as_deref(),
+            Some("jesseh"),
+            "the person the fold was made for travels with it"
+        );
+        assert_eq!(log[1].by, "agent");
+        assert!(log[1].on_behalf_of.is_none(), "nobody was named");
+    }
+
+    /// resp-a3axy5: a plan write the agent made FOR a person names the person
+    /// on the plan event, beside the actor of the write (resp-ag8ngf).
+    #[test]
+    fn resp_a3axy5_a_plan_write_names_the_person_it_was_made_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = countersign_project_for_mcp(&model_ref);
+
+        let cid = as_actor_for(Some("agent"), Some("jesseh"), || {
+            author_one_claim(&ScryerServer::new(), &project, "Verifies the token")
+        });
+        let event = scryer_core::history::read_history(&model_ref)
+            .into_iter()
+            .find(|e| e.change_id.as_deref() == Some(cid.as_str()))
+            .expect("the plan write is on the timeline");
+        assert_eq!(event.by, "agent");
+        assert_eq!(
+            event.on_behalf_of.as_deref(),
+            Some("jesseh"),
+            "the developer whose say-so the plan was edited on"
+        );
+
+        // A write with nobody named stays a direct write, as it always was.
+        let dir2 = tempfile::tempdir().unwrap();
+        let model_ref2 = ModelRef::ProjectLocal(dir2.path().to_path_buf());
+        let project2 = countersign_project_for_mcp(&model_ref2);
+        let cid2 = as_actor_for(Some("ada-fixture"), None, || {
+            author_one_claim(&ScryerServer::new(), &project2, "Verifies the token")
+        });
+        let solo = scryer_core::history::read_history(&model_ref2)
+            .into_iter()
+            .find(|e| e.change_id.as_deref() == Some(cid2.as_str()))
+            .unwrap();
+        assert_eq!(solo.by, "ada-fixture");
+        assert!(solo.on_behalf_of.is_none());
     }
 
     /// End to end, through the MCP tools: the gate now BITES for agent-authored

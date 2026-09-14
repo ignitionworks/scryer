@@ -1008,14 +1008,14 @@ mod tests {
             &mut plan,
             &cid,
             200,
-            Some("claude-session-7"),
+            Some("agent-session-7"),
             Some("jesseh"),
         )
         .unwrap();
         record_signed_off(&r, &plan.changes[0]);
         let log = signed_off(&r);
         assert_eq!(log.len(), 1);
-        assert_eq!(log[0].by, "claude-session-7", "the signer");
+        assert_eq!(log[0].by, "agent-session-7", "the signer");
         assert_eq!(
             log[0].on_behalf_of.as_deref(),
             Some("jesseh"),
@@ -1261,14 +1261,14 @@ mod tests {
             &mut plan,
             &cid,
             200,
-            Some("claude-session-7"),
+            Some("agent-session-7"),
             Some("jesseh"),
         )
         .unwrap();
         let snap = plan.changes[0].signed_off.clone().unwrap();
         assert_eq!(
             snap.by.as_deref(),
-            Some("claude-session-7"),
+            Some("agent-session-7"),
             "the SIGNER is the actor"
         );
         assert_eq!(
@@ -1282,7 +1282,7 @@ mod tests {
         restamp_signoffs(&mut plan, 300);
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert_eq!(snap.at, 300);
-        assert_eq!(snap.by.as_deref(), Some("claude-session-7"));
+        assert_eq!(snap.by.as_deref(), Some("agent-session-7"));
         assert_eq!(
             snap.on_behalf_of.as_deref(),
             Some("jesseh"),

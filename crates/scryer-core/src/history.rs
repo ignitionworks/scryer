@@ -62,7 +62,11 @@ pub struct EventRow {
 
 impl EventRow {
     pub fn new(marker: &str, text: impl Into<String>) -> Self {
-        Self { marker: marker.to_string(), text: text.into(), source: None }
+        Self {
+            marker: marker.to_string(),
+            text: text.into(),
+            source: None,
+        }
     }
 
     pub fn with_source(mut self, source: SourceLocation) -> Self {
@@ -144,8 +148,10 @@ impl HistoryEvent {
     /// `None` is a direct act and records nothing — "on behalf of" says
     /// nothing without an actor to qualify.
     pub fn for_person(mut self, person: Option<&str>) -> Self {
-        self.on_behalf_of =
-            person.map(str::trim).filter(|p| !p.is_empty()).map(str::to_string);
+        self.on_behalf_of = person
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string);
         self
     }
 }
@@ -208,7 +214,10 @@ pub fn plan_events(before: &ScryModel, after: &ScryModel, at: u64) -> Vec<Histor
             continue;
         };
         let key = changes::key_for(ch);
-        let tag = after.change_map.get(&key).or_else(|| before.change_map.get(&key));
+        let tag = after
+            .change_map
+            .get(&key)
+            .or_else(|| before.change_map.get(&key));
         let slot = by_owner.entry(owner).or_insert((Vec::new(), None, false));
         slot.0.push(EventRow::new(marker, ch.label.clone()));
         match (tag.map(String::as_str), slot.1) {
@@ -247,7 +256,10 @@ fn claim_marker(changes: &[diff::Change]) -> Option<&'static str> {
     if changes.iter().any(|c| matches!(c, diff::Change::Deleted)) {
         return Some("−");
     }
-    if changes.iter().any(|c| matches!(c, diff::Change::Reworded { .. })) {
+    if changes
+        .iter()
+        .any(|c| matches!(c, diff::Change::Reworded { .. }))
+    {
         return Some("!");
     }
     None
@@ -267,8 +279,26 @@ pub fn append_plan_events(
     after: &ScryModel,
     actor: Option<&str>,
 ) {
+    append_plan_events_for(r, before, after, actor, None);
+}
+
+/// [`append_plan_events`], plus the PERSON the write was made FOR — an agent a
+/// host runs on a developer's behalf edits the plan on their say-so, and an
+/// event naming only the agent loses that the developer asked for it while one
+/// naming only the developer claims they wrote it. Same pair, and the same
+/// reason, as [`HistoryEvent::for_person`] on a sign-off.
+///
+/// `None` is a direct write and records nothing extra, which is every write a
+/// plain invocation makes.
+pub fn append_plan_events_for(
+    r: &ModelRef,
+    before: &ScryModel,
+    after: &ScryModel,
+    actor: Option<&str>,
+    person: Option<&str>,
+) {
     for ev in plan_events(before, after, crate::drift::now_secs()) {
-        let _ = append_event(r, &ev.by_actor(actor));
+        let _ = append_event(r, &ev.by_actor(actor).for_person(person));
     }
 }
 
@@ -300,14 +330,17 @@ mod tests {
 
         let born = HistoryEvent::new(100, EventKind::Born, "n1", "build")
             .with_rows(vec![EventRow::new("+", "3 responsibilities · component")]);
-        let impld = HistoryEvent::new(200, EventKind::Impl, "n1", "fill").with_rows(vec![
-            EventRow::new("+", "Charges the card via Stripe.").with_source(SourceLocation {
+        let impld =
+            HistoryEvent::new(200, EventKind::Impl, "n1", "fill").with_rows(vec![EventRow::new(
+                "+",
+                "Charges the card via Stripe.",
+            )
+            .with_source(SourceLocation {
                 pattern: "api/payment/handler.rs".into(),
                 symbol: Some("charge".into()),
                 line: Some(40),
                 end_line: Some(78),
-            }),
-        ]);
+            })]);
         append_event(&r, &born).unwrap();
         append_event(&r, &impld).unwrap();
 
@@ -377,21 +410,34 @@ mod tests {
 
         let proposed = HistoryEvent::new(100, EventKind::Plan, "n1", "chg-7")
             .with_change("chg-7")
-            .with_rows(vec![EventRow::new("+", "**When** the card is charged, **record** it")]);
+            .with_rows(vec![EventRow::new(
+                "+",
+                "**When** the card is charged, **record** it",
+            )]);
         let built = HistoryEvent::new(200, EventKind::Impl, "n1", "fill");
         append_event(&r, &proposed).unwrap();
         append_event(&r, &built).unwrap();
 
         let log = read_history(&r);
         assert_eq!(log.len(), 2);
-        assert_eq!(log[0].kind, EventKind::Plan, "the proposal keeps its own kind");
-        assert_ne!(log[0].kind, log[1].kind, "a plan event is not the fold beside it");
+        assert_eq!(
+            log[0].kind,
+            EventKind::Plan,
+            "the proposal keeps its own kind"
+        );
+        assert_ne!(
+            log[0].kind, log[1].kind,
+            "a plan event is not the fold beside it"
+        );
         assert_eq!(log[0].change_id.as_deref(), Some("chg-7"));
         assert_eq!(log[0].rows[0].marker, "+");
 
         // The serialised name every other reader keys on.
         let line = serde_json::to_string(&proposed).unwrap();
-        assert!(line.contains(r#""kind":"plan""#), "serialises as `plan`: {line}");
+        assert!(
+            line.contains(r#""kind":"plan""#),
+            "serialises as `plan`: {line}"
+        );
     }
 
     /// A reader that has never heard of an event kind SKIPS that line — the
@@ -418,7 +464,11 @@ mod tests {
         .unwrap();
 
         let log = read_history(&r);
-        assert_eq!(log.len(), 2, "the unknown kind is dropped, its neighbours survive");
+        assert_eq!(
+            log.len(),
+            2,
+            "the unknown kind is dropped, its neighbours survive"
+        );
         assert_eq!(log[0].kind, EventKind::Born);
         assert_eq!(log[1].kind, EventKind::Plan);
     }
@@ -447,14 +497,23 @@ mod tests {
     /// are tagged to as the driver.
     #[test]
     fn resp_ag8ngf_a_plan_write_earns_one_event_per_touched_node() {
-        let before = plan_of(&[("resp-1", "**When** asked, **answer**"), ("resp-2", "**Log** it")]);
+        let before = plan_of(&[
+            ("resp-1", "**When** asked, **answer**"),
+            ("resp-2", "**Log** it"),
+        ]);
         let mut after = plan_of(&[
             ("resp-1", "**When** asked politely, **answer**"),
             ("resp-3", "**Retry** once"),
         ]);
-        after.change_map.insert("resp:resp-1".into(), "chg-7".into());
-        after.change_map.insert("resp:resp-3".into(), "chg-7".into());
-        after.change_map.insert("resp:resp-2".into(), "chg-7".into());
+        after
+            .change_map
+            .insert("resp:resp-1".into(), "chg-7".into());
+        after
+            .change_map
+            .insert("resp:resp-3".into(), "chg-7".into());
+        after
+            .change_map
+            .insert("resp:resp-2".into(), "chg-7".into());
 
         let events = plan_events(&before, &after, 500);
         assert_eq!(events.len(), 1, "one node touched, one event");
@@ -464,9 +523,15 @@ mod tests {
         assert_eq!(ev.driver, "chg-7", "the change the edits are tagged to");
         assert_eq!(ev.change_id.as_deref(), Some("chg-7"));
 
-        let rows: Vec<(&str, &str)> =
-            ev.rows.iter().map(|r| (r.marker.as_str(), r.text.as_str())).collect();
-        assert!(rows.contains(&("!", "**When** asked politely, **answer**")), "reworded: {rows:?}");
+        let rows: Vec<(&str, &str)> = ev
+            .rows
+            .iter()
+            .map(|r| (r.marker.as_str(), r.text.as_str()))
+            .collect();
+        assert!(
+            rows.contains(&("!", "**When** asked politely, **answer**")),
+            "reworded: {rows:?}"
+        );
         assert!(rows.contains(&("+", "**Retry** once")), "added: {rows:?}");
         assert!(rows.contains(&("−", "**Log** it")), "removed: {rows:?}");
         assert_eq!(rows.len(), 3);
@@ -481,7 +546,10 @@ mod tests {
         let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
         let before = plan_of(&[("resp-1", "**When** asked, **answer**")]);
 
-        assert!(plan_events(&before, &before, 500).is_empty(), "an identical plan is silent");
+        assert!(
+            plan_events(&before, &before, 500).is_empty(),
+            "an identical plan is silent"
+        );
 
         let mut after = before.clone();
         after.source_map.insert(
@@ -493,14 +561,19 @@ mod tests {
                 end_line: None,
             }],
         );
-        after.change_map.insert("resp:resp-1".into(), "chg-7".into());
+        after
+            .change_map
+            .insert("resp:resp-1".into(), "chg-7".into());
         assert!(
             plan_events(&before, &after, 500).is_empty(),
             "an anchor landing and a tag are not claims"
         );
 
         append_plan_events(&r, &before, &after, Some("jesseh"));
-        assert!(read_history(&r).is_empty(), "nothing appended, so no log at all");
+        assert!(
+            read_history(&r).is_empty(),
+            "nothing appended, so no log at all"
+        );
     }
 
     /// The driver falls back to the bare `plan` when the edits carry no tag —
@@ -516,13 +589,24 @@ mod tests {
         assert_eq!(untagged[0].change_id, None);
 
         let mut split = after.clone();
-        split.change_map.insert("resp:resp-1".into(), "chg-7".into());
-        split.change_map.insert("resp:resp-2".into(), "chg-8".into());
+        split
+            .change_map
+            .insert("resp:resp-1".into(), "chg-7".into());
+        split
+            .change_map
+            .insert("resp:resp-2".into(), "chg-8".into());
         let split = plan_events(&before, &split, 500);
         assert_eq!(split.len(), 1);
-        assert_eq!(split[0].driver, "plan", "two changes in one node: neither speaks for it");
+        assert_eq!(
+            split[0].driver, "plan",
+            "two changes in one node: neither speaks for it"
+        );
         assert_eq!(split[0].change_id, None);
-        assert_eq!(split[0].rows.len(), 2, "both claims are still on the record");
+        assert_eq!(
+            split[0].rows.len(),
+            2,
+            "both claims are still on the record"
+        );
     }
 
     /// The actor who drove the write names the plan event, exactly as it names

@@ -364,6 +364,18 @@ pub fn write_planned_as(
     model: &ScryModel,
     actor: Option<&str>,
 ) -> Result<(), String> {
+    write_planned_for(r, model, actor, None)
+}
+
+/// [`write_planned_as`], plus the PERSON the write was made FOR, for the plan
+/// events it appends. `None` is a direct write, which is every write a caller
+/// with nobody to name makes.
+pub fn write_planned_for(
+    r: &ModelRef,
+    model: &ScryModel,
+    actor: Option<&str>,
+    person: Option<&str>,
+) -> Result<(), String> {
     let prior = read_planned_at(r).ok();
     let mut stamped = model.clone();
     stamp_touches(&mut stamped, prior.as_ref(), drift::now_secs());
@@ -390,7 +402,7 @@ pub fn write_planned_as(
     // what a plain `scryer-mcp` invocation is. Nothing is appended when the
     // claims did not move.
     if let Some(prior) = prior.as_ref() {
-        crate::history::append_plan_events(r, prior, &stamped, actor);
+        crate::history::append_plan_events_for(r, prior, &stamped, actor, person);
     }
     Ok(())
 }

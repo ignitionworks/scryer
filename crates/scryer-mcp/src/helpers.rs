@@ -254,8 +254,17 @@ pub(crate) fn env_on_behalf_of() -> Option<String> {
 
 /// Record a committed-model history event, best-effort: a logging failure must
 /// never abort the model operation that produced it (see [`scryer_core::history`]).
+///
+/// Names the actor this process writes as AND, when the host runs it on
+/// someone's behalf, the PERSON it acted for — the same pair a sign-off
+/// already records. Without the person, a fold an agent made on a developer's
+/// say-so is indistinguishable in the timeline from one it made on its own.
 pub(crate) fn record_event(model_ref: &ModelRef, ev: HistoryEvent) {
-    let _ = append_event(model_ref, &ev.by_actor(env_actor().as_deref()));
+    let _ = append_event(
+        model_ref,
+        &ev.by_actor(env_actor().as_deref())
+            .for_person(env_on_behalf_of().as_deref()),
+    );
 }
 
 /// THE MCP plan-write seam: every plan this server writes goes through here, so
@@ -269,12 +278,19 @@ pub(crate) fn record_event(model_ref: &ModelRef, ev: HistoryEvent) {
 /// change authorless and the gate unable to bite.
 ///
 /// Unset `SCRYER_ACTOR` is unattributed and lands as the agent, which is what a
-/// plain `scryer-mcp` invocation is.
+/// plain `scryer-mcp` invocation is. `SCRYER_ON_BEHALF_OF` rides along beside
+/// it, so a plan a host's agent edited on a developer's say-so records both —
+/// the same pair the sign-off records, for the same reason.
 pub(crate) fn write_planned(
     model_ref: &ModelRef,
     model: &scryer_core::ScryModel,
 ) -> Result<(), String> {
-    scryer_core::write_planned_as(model_ref, model, env_actor().as_deref())
+    scryer_core::write_planned_for(
+        model_ref,
+        model,
+        env_actor().as_deref(),
+        env_on_behalf_of().as_deref(),
+    )
 }
 
 pub(crate) fn resolve_model_ref(req_project: Option<&str>) -> Result<ResolvedProject, McpError> {
