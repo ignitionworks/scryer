@@ -250,10 +250,21 @@ triple, and `target/release/` if that is what you built.
 Quality gates, all of which should be clean:
 
 ```bash
-cargo fmt --check
+cargo run -p xtask -- fmt-check --working
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm exec tsc --noEmit
 ```
+
+That first line is the formatting gate, and it is deliberately not
+`cargo fmt --check`. `rustfmt.toml` pins what formatted means; the gate decides
+which files have to be it, and the answer is the ones your change touches —
+`git diff --name-only <base>...HEAD`, plus your working tree with `--working`.
+Point it at another base with `--base <ref>`; the default is `main`. A file
+your change would not otherwise touch is left alone, formatting and blame both,
+because a tree-wide sweep buries the change it travels with and rewrites the
+history of code nobody edited. It also honours `rustfmt.toml`'s `ignore` list,
+which stable rustfmt does not: `ignore` is nightly-only, so rustfmt warns and
+formats the path anyway.
 
 ### The committed export viewer
 

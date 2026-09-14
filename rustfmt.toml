@@ -1,6 +1,6 @@
 # The formatting this repository is checked against.
 #
-# Committed so `cargo fmt --check` means the same thing on every machine and in
+# Committed so a formatting check means the same thing on every machine and in
 # CI: rustfmt's defaults drift between editions, and a project that pins
 # nothing gets a different answer from a newer toolchain than the one its code
 # was written with. These ARE the defaults the tree was written to — the point
@@ -8,3 +8,14 @@
 edition = "2021"
 style_edition = "2021"
 max_width = 100
+
+# crates/tree-sitter-clojure is generated: `tree-sitter generate` writes
+# parser.c and its Rust binding, and what the generator emits is not ours to
+# choose. It happens to satisfy the pin today, by luck rather than by rule, and
+# the next regeneration is under no obligation to keep doing so. Fence it off
+# rather than let a generator's whitespace decide whether the gate is green.
+#
+# `ignore` is a nightly-only rustfmt option, so stable rustfmt warns and formats
+# the path anyway. `cargo xtask fmt-check` reads this list itself and honours
+# it, which is what makes the fence real on the toolchain we actually run.
+ignore = ["crates/tree-sitter-clojure"]

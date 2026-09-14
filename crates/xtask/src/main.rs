@@ -1,5 +1,6 @@
+use std::collections::BTreeSet;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -11,11 +12,13 @@ fn main() {
         "build-sidecar" => build_sidecar(!debug),
         "export-template" => export_template(args.iter().any(|a| a == "--check")),
         "validate-model" => validate_model(args.get(2).map(PathBuf::from)),
+        "fmt-check" => fmt_check(&args[2..]),
         _ => {
             eprintln!(
                 "Usage:\n  cargo run -p xtask -- build-sidecar [--debug]\n  \
                  cargo run -p xtask -- validate-model [project-path]\n  \
-                 cargo run -p xtask -- export-template [--check]"
+                 cargo run -p xtask -- export-template [--check]\n  \
+                 cargo run -p xtask -- fmt-check [--base <ref>] [--working]"
             );
             std::process::exit(1);
         }
@@ -97,6 +100,191 @@ fn export_template(check: bool) {
         .expect("could not create the assets directory");
     std::fs::write(&dst, &fresh).expect("could not write the template");
     println!("Wrote {TEMPLATE_PATH} ({} bytes).", fresh.len());
+}
+
+/// The default base a change is measured against when none is named.
+const DEFAULT_BASE: &str = "main";
+
+/// The formatting gate, scoped to the change rather than to the tree.
+///
+/// The pin in `rustfmt.toml` says what formatted means; this says WHICH files
+/// have to be it. A change's own files do — `git diff --name-only
+/// <base>...HEAD`, plus the working tree's own changes with `--working`. A
+/// file the change would not otherwise touch is left alone, formatting and
+/// blame both, because a tree-wide sweep buries the change it travels with and
+/// rewrites the history of code nobody edited.
+///
+/// Exit 0 clean, 1 when a file the change touches is not formatted (each one
+/// named), 2 when the invocation itself is wrong — a bad flag or a `--base`
+/// that does not resolve, which must be loud rather than silently checking
+/// nothing.
+fn fmt_check(args: &[String]) {
+    let mut base: Option<String> = None;
+    let mut base_was_named = false;
+    let mut working = false;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--working" => working = true,
+            "--base" => match it.next() {
+                Some(r) => {
+                    base = Some(r.clone());
+                    base_was_named = true;
+                }
+                None => usage_error("--base needs a git ref"),
+            },
+            other => match other.strip_prefix("--base=") {
+                Some(r) => {
+                    base = Some(r.to_string());
+                    base_was_named = true;
+                }
+                None => usage_error(&format!("unknown argument '{other}'")),
+            },
+        }
+    }
+    let root = workspace_root();
+    let base = base.unwrap_or_else(|| DEFAULT_BASE.to_string());
+
+    let mut touched: BTreeSet<PathBuf> = BTreeSet::new();
+    if git_ok(
+        &root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{base}^{{commit}}"),
+        ],
+    ) {
+        touched.extend(git_paths(
+            &root,
+            &[
+                "diff",
+                "--name-only",
+                "--diff-filter=ACMR",
+                &format!("{base}...HEAD"),
+                "--",
+                "*.rs",
+            ],
+        ));
+    } else if base_was_named {
+        eprintln!("fmt-check: '{base}' does not resolve to a commit");
+        std::process::exit(2);
+    } else {
+        println!("fmt-check: no '{base}' to compare against; checking the working tree only.");
+        working = true;
+    }
+    if working {
+        touched.extend(git_paths(
+            &root,
+            &[
+                "diff",
+                "--name-only",
+                "--diff-filter=ACMR",
+                "HEAD",
+                "--",
+                "*.rs",
+            ],
+        ));
+        touched.extend(git_paths(
+            &root,
+            &["ls-files", "--others", "--exclude-standard", "--", "*.rs"],
+        ));
+    }
+
+    // The pin's own fence, honoured here because rustfmt will not honour it:
+    // `ignore` is a nightly-only option, so stable rustfmt reads it, warns, and
+    // formats the file anyway. A fence nobody enforces is worse than none.
+    let fenced = fenced_paths(&root);
+    let mut skipped = 0usize;
+    let files: Vec<PathBuf> = touched
+        .into_iter()
+        .filter(|f| {
+            if fenced.iter().any(|p| f.starts_with(p)) {
+                skipped += 1;
+                return false;
+            }
+            root.join(f).is_file()
+        })
+        .collect();
+
+    if files.is_empty() {
+        println!("fmt-check: no changed Rust files to check ({skipped} fenced off).");
+        return;
+    }
+
+    let status = Command::new("rustfmt")
+        .args(["--edition", "2021", "--check"])
+        .args(&files)
+        .current_dir(&root)
+        .status()
+        .expect("failed to run rustfmt (is the rustfmt component installed?)");
+    if status.success() {
+        println!(
+            "fmt-check: {} changed Rust file(s) match the pin ({skipped} fenced off).",
+            files.len()
+        );
+        return;
+    }
+    eprintln!(
+        "\nfmt-check: these files are part of this change and do not match the pinned formatting:"
+    );
+    for f in &files {
+        eprintln!("  {}", f.display());
+    }
+    eprintln!("Run `rustfmt --edition 2021` over them (or `cargo fmt -- <file>…`) and commit.");
+    std::process::exit(1);
+}
+
+fn usage_error(why: &str) -> ! {
+    eprintln!("{why}\nusage: cargo run -p xtask -- fmt-check [--base <ref>] [--working]");
+    std::process::exit(2);
+}
+
+/// The prefixes `rustfmt.toml`'s `ignore` list fences off, project-relative.
+/// Absent or unparseable, nothing is fenced — the gate's default is to check.
+fn fenced_paths(root: &Path) -> Vec<PathBuf> {
+    let text = std::fs::read_to_string(root.join("rustfmt.toml")).unwrap_or_default();
+    let uncommented: String = text
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let Some(after) = uncommented.split_once("ignore") else {
+        return Vec::new();
+    };
+    let Some(list) = after.1.split_once('[').and_then(|(_, r)| r.split_once(']')) else {
+        return Vec::new();
+    };
+    list.0
+        .split(',')
+        .map(|e| e.trim().trim_matches(['"', '\'']).trim())
+        .filter(|e| !e.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Whether a git invocation succeeds, output discarded.
+fn git_ok(root: &Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// The project-relative paths a git invocation lists, one per line.
+fn git_paths(root: &Path, args: &[&str]) -> Vec<PathBuf> {
+    let out = match Command::new("git").args(args).current_dir(root).output() {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&out)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 fn validate_model(project: Option<PathBuf>) {
@@ -226,7 +414,10 @@ mod tests {
     /// host-tuple` is unavailable.
     #[test]
     fn target_triple_matches_the_rustc_host() {
-        let out = Command::new("rustc").arg("-vV").output().expect("rustc runs");
+        let out = Command::new("rustc")
+            .arg("-vV")
+            .output()
+            .expect("rustc runs");
         let host = String::from_utf8_lossy(&out.stdout)
             .lines()
             .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
