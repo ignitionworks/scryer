@@ -1110,6 +1110,12 @@
           "id": "resp-88",
           "statement": "Records a committed-model history event, best-effort, so a logging failure never aborts the write that produced it.",
           "lastTouchedAt": 1784883763
+        },
+        {
+          "id": "resp-ff5mea",
+          "statement": "**When** the agent acted for a person, **name** that person on the event it records beside the actor.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789378834
         }
       ]
     },
@@ -4895,6 +4901,12 @@
           "id": "resp-279",
           "statement": "**Render** a node's durable committed-model timeline — folds, drift reconciles, moves, and births",
           "lastTouchedAt": 1784883905
+        },
+        {
+          "id": "resp-h27gc7",
+          "statement": "**When** an event on the timeline was driven by the agent, **name** the driver AI and, where it acted for a person, AI on behalf of that person.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789378834
         }
       ]
     },
@@ -4942,6 +4954,18 @@
           "id": "resp-h4rf4g",
           "statement": "**While** a change's sign-off is stale, **show** it as needing re-signing beside the signature, naming who moved the plan.",
           "lastTouchedAt": 1789318478
+        },
+        {
+          "id": "resp-chsmkg",
+          "statement": "**When** a change's sign-off was given by the agent, **name** the signer AI and, where it was given for a person, AI on behalf of that person.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789378834
+        },
+        {
+          "id": "resp-tmmzts",
+          "statement": "**When** the agent moved the plan under a signature, **name** the mover AI in the note asking for a re-signature.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789378834
         }
       ]
     },
@@ -12958,6 +12982,12 @@
           "statement": "**When** a sign-off is recorded, **append** a history event naming the actor who signed and, for a proxy signature, the person it was given for, so a reader of the timeline tells \"signed by X for Y\" from \"signed by Y\".",
           "concern": "oversight",
           "lastTouchedAt": 1789317113
+        },
+        {
+          "id": "resp-j4jxfr",
+          "statement": "**While** a session names no actor of its own, **record** its sign-off as the agent's, never under the name of whatever the session runs inside.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789378834
         }
       ]
     },
@@ -13406,6 +13436,12 @@
           "statement": "**When** a plan write changes what the plan claims, **append** one plan event per touched node to the history, naming the actor of the write — the person when the write names one, at the canvas or through the MCP seam from `SCRYER_ACTOR`, and the agent only when none is named — the change the edits are tagged to, and each claim added, reworded or removed as a row; a write that changes nothing appends nothing",
           "concern": "oversight",
           "lastTouchedAt": 1789210103
+        },
+        {
+          "id": "resp-a3axy5",
+          "statement": "**When** a plan write was made for a person, **name** that person on the plan event beside the actor of the write.",
+          "concern": "oversight",
+          "lastTouchedAt": 1789378834
         }
       ]
     },
