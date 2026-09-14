@@ -21,13 +21,15 @@ const snapshot = (over: Partial<SignOff> = {}): SignOff => ({
 describe("resp-z5zzvj — a signature says who signed, and who for", () => {
   it("resp-z5zzvj: reads a proxy signature apart from the person's own", () => {
     expect(signatureLabel(snapshot({ by: "jesseh" }))).toBe("jesseh");
-    expect(
-      signatureLabel(snapshot({ by: "claude-session-7", onBehalfOf: "jesseh" })),
-    ).toBe("claude-session-7 for jesseh");
+    // An actor a host asserted is a name the app knows nothing about, so it
+    // reads as given — with the person it signed for beside it.
+    expect(signatureLabel(snapshot({ by: "agent-session-7", onBehalfOf: "jesseh" }))).toBe(
+      "agent-session-7 on behalf of jesseh",
+    );
 
     // Never the person alone: that is precisely the reading the record exists
     // to prevent.
-    expect(signatureLabel(snapshot({ by: "claude-session-7", onBehalfOf: "jesseh" }))).not.toBe(
+    expect(signatureLabel(snapshot({ by: "agent-session-7", onBehalfOf: "jesseh" }))).not.toBe(
       "jesseh",
     );
   });
@@ -76,7 +78,9 @@ describe("resp-z5zzvj — a signature says who signed, and who for", () => {
     const src = fileURLToPath(new URL("../src/", import.meta.url));
     const page = readFileSync(src + "special/ChangesPage.tsx", "utf8");
     expect(page).toContain("signatureLabel(signedOff)");
-    expect(page).toContain("as ${signedOff.onBehalfOf}'s proxy");
+    // Badge and tooltip read from the one label, so they cannot disagree about
+    // who signed (resp-chsmkg says what that label reads).
+    expect(page).toContain("` by ${signatureLabel(signedOff)}`");
 
     // And the type it reads carries all three facts the Rust ledger records.
     const ledger = readFileSync(src + "ledger.ts", "utf8");

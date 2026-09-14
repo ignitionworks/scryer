@@ -22,8 +22,14 @@ export interface EventRow {
 export interface HistoryEvent {
   /** Unix seconds. */
   at: number;
-  /** Who drove it — agent-only in v0.3. */
+  /** Who drove it. The agent unless a host named an actor on the write. */
   by: string;
+  /** The PERSON {@link HistoryEvent.by} acted for, when it acted as their
+   *  proxy — the agent a host runs on a developer's behalf. Mirrors Rust
+   *  `history::HistoryEvent.on_behalf_of`. Two names, never one: with only
+   *  `by` the event reads as the agent's own act, and with only this it reads
+   *  as the person's. Absent on everything nobody proxied. */
+  onBehalfOf?: string;
   /** Short driver/intent label, e.g. "fill", "build", "took code". */
   driver: string;
   kind: EventKind;

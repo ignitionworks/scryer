@@ -610,13 +610,9 @@ function ChangeSection({
             title={[
               `Signed off ${new Date(signedOff.at * 1000).toLocaleString()}`,
               // A proxy signature is a different fact from the person's own,
-              // and the difference is exactly what a reader needs: an agent
+              // and the difference is exactly what a reader needs: the AI
               // approving on someone's say-so is not that someone approving.
-              signedOff.onBehalfOf && signedOff.by
-                ? ` by ${signedOff.by}, as ${signedOff.onBehalfOf}'s proxy`
-                : signedOff.by
-                  ? ` by ${signedOff.by}`
-                  : "",
+              signatureLabel(signedOff) ? ` by ${signatureLabel(signedOff)}` : "",
               ". Anything the agent rewords or adds afterwards lands in the Inbox as a proposal.",
             ].join("")}
           >

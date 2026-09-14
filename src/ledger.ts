@@ -52,19 +52,43 @@ export interface SignOff {
   entries: Record<string, SignedEntry>;
 }
 
+/** The actor an act records when no name was given for it — the engine's own
+ *  word for a machine writer, and the serde default of Rust
+ *  `history::HistoryEvent.by`. The one actor string the app can recognise:
+ *  every other one is opaque, a name some host asserted. */
+export const AGENT_ACTOR = "agent";
+
+/** How an act reads to a person: the actor, and the person it was done for.
+ *
+ *  The agent gets a name a reader recognises — "AI" — rather than the model's
+ *  internal word, and an act it made for someone reads as that person's, done
+ *  by the AI: "AI on behalf of jesseh". Never the bare actor, never the
+ *  person's name alone (that would read as the person having done it
+ *  themselves, which is the one reading the two-name record exists to
+ *  prevent), and never the name of whatever product the agent runs inside —
+ *  the app has no such name to show, and the engine never records one.
+ *
+ *  Any other actor is a name a host asserted and the app knows nothing about,
+ *  so it passes through as given. `null` when nobody is named at all. */
+export function actorLabel(by: string | undefined, onBehalfOf?: string): string | null {
+  if (!by) return null;
+  const who = by === AGENT_ACTOR ? "AI" : by;
+  return onBehalfOf ? `${who} on behalf of ${onBehalfOf}` : who;
+}
+
 /** What a stale signature needs said: who moved the plan out from under it.
  *  `null` when the signature still covers what the plan holds — which is every
  *  signature in a project only one person writes to. */
 export function staleNote(signedOff: SignOff | undefined): string | null {
-  return signedOff?.staledBy ? `${signedOff.staledBy} has edited the plan since` : null;
+  const who = actorLabel(signedOff?.staledBy);
+  return who ? `${who} has edited the plan since` : null;
 }
 
-/** How a sign-off reads to a person: "jesseh", or "claude-session-7 for
- *  jesseh" when it was given as a proxy. `null` when nobody is named — an
+/** How a sign-off reads to a person: "jesseh", or "AI on behalf of jesseh"
+ *  when the agent gave it on their say-so. `null` when nobody is named — an
  *  unattributed signature says only that one was given. */
 export function signatureLabel(signedOff: SignOff | undefined): string | null {
-  if (!signedOff?.by) return null;
-  return signedOff.onBehalfOf ? `${signedOff.by} for ${signedOff.onBehalfOf}` : signedOff.by;
+  return actorLabel(signedOff?.by, signedOff?.onBehalfOf);
 }
 
 /** What a sign-off remembered about one entry. */

@@ -3,6 +3,7 @@ import type { ScryModel, Node } from "../viewmodel";
 import type { Editor } from "../editor";
 import { DiffRow, diffAnchorClass, diffTextClass, kindOfGlyph } from "../diffkit";
 import { EVENT_META, type HistoryEvent, relativeTime } from "../history";
+import { actorLabel } from "../ledger";
 import { StatementText } from "../markup";
 import { ClaimSource } from "../SourceSection";
 import {
@@ -276,8 +277,12 @@ export function NodeHistory({
               >
                 {meta.label}
               </span>
+              {/* Who drove it, as a reader should read it: the AI, and the
+                  person it acted for when a host ran it on their say-so.
+                  Never the person's name alone — a fold the AI made for
+                  someone is not that someone having made it. */}
               <span className="text-xs text-[var(--text-muted)]">
-                <AgentMark /> {ev.by} · {ev.driver}
+                <AgentMark /> {actorLabel(ev.by, ev.onBehalfOf)} · {ev.driver}
               </span>
             </div>
             <div className="flex flex-col gap-1">
