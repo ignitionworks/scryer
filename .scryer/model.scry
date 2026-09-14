@@ -2,34 +2,6 @@
   "version": "0.3",
   "nodes": [
     {
-      "id": "node-1",
-      "kind": "system",
-      "name": "scryer",
-      "description": "A model-driven development tool that keeps an architecture model of responsibilities and tests next to a codebase, so a developer and their coding agent plan and verify changes against a shared spec.",
-      "responsibilities": [
-        {
-          "id": "resp-10",
-          "statement": "**Maintain** a shared architecture model of what the system is responsible for, mapped to source and tests.",
-          "lastTouchedAt": 1784884343
-        },
-        {
-          "id": "resp-11",
-          "statement": "**Detect** drift between the model and the codebase and **reconcile** it in either direction.",
-          "lastTouchedAt": 1784884343
-        },
-        {
-          "id": "resp-12",
-          "statement": "**Expose** the model to coding agents over MCP so they build and validate code against the plan.",
-          "lastTouchedAt": 1784884343
-        },
-        {
-          "id": "resp-13",
-          "statement": "**Present** the model to the developer for authoring, review, and navigation.",
-          "lastTouchedAt": 1784884343
-        }
-      ]
-    },
-    {
       "id": "node-3",
       "kind": "container",
       "name": "Agent Sync",
@@ -116,6 +88,11 @@
           "id": "resp-34",
           "statement": "**Validate** a project's architecture model for structural and source-coverage issues.",
           "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-7j0nyf",
+          "statement": "**Check** the pinned formatting over the files a change touches.",
+          "lastTouchedAt": 1789387513
         }
       ]
     },
@@ -190,6 +167,11 @@
           "id": "resp-3",
           "statement": "**Validate** the project's architecture model for structural and source-coverage issues.",
           "lastTouchedAt": 1784883565
+        },
+        {
+          "id": "resp-n5dm9c",
+          "statement": "**Check** the pinned formatting of the Rust files a change touches, never of the whole tree.",
+          "lastTouchedAt": 1789387513
         }
       ]
     },
@@ -13578,6 +13560,60 @@
           "lastTouchedAt": 1789318022
         }
       ]
+    },
+    {
+      "id": "node-1",
+      "kind": "system",
+      "name": "scryer",
+      "description": "A model-driven development tool that keeps an architecture model of responsibilities and tests next to a codebase, so a developer and their coding agent plan and verify changes against a shared spec.",
+      "responsibilities": [
+        {
+          "id": "resp-10",
+          "statement": "**Maintain** a shared architecture model of what the system is responsible for, mapped to source and tests.",
+          "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-11",
+          "statement": "**Detect** drift between the model and the codebase and **reconcile** it in either direction.",
+          "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-12",
+          "statement": "**Expose** the model to coding agents over MCP so they build and validate code against the plan.",
+          "lastTouchedAt": 1784884343
+        },
+        {
+          "id": "resp-13",
+          "statement": "**Present** the model to the developer for authoring, review, and navigation.",
+          "lastTouchedAt": 1784884343
+        }
+      ],
+      "directives": [
+        "The improved formatting applies to the files a change actively touches: format those, and leave every other file exactly as it is. Never reformat a file the change would not otherwise alter — a tree-wide sweep buries the change it travels with and rewrites the blame of code nobody touched. The formatting gate is scoped the same way, to the files a change touches."
+      ]
+    },
+    {
+      "id": "node-4yw7sv",
+      "kind": "symbol",
+      "name": "fmt_check",
+      "parentId": "node-10",
+      "responsibilities": [
+        {
+          "id": "resp-tm5qwy",
+          "statement": "**Skip** every path the formatting pin's ignore list fences off.",
+          "lastTouchedAt": 1789387513
+        },
+        {
+          "id": "resp-b5djjs",
+          "statement": "**When** run, **check** the pinned formatting over exactly the Rust files that differ from the base ref, plus the working tree's own changes when asked.",
+          "lastTouchedAt": 1789387526
+        },
+        {
+          "id": "resp-z9a0ex",
+          "statement": "**If** a checked file does not match the pinned formatting, **then** **refuse** the run naming every file that falls short.",
+          "lastTouchedAt": 1789387526
+        }
+      ]
     }
   ],
   "links": [
@@ -21878,6 +21914,12 @@
         "symbol": "mintId"
       }
     ],
+    "resp-7j0nyf": [
+      {
+        "pattern": "crates/xtask/src/main.rs",
+        "symbol": "fmt_check"
+      }
+    ],
     "resp-7pgwkq": [
       {
         "pattern": "src/host/bridge.ts",
@@ -22286,6 +22328,12 @@
         "symbol": "by_actor"
       }
     ],
+    "resp-b5djjs": [
+      {
+        "pattern": "crates/xtask/src/main.rs",
+        "symbol": "fmt_check"
+      }
+    ],
     "resp-bs0y4b": [
       {
         "pattern": "crates/scryer-app/src/commands/export.rs",
@@ -22541,6 +22589,12 @@
         "symbol": "write_planned_tagged"
       }
     ],
+    "resp-n5dm9c": [
+      {
+        "pattern": "crates/xtask/src/main.rs",
+        "symbol": "fmt_check"
+      }
+    ],
     "resp-pcm2a4": [
       {
         "pattern": "crates/scryer-core/src/changes.rs",
@@ -22651,6 +22705,12 @@
       {
         "pattern": "crates/scryer-mcp/src/server.rs",
         "symbol": "slim_schema"
+      }
+    ],
+    "resp-tm5qwy": [
+      {
+        "pattern": "crates/xtask/src/main.rs",
+        "symbol": "fenced_paths"
       }
     ],
     "resp-tmmzts": [
@@ -22775,6 +22835,12 @@
       {
         "pattern": "src/special/ChangesPage.tsx",
         "symbol": "ChangesPage"
+      }
+    ],
+    "resp-z9a0ex": [
+      {
+        "pattern": "crates/xtask/src/main.rs",
+        "symbol": "fmt_check"
       }
     ],
     "resp-z9kn5w": [
@@ -24647,6 +24713,12 @@
         "symbol": "an_event_carrying_an_actor_names_it_instead_of_the_agent"
       }
     ],
+    "resp-b5djjs": [
+      {
+        "pattern": "crates/xtask/tests/cli.rs",
+        "symbol": "resp_b5djjs_checks_the_changed_files_and_the_working_tree_when_asked"
+      }
+    ],
     "resp-bs0y4b": [
       {
         "pattern": "crates/scryer-app/tests/serve.rs",
@@ -25027,6 +25099,12 @@
         "symbol": "slim_schema_drops_generator_noise_and_keeps_structure"
       }
     ],
+    "resp-tm5qwy": [
+      {
+        "pattern": "crates/xtask/tests/cli.rs",
+        "symbol": "resp_tm5qwy_skips_the_paths_the_pin_fences_off"
+      }
+    ],
     "resp-tmmzts": [
       {
         "pattern": "tests/attribution.test.tsx",
@@ -25139,6 +25217,12 @@
       {
         "pattern": "tests/signature.test.ts",
         "symbol": "resp-z5zzvj: the Changes page shows the signature, badge and tooltip"
+      }
+    ],
+    "resp-z9a0ex": [
+      {
+        "pattern": "crates/xtask/tests/cli.rs",
+        "symbol": "resp_z9a0ex_refuses_the_run_naming_every_file_that_falls_short"
       }
     ],
     "resp-z9kn5w": [

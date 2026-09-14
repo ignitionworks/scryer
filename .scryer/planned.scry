@@ -27,6 +27,9 @@
           "statement": "**Present** the model to the developer for authoring, review, and navigation.",
           "lastTouchedAt": 1784883634
         }
+      ],
+      "directives": [
+        "The improved formatting applies to the files a change actively touches: format those, and leave every other file exactly as it is. Never reformat a file the change would not otherwise alter — a tree-wide sweep buries the change it travels with and rewrites the blame of code nobody touched. The formatting gate is scoped the same way, to the files a change touches."
       ]
     },
     {
@@ -242,6 +245,11 @@
           "id": "resp-34",
           "statement": "**Validate** a project's architecture model for structural and source-coverage issues.",
           "lastTouchedAt": 1784883634
+        },
+        {
+          "id": "resp-7j0nyf",
+          "statement": "**Check** the pinned formatting over the files a change touches.",
+          "lastTouchedAt": 1789386995
         }
       ]
     },
@@ -316,6 +324,11 @@
           "id": "resp-3",
           "statement": "**Validate** the project's architecture model for structural and source-coverage issues.",
           "lastTouchedAt": 1784883565
+        },
+        {
+          "id": "resp-n5dm9c",
+          "statement": "**Check** the pinned formatting of the Rust files a change touches, never of the whole tree.",
+          "lastTouchedAt": 1789386995
         }
       ]
     },
@@ -13591,6 +13604,29 @@
           "id": "resp-rw7xhr",
           "statement": "**While** mounted in a host's pane, **confine** every full-surface overlay to the mount root the bridge provides rather than the window, so a guest never covers its host's chrome.",
           "lastTouchedAt": 1789317113
+        }
+      ]
+    },
+    {
+      "id": "node-4yw7sv",
+      "kind": "symbol",
+      "name": "fmt_check",
+      "parentId": "node-10",
+      "responsibilities": [
+        {
+          "id": "resp-b5djjs",
+          "statement": "**When** run, **check** the pinned formatting over exactly the Rust files that differ from the base ref, plus the working tree's own changes when asked.",
+          "lastTouchedAt": 1789387008
+        },
+        {
+          "id": "resp-z9a0ex",
+          "statement": "**If** a checked file does not match the pinned formatting, **then** **refuse** the run naming every file that falls short.",
+          "lastTouchedAt": 1789387008
+        },
+        {
+          "id": "resp-tm5qwy",
+          "statement": "**Skip** every path the formatting pin's ignore list fences off.",
+          "lastTouchedAt": 1789387008
         }
       ]
     }
