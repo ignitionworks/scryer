@@ -298,7 +298,7 @@ impl ScryerServer {
          containers.\n\
          Rules: naming, links-same-level"
     )]
-    fn add_person(
+    pub fn add_person(
         &self,
         Parameters(req): Parameters<AddPersonRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -346,7 +346,7 @@ impl ScryerServer {
          system. Plain responsibility statements; ids and status are set for you.\n\
          Rules: system-boundary, externals, naming, statement-ears"
     )]
-    fn add_system(
+    pub fn add_system(
         &self,
         Parameters(req): Parameters<AddSystemRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -397,7 +397,7 @@ impl ScryerServer {
          and status are set for you.\n\
          Rules: containers, altitude, technology, statement-ears, concerns, naming"
     )]
-    fn add_container(
+    pub fn add_container(
         &self,
         Parameters(req): Parameters<AddContainerRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -481,7 +481,7 @@ impl ScryerServer {
          plain string or `{statement, concern?}`; ids and status are set for you.\n\
          Rules: components, altitude, node-justification, statement-ears, concerns, naming"
     )]
-    pub(crate) fn add_component(
+    pub fn add_component(
         &self,
         Parameters(req): Parameters<AddComponentRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -540,7 +540,7 @@ impl ScryerServer {
          layout are set for you.\n\
          Rules: groups"
     )]
-    fn add_group(
+    pub fn add_group(
         &self,
         Parameters(req): Parameters<AddGroupRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -643,7 +643,7 @@ impl ScryerServer {
          `properties`, never in prose. Not every definition earns a symbol.\n\
          Rules: symbols, node-justification, altitude, statement-ears, source-map"
     )]
-    fn add_symbol(
+    pub fn add_symbol(
         &self,
         Parameters(req): Parameters<AddSymbolRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -747,7 +747,7 @@ impl ScryerServer {
          Rules: drift-directions, drift-homing, drift-properties, drift-stale-nodes, \
          vagrant-stale"
     )]
-    fn flag_drift(
+    pub fn flag_drift(
         &self,
         Parameters(req): Parameters<FlagDriftRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1217,7 +1217,7 @@ impl ScryerServer {
          anything you skipped will not resurface. Also re-baselines a clean model.\n\
          Rules: drift-first"
     )]
-    fn reconcile_drift(
+    pub fn reconcile_drift(
         &self,
         Parameters(req): Parameters<ReconcileDriftRequest>,
     ) -> Result<CallToolResult, McpError> {

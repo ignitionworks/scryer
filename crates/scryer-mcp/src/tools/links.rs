@@ -18,7 +18,7 @@ impl ScryerServer {
          missing endpoints, self-loops, and ancestor↔descendant links. Returns the link ids.\n\
          Rules: links-same-level, one-link, mentions-imply-links"
     )]
-    fn add_links(
+    pub fn add_links(
         &self,
         Parameters(req): Parameters<AddLinkRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -30,12 +30,13 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
-        let node_ids: HashSet<String> =
-            model.nodes.iter().map(|n| n.id.clone()).collect();
+        let node_ids: HashSet<String> = model.nodes.iter().map(|n| n.id.clone()).collect();
         let mut added: Vec<String> = Vec::new();
         let mut reused: Vec<String> = Vec::new();
         for item in &req.links {
@@ -98,8 +99,9 @@ impl ScryerServer {
             .links
             .iter()
             .filter_map(|item| {
-                scryer_core::validate::link_violation(&model, &item.src, &item.dst)
-                    .map(|v| scryer_core::validate::describe_violation(&model, &item.src, &item.dst, &v))
+                scryer_core::validate::link_violation(&model, &item.src, &item.dst).map(|v| {
+                    scryer_core::validate::describe_violation(&model, &item.src, &item.dst, &v)
+                })
             })
             .collect();
         if !violations.is_empty() {
@@ -147,7 +149,7 @@ impl ScryerServer {
          be legal.\n\
          Rules: links-same-level, one-link"
     )]
-    fn update_links(
+    pub fn update_links(
         &self,
         Parameters(req): Parameters<UpdateLinkRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -159,7 +161,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -205,7 +209,7 @@ impl ScryerServer {
         description = "Delete one or more links by id. Fold the deletion with mark_implemented `link_ids`.\n\
          Rules: fold-in-layers"
     )]
-    fn delete_links(
+    pub fn delete_links(
         &self,
         Parameters(req): Parameters<DeleteLinkRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -217,7 +221,9 @@ impl ScryerServer {
         let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(m) => m,
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(read_fail("model", &model_ref, &e))]));
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
             }
         };
 
@@ -313,7 +319,10 @@ mod tests {
 
         let after = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(after.links.len(), 2);
-        assert_ne!(after.links[0].id, after.links[1].id, "parallel edges stay distinct");
+        assert_ne!(
+            after.links[0].id, after.links[1].id,
+            "parallel edges stay distinct"
+        );
 
         // Clear the first link's method with an empty string.
         let first = after.links[0].id.clone();

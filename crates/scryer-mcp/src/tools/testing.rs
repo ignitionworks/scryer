@@ -58,7 +58,7 @@ impl ScryerServer {
          remaining radius. Call after every run.\n\
          Rules: test-verdicts, test-attachment"
     )]
-    fn ingest_test_report(
+    pub fn ingest_test_report(
         &self,
         Parameters(req): Parameters<IngestTestReportRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -85,16 +85,16 @@ impl ScryerServer {
             Ok(l) => l,
             Err(e) => return Ok(e),
         };
-        let summary = match ingest_report_as(&model_ref, &xml, crate::helpers::env_actor().as_deref())
-        {
-            Ok(s) => s,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Failed to ingest '{}': {e}",
-                    abs.display()
-                ))]));
-            }
-        };
+        let summary =
+            match ingest_report_as(&model_ref, &xml, crate::helpers::env_actor().as_deref()) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "Failed to ingest '{}': {e}",
+                        abs.display()
+                    ))]));
+                }
+            };
         drop(_lock);
 
         let mut msg = format!(
@@ -156,7 +156,7 @@ impl ScryerServer {
          no test never appear (that is health's `untested`). Also summarizes current verdicts.\n\
          Rules: test-verdicts"
     )]
-    fn get_test_radius(
+    pub fn get_test_radius(
         &self,
         Parameters(req): Parameters<GetTestRadiusRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -172,7 +172,10 @@ impl ScryerServer {
         let verdicts = test_statuses(&model_ref).unwrap_or_default();
         let stale = verdicts.iter().filter(|s| s.stale).count();
         let count_fresh = |o: TestOutcome| {
-            verdicts.iter().filter(|s| !s.stale && s.outcome == o).count()
+            verdicts
+                .iter()
+                .filter(|s| !s.stale && s.outcome == o)
+                .count()
         };
         let mut msg = radius_lines(&radius);
         msg.push_str(&format!(
@@ -194,7 +197,7 @@ impl ScryerServer {
          verdict, or outside a git repo.\n\
          Rules: probe-loop"
     )]
-    fn open_probe(
+    pub fn open_probe(
         &self,
         Parameters(req): Parameters<ProbeClaimRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -230,7 +233,10 @@ impl ScryerServer {
                 .unwrap_or_default(),
         );
         if !target.tests.is_empty() {
-            msg.push_str(&format!("\nRun only these test(s): {}", target.tests.join(", ")));
+            msg.push_str(&format!(
+                "\nRun only these test(s): {}",
+                target.tests.join(", ")
+            ));
         }
         msg.push_str(
             "\nMake ONE breaking edit inside the span, run those tests in the worktree, expect \
@@ -247,7 +253,7 @@ impl ScryerServer {
          NOT catch). Call after every open_probe, including when a probe went wrong.\n\
          Rules: probe-loop"
     )]
-    fn close_probe(
+    pub fn close_probe(
         &self,
         Parameters(req): Parameters<EndProbeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -323,7 +329,11 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     /// Keep probe worktrees out of the home directory of whoever runs the
@@ -335,7 +345,10 @@ mod tests {
             // Never clear the root here: nextest gives each test its own
             // process, so a wipe would race sibling tests already using it.
             // Slugs are unique per fixture, and /tmp is the OS's to reap.
-            std::env::set_var("SCRYER_PROBES_DIR", std::env::temp_dir().join("scryer-mcp-probe-tests"));
+            std::env::set_var(
+                "SCRYER_PROBES_DIR",
+                std::env::temp_dir().join("scryer-mcp-probe-tests"),
+            );
         });
     }
 
@@ -419,7 +432,9 @@ mod tests {
         let (server, dir) = tested_project();
         // Before any report: the radius names the attached test file.
         let before = server
-            .get_test_radius(Parameters(GetTestRadiusRequest { project: project_arg(&dir) }))
+            .get_test_radius(Parameters(GetTestRadiusRequest {
+                project: project_arg(&dir),
+            }))
             .unwrap();
         let text = text_of(&before);
         assert!(text.contains("src/m.spec.ts"), "{text}");
@@ -437,7 +452,9 @@ mod tests {
         assert!(text.contains("Radius clear"), "{text}");
 
         let after = server
-            .get_test_radius(Parameters(GetTestRadiusRequest { project: project_arg(&dir) }))
+            .get_test_radius(Parameters(GetTestRadiusRequest {
+                project: project_arg(&dir),
+            }))
             .unwrap();
         let text = text_of(&after);
         assert!(text.contains("Radius clear"), "{text}");
@@ -460,7 +477,9 @@ mod tests {
         )
         .unwrap();
         let result = server
-            .get_test_radius(Parameters(GetTestRadiusRequest { project: project_arg(&dir) }))
+            .get_test_radius(Parameters(GetTestRadiusRequest {
+                project: project_arg(&dir),
+            }))
             .unwrap();
         let text = text_of(&result);
         assert!(text.contains("src/m.spec.ts"), "{text}");
@@ -546,7 +565,11 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(malformed.is_error, Some(true));
-        assert!(text_of(&malformed).contains("not a JUnit report"), "{}", text_of(&malformed));
+        assert!(
+            text_of(&malformed).contains("not a JUnit report"),
+            "{}",
+            text_of(&malformed)
+        );
     }
 
     // --- probes ---
@@ -578,10 +601,16 @@ mod tests {
 
         let text = text_of(&result);
         assert!(text.contains("src/m.ts:1-3"), "{text}");
-        assert!(text.contains("Run only these test(s): src/m.spec.ts"), "{text}");
+        assert!(
+            text.contains("Run only these test(s): src/m.spec.ts"),
+            "{text}"
+        );
 
         let wt = scryer_core::worktree::worktree_path(dir.path());
-        assert!(text.contains(&wt.display().to_string()), "the worktree is named: {text}");
+        assert!(
+            text.contains(&wt.display().to_string()),
+            "the worktree is named: {text}"
+        );
         assert_eq!(
             std::fs::read_to_string(wt.join("src/m.ts")).unwrap(),
             IMPL_TS,
@@ -606,7 +635,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.is_error, Some(true));
-        assert!(text_of(&result).contains("not a git repository"), "{}", text_of(&result));
+        assert!(
+            text_of(&result).contains("not a git repository"),
+            "{}",
+            text_of(&result)
+        );
     }
 
     /// resp-765: without a verdict there is nothing for a red test to mean.
@@ -622,7 +655,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.is_error, Some(true));
-        assert!(text_of(&result).contains("no recorded verdict"), "{}", text_of(&result));
+        assert!(
+            text_of(&result).contains("no recorded verdict"),
+            "{}",
+            text_of(&result)
+        );
     }
 
     /// resp-766 and resp-762: the mutation lands in the worktree, closing
@@ -641,8 +678,11 @@ mod tests {
         // The subagent breaks the code, as the probe instructed — in the
         // worktree, which is the only place it was given.
         let wt = scryer_core::worktree::worktree_path(dir.path());
-        std::fs::write(wt.join("src/m.ts"), "export function alpha() {\n    return 2;\n}\n")
-            .unwrap();
+        std::fs::write(
+            wt.join("src/m.ts"),
+            "export function alpha() {\n    return 2;\n}\n",
+        )
+        .unwrap();
 
         let result = server
             .close_probe(Parameters(EndProbeRequest {
@@ -737,7 +777,10 @@ mod tests {
 
         probe(vec!["returning 2 went unnoticed".into()]);
         let header = status_header(&r).unwrap();
-        assert!(header.contains("probes: 1 claim with a surviving break"), "{header}");
+        assert!(
+            header.contains("probes: 1 claim with a surviving break"),
+            "{header}"
+        );
         std::fs::remove_dir_all(scryer_core::worktree::worktree_path(dir.path())).ok();
     }
 

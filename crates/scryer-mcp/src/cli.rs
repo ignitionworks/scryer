@@ -14,7 +14,7 @@
 use crate::helpers::{pending_changes, status_counts, StatusCounts};
 use std::path::{Path, PathBuf};
 
-pub(crate) fn run_status(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_status(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut json = false;
     let mut start: Option<PathBuf> = None;
     for a in args {
@@ -32,9 +32,8 @@ pub(crate) fn run_status(args: &[String]) -> Result<(), Box<dyn std::error::Erro
         None => std::env::current_dir()?,
     };
 
-    let counts = find_project(&start).and_then(|project| {
-        status_counts(&scryer_core::ModelRef::ProjectLocal(project))
-    });
+    let counts = find_project(&start)
+        .and_then(|project| status_counts(&scryer_core::ModelRef::ProjectLocal(project)));
     match counts {
         Some(c) if json => println!("{}", status_json(&c)),
         Some(c) => println!("{}", status_line(&c)),
@@ -50,7 +49,7 @@ pub(crate) fn run_status(args: &[String]) -> Result<(), Box<dyn std::error::Erro
 /// is found (a blank segment, not an error), and always exits 0. Also callable
 /// from a user's own statusline script — stdin is only read when it is piped,
 /// and an empty/foreign payload falls back to the process cwd.
-pub(crate) fn run_statusline() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_statusline() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{IsTerminal, Read};
     let mut input = String::new();
     if !std::io::stdin().is_terminal() {
@@ -103,7 +102,7 @@ pub(crate) fn find_project(start: &Path) -> Option<PathBuf> {
 /// flags those dimensions are reported as notes, and dimensions that CANNOT be
 /// verified (no committed baseline / reconcile anchor) say so instead of
 /// passing silently.
-pub(crate) fn run_check(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_check(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut fail_on_drift = false;
     let mut fail_on_pending = false;
     let mut fail_on_tests = true;
@@ -127,7 +126,10 @@ pub(crate) fn run_check(args: &[String]) -> Result<(), Box<dyn std::error::Error
         None => std::env::current_dir()?,
     };
     let Some(project) = find_project(&start) else {
-        eprintln!("scryer check: no model found (searched up from {})", start.display());
+        eprintln!(
+            "scryer check: no model found (searched up from {})",
+            start.display()
+        );
         std::process::exit(2);
     };
     let r = scryer_core::ModelRef::ProjectLocal(project.clone());
@@ -181,7 +183,9 @@ pub(crate) fn check_report(
     // 1) The validator trio the `validate_model` tool runs, on the working view.
     let mut warnings = scryer_core::validate::validate(&working);
     warnings.extend(scryer_core::validate::validate_coverage(&working, project));
-    warnings.extend(scryer_extract::anchors::whole_symbol_warnings(&working, project));
+    warnings.extend(scryer_extract::anchors::whole_symbol_warnings(
+        &working, project,
+    ));
     failures.extend(warnings.into_iter().map(|w| format!("validator: {w}")));
 
     // 2) Anchor fingerprints, when a committed baseline exists. Changed spans
@@ -202,7 +206,10 @@ pub(crate) fn check_report(
                         o.key,
                         o.host_name,
                         o.file,
-                        o.symbol.as_deref().map(|s| format!(" `{s}`")).unwrap_or_default()
+                        o.symbol
+                            .as_deref()
+                            .map(|s| format!(" `{s}`"))
+                            .unwrap_or_default()
                     ));
                 }
                 AnchorState::FileMissing => {
@@ -239,7 +246,12 @@ pub(crate) fn check_report(
         .source_map
         .iter()
         .map(|(k, v)| (k.clone(), v))
-        .chain(working.test_map.iter().map(|(k, v)| (scryer_core::test_key(k), v)))
+        .chain(
+            working
+                .test_map
+                .iter()
+                .map(|(k, v)| (scryer_core::test_key(k), v)),
+        )
         .collect();
     keyed.sort_by(|a, b| a.0.cmp(&b.0));
     for (key, locs) in keyed {
@@ -251,7 +263,10 @@ pub(crate) fn check_report(
                 continue; // already reported off its fingerprint
             }
             if !project.join(&loc.pattern).exists() {
-                failures.push(format!("anchor: '{}' → {} — file does not exist", key, loc.pattern));
+                failures.push(format!(
+                    "anchor: '{}' → {} — file does not exist",
+                    key, loc.pattern
+                ));
             }
         }
     }
@@ -264,7 +279,13 @@ pub(crate) fn check_report(
         if !scopes.is_empty() {
             if fail_on_drift {
                 for s in &scopes {
-                    let mut preview = s.changed_files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+                    let mut preview = s
+                        .changed_files
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     if s.changed_files.len() > 3 {
                         preview.push_str(&format!(", … {} more", s.changed_files.len() - 3));
                     }
@@ -297,9 +318,7 @@ pub(crate) fn check_report(
     //    notes for repos adopting incrementally. No results cache at all is a
     //    NOTE, never a pass — nothing has been verified.
     {
-        let has_test = |id: &str| {
-            working.test_map.get(id).is_some_and(|l| !l.is_empty())
-        };
+        let has_test = |id: &str| working.test_map.get(id).is_some_and(|l| !l.is_empty());
         let mut untested: Vec<String> = Vec::new();
         for n in &committed.nodes {
             if n.kind == scryer_core::Kind::Person || n.external == Some(true) {
@@ -340,13 +359,22 @@ pub(crate) fn check_report(
         }
         let mut lines: Vec<(String, String)> = Vec::new();
         for u in &untested {
-            lines.push(("untested".into(), format!("{u} — testable committed claim with no attached test")));
+            lines.push((
+                "untested".into(),
+                format!("{u} — testable committed claim with no attached test"),
+            ));
         }
         for f in &failing {
-            lines.push(("failing".into(), format!("{f} — current verdict is not passing")));
+            lines.push((
+                "failing".into(),
+                format!("{f} — current verdict is not passing"),
+            ));
         }
         for s in &stale {
-            lines.push(("stale".into(), format!("{s} — verdict fingerprints no longer match the tree; re-run and ingest")));
+            lines.push((
+                "stale".into(),
+                format!("{s} — verdict fingerprints no longer match the tree; re-run and ingest"),
+            ));
         }
         if fail_on_tests {
             failures.extend(lines.iter().map(|(k, l)| format!("{k}: {l}")));
@@ -557,7 +585,10 @@ mod tests {
         scryer_core::write_planned_at(&r, &plan).unwrap();
 
         let c = status_counts(&r).unwrap();
-        assert_eq!(status_line(&c), "scryer: 1 pending across 1 node · no reconcile anchor yet");
+        assert_eq!(
+            status_line(&c),
+            "scryer: 1 pending across 1 node · no reconcile anchor yet"
+        );
     }
 
     /// The line reports BOTH altitudes, because they differ: three reworded
@@ -592,7 +623,10 @@ mod tests {
         let c = status_counts(&r).unwrap();
         assert_eq!(c.pending, 3);
         assert_eq!(c.carriers, 1);
-        assert_eq!(status_line(&c), "scryer: 3 pending across 1 node · no reconcile anchor yet");
+        assert_eq!(
+            status_line(&c),
+            "scryer: 3 pending across 1 node · no reconcile anchor yet"
+        );
     }
 
     /// A clean, fully-anchored model passes — and the unverifiable anchor
@@ -628,7 +662,8 @@ mod tests {
 
         // Add a pending plan item: a note by default, a failure when gating.
         let mut plan = m.clone();
-        plan.nodes.push(node("worker", Kind::Container, "Worker", Some("sys")));
+        plan.nodes
+            .push(node("worker", Kind::Container, "Worker", Some("sys")));
         plan.links.push(scryer_core::Link {
             id: "l-1".into(),
             src: "api".into(),
@@ -642,7 +677,9 @@ mod tests {
         assert!(rep.notes.iter().any(|n| n.contains("pending plan item")));
         let rep = check_report(&r, false, true, true).unwrap();
         assert!(
-            rep.failures.iter().any(|f| f.starts_with("pending: node 'Worker'")),
+            rep.failures
+                .iter()
+                .any(|f| f.starts_with("pending: node 'Worker'")),
             "{:?}",
             rep.failures
         );
@@ -671,8 +708,9 @@ mod tests {
         );
         m.test_map.insert(
             "r-1".into(),
-            vec![serde_json::from_value(serde_json::json!({ "pattern": "tests/gone.rs" }))
-                .unwrap()],
+            vec![
+                serde_json::from_value(serde_json::json!({ "pattern": "tests/gone.rs" })).unwrap(),
+            ],
         );
         scryer_core::write_model_at(&r, &m).unwrap();
 
@@ -712,17 +750,33 @@ mod tests {
         // No baseline: the existence sweep catches the deleted file.
         std::fs::remove_file(dir.path().join("src/auth.rs")).unwrap();
         let rep = check_report(&r, false, false, true).unwrap();
-        let hits = rep.failures.iter().filter(|f| f.contains("src/auth.rs")).count();
-        assert_eq!(hits, 1, "sweep reports the gone file once: {:?}", rep.failures);
+        let hits = rep
+            .failures
+            .iter()
+            .filter(|f| f.contains("src/auth.rs"))
+            .count();
+        assert_eq!(
+            hits, 1,
+            "sweep reports the gone file once: {:?}",
+            rep.failures
+        );
 
         // With a baseline: reported off the fingerprint, still exactly once.
         std::fs::write(dir.path().join("src/auth.rs"), "fn verify() {}\n").unwrap();
         scryer_extract::anchors::write_baseline(&r).unwrap();
         std::fs::remove_file(dir.path().join("src/auth.rs")).unwrap();
         let rep = check_report(&r, false, false, true).unwrap();
-        let hits: Vec<&String> =
-            rep.failures.iter().filter(|f| f.contains("src/auth.rs")).collect();
-        assert_eq!(hits.len(), 1, "fingerprint + sweep must not double-report: {:?}", rep.failures);
+        let hits: Vec<&String> = rep
+            .failures
+            .iter()
+            .filter(|f| f.contains("src/auth.rs"))
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "fingerprint + sweep must not double-report: {:?}",
+            rep.failures
+        );
         assert!(hits[0].contains("file is gone"), "{:?}", hits);
     }
 
@@ -742,7 +796,9 @@ mod tests {
 
         let rep = check_report(&r, false, false, true).unwrap();
         assert!(
-            rep.failures.iter().any(|f| f.starts_with("validator:") && f.contains("ghost-id")),
+            rep.failures
+                .iter()
+                .any(|f| f.starts_with("validator:") && f.contains("ghost-id")),
             "{:?}",
             rep.failures
         );
@@ -869,27 +925,56 @@ mod tests {
 
         let rep = check_report(&r, false, false, true).unwrap();
         assert!(
-            rep.failures.iter().any(|f| f.starts_with("untested:") && f.contains("r-1")),
+            rep.failures
+                .iter()
+                .any(|f| f.starts_with("untested:") && f.contains("r-1")),
             "{:?}",
             rep.failures
         );
-        assert!(!rep.failures.iter().any(|f| f.contains("r-2")), "ubiquitous claims are not gated");
-        assert!(!rep.failures.iter().any(|f| f.contains("r-p")), "a person never expects tests");
+        assert!(
+            !rep.failures.iter().any(|f| f.contains("r-2")),
+            "ubiquitous claims are not gated"
+        );
+        assert!(
+            !rep.failures.iter().any(|f| f.contains("r-p")),
+            "a person never expects tests"
+        );
 
         let rep = check_report(&r, false, false, false).unwrap();
-        assert!(rep.failures.iter().all(|f| !f.starts_with("untested:")), "{:?}", rep.failures);
-        assert!(rep.notes.iter().any(|n| n.contains("1 untested") && n.contains("--no-fail-on-tests")), "{:?}", rep.notes);
+        assert!(
+            rep.failures.iter().all(|f| !f.starts_with("untested:")),
+            "{:?}",
+            rep.failures
+        );
+        assert!(
+            rep.notes
+                .iter()
+                .any(|n| n.contains("1 untested") && n.contains("--no-fail-on-tests")),
+            "{:?}",
+            rep.notes
+        );
 
         // Attach a test but never ingest a report: the cache is missing, so the
         // gate says so instead of passing vacuously.
         m.test_map.insert(
             "r-1".into(),
-            vec![serde_json::from_value(serde_json::json!({ "pattern": "src/auth.rs", "symbol": "verify" })).unwrap()],
+            vec![serde_json::from_value(
+                serde_json::json!({ "pattern": "src/auth.rs", "symbol": "verify" }),
+            )
+            .unwrap()],
         );
         scryer_core::write_model_at(&r, &m).unwrap();
         let rep = check_report(&r, false, false, true).unwrap();
-        assert!(!rep.failures.iter().any(|f| f.starts_with("untested:")), "{:?}", rep.failures);
-        assert!(rep.notes.iter().any(|n| n.contains("no results cache")), "{:?}", rep.notes);
+        assert!(
+            !rep.failures.iter().any(|f| f.starts_with("untested:")),
+            "{:?}",
+            rep.failures
+        );
+        assert!(
+            rep.notes.iter().any(|n| n.contains("no results cache")),
+            "{:?}",
+            rep.notes
+        );
     }
 
     /// A recorded verdict the tree has since moved past fails as `stale`; a
@@ -900,8 +985,16 @@ mod tests {
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::create_dir_all(dir.path().join("tests")).unwrap();
-        std::fs::write(dir.path().join("src/auth.rs"), "fn verify() {\n    let ok = true;\n}\n").unwrap();
-        std::fs::write(dir.path().join("tests/auth.rs"), "#[test]\nfn verifies() {\n    assert!(true);\n}\n").unwrap();
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "fn verify() {\n    let ok = true;\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("tests/auth.rs"),
+            "#[test]\nfn verifies() {\n    assert!(true);\n}\n",
+        )
+        .unwrap();
         let mut m = ScryModel::new();
         m.nodes.push(node("sys", Kind::System, "Acme", None));
         let mut api = node("api", Kind::Container, "API", Some("sys"));
@@ -910,22 +1003,54 @@ mod tests {
         )
         .unwrap()];
         m.nodes.push(api);
-        m.source_map.insert("r-1".into(), vec![serde_json::from_value(serde_json::json!({ "pattern": "src/auth.rs", "symbol": "verify" })).unwrap()]);
-        m.test_map.insert("r-1".into(), vec![serde_json::from_value(serde_json::json!({ "pattern": "tests/auth.rs", "symbol": "verifies" })).unwrap()]);
+        m.source_map.insert(
+            "r-1".into(),
+            vec![serde_json::from_value(
+                serde_json::json!({ "pattern": "src/auth.rs", "symbol": "verify" }),
+            )
+            .unwrap()],
+        );
+        m.test_map.insert(
+            "r-1".into(),
+            vec![serde_json::from_value(
+                serde_json::json!({ "pattern": "tests/auth.rs", "symbol": "verifies" }),
+            )
+            .unwrap()],
+        );
         scryer_core::write_model_at(&r, &m).unwrap();
 
         let pass = r#"<testsuites><testsuite name="a"><testcase classname="tests/auth.rs" name="verifies"/></testsuite></testsuites>"#;
         scryer_extract::test_status::ingest_report(&r, pass).unwrap();
         let rep = check_report(&r, false, false, true).unwrap();
-        assert!(rep.failures.is_empty(), "verified claim passes: {:?}", rep.failures);
+        assert!(
+            rep.failures.is_empty(),
+            "verified claim passes: {:?}",
+            rep.failures
+        );
 
-        std::fs::write(dir.path().join("src/auth.rs"), "fn verify() {\n    let ok = false;\n}\n").unwrap();
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "fn verify() {\n    let ok = false;\n}\n",
+        )
+        .unwrap();
         let rep = check_report(&r, false, false, true).unwrap();
-        assert!(rep.failures.iter().any(|f| f.starts_with("stale:") && f.contains("r-1")), "{:?}", rep.failures);
+        assert!(
+            rep.failures
+                .iter()
+                .any(|f| f.starts_with("stale:") && f.contains("r-1")),
+            "{:?}",
+            rep.failures
+        );
 
         let fail = r#"<testsuites><testsuite name="a"><testcase classname="tests/auth.rs" name="verifies"><failure message="boom"/></testcase></testsuite></testsuites>"#;
         scryer_extract::test_status::ingest_report(&r, fail).unwrap();
         let rep = check_report(&r, false, false, true).unwrap();
-        assert!(rep.failures.iter().any(|f| f.starts_with("failing:") && f.contains("r-1")), "{:?}", rep.failures);
+        assert!(
+            rep.failures
+                .iter()
+                .any(|f| f.starts_with("failing:") && f.contains("r-1")),
+            "{:?}",
+            rep.failures
+        );
     }
 }

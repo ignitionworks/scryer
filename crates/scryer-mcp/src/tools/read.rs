@@ -417,7 +417,7 @@ impl ScryerServer {
          PLAN by default; `layer: \"committed\"` reads what the code currently satisfies.\n\
          Rules: model-layers, directives-binding"
     )]
-    fn read_model(
+    pub fn read_model(
         &self,
         Parameters(req): Parameters<ReadModelRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -504,7 +504,7 @@ impl ScryerServer {
          Optional `kind` filter; top 50. Then read_model `{node}` into a hit.\n\
          Rules: loop-orient"
     )]
-    fn search_model(
+    pub fn search_model(
         &self,
         Parameters(req): Parameters<SearchModelRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -600,7 +600,7 @@ impl ScryerServer {
          of orient.\n\
          Rules: orient-phases, directives-binding, test-attachment"
     )]
-    fn locate(
+    pub fn locate(
         &self,
         Parameters(req): Parameters<LocateRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -708,7 +708,7 @@ impl ScryerServer {
          search_model / read_model dance for coding sessions.\n\
          Rules: orient-phases, loop-orient, directives-binding"
     )]
-    fn orient(
+    pub fn orient(
         &self,
         Parameters(req): Parameters<OrientRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1026,7 +1026,7 @@ impl ScryerServer {
          at 200. The structural complement to search_model.\n\
          Rules: node-justification, symbols"
     )]
-    fn query_model(
+    pub fn query_model(
         &self,
         Parameters(req): Parameters<QueryModelRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1148,7 +1148,7 @@ impl ScryerServer {
          per scope, then reconcile_drift.\n\
          Rules: drift-first, drift-directions"
     )]
-    fn get_drift(
+    pub fn get_drift(
         &self,
         Parameters(req): Parameters<GetDriftRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1233,7 +1233,7 @@ impl ScryerServer {
          calling mark_implemented folds it.\n\
          Rules: model-layers, change-ledger"
     )]
-    pub(crate) fn get_pending(
+    pub fn get_pending(
         &self,
         Parameters(req): Parameters<GetPendingRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1451,7 +1451,7 @@ impl ScryerServer {
          infer conventions from existing nodes.\n\
          Rules: user-owns-intent"
     )]
-    fn get_rules(
+    pub fn get_rules(
         &self,
         Parameters(req): Parameters<GetRulesRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1511,7 +1511,7 @@ impl ScryerServer {
          .gitignore.\n\
          Rules: generation-fill, codebase-as-evidence"
     )]
-    fn read_codebase(
+    pub fn read_codebase(
         &self,
         Parameters(req): Parameters<ReadCodebaseRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1531,7 +1531,7 @@ impl ScryerServer {
          query_model. Ignores wording.\n\
          Rules: fold-post-flight, node-justification, links-same-level"
     )]
-    fn validate_model(
+    pub fn validate_model(
         &self,
         Parameters(req): Parameters<ValidateModelRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1614,7 +1614,7 @@ impl ScryerServer {
          WHERE work is needed before reading subtrees.\n\
          Rules: health-reading, completeness-layered, loop-orient"
     )]
-    fn get_health(
+    pub fn get_health(
         &self,
         Parameters(req): Parameters<GetHealthRequest>,
     ) -> Result<CallToolResult, McpError> {

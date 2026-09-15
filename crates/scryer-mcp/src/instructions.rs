@@ -3,7 +3,7 @@
 /// live in `scryer_core::rules` and are fetched with `get_rules {id}` when the
 /// agent reaches that step. Every tool description ends with its own `Rules:`
 /// line the same way.
-pub(crate) const INSTRUCTIONS: &str = "\
+pub const INSTRUCTIONS: &str = "\
 This project has a scryer architecture model alongside its code: a tree of what each part is \
 RESPONSIBLE for, mapped to the source that implements it and to the TESTS attached to each claim. \
 It is the user's authored spec, not optional background. While a model exists you work through it: \

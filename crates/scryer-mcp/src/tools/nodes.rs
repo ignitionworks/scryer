@@ -544,7 +544,7 @@ impl ScryerServer {
          interactive editing use the typed add_*/update_*/move_* tools.\n\
          Rules: generation-fill, model-layers"
     )]
-    fn replace_model(
+    pub fn replace_model(
         &self,
         Parameters(req): Parameters<SetModelRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -627,7 +627,7 @@ impl ScryerServer {
          Rules: statement-ears, scanning, altitude, naming, technology, concerns, \
          node-justification"
     )]
-    fn update_nodes(
+    pub fn update_nodes(
         &self,
         Parameters(mut req): Parameters<UpdateNodeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -871,7 +871,7 @@ impl ScryerServer {
          `directives` as the FULL replacement array (empty clears). Writes the plan layer.\n\
          Rules: directives-binding"
     )]
-    fn set_directives(
+    pub fn set_directives(
         &self,
         Parameters(req): Parameters<SetDirectivesRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -961,7 +961,7 @@ impl ScryerServer {
          Rules: fold-evidence-gate, fold-after-sign-off, fold-in-layers, fold-post-flight, \
          test-attachment, anchor-completeness, descope-vs-delete"
     )]
-    fn mark_implemented(
+    pub fn mark_implemented(
         &self,
         Parameters(mut req): Parameters<MarkImplementedRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1802,7 +1802,7 @@ impl ScryerServer {
          after structural moves.\n\
          Rules: links-same-level, groups"
     )]
-    fn move_nodes(
+    pub fn move_nodes(
         &self,
         Parameters(req): Parameters<MoveNodesRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -1977,7 +1977,7 @@ impl ScryerServer {
          interactive editing use the typed tools.\n\
          Rules: generation-fill, model-layers"
     )]
-    fn replace_subtree(
+    pub fn replace_subtree(
         &self,
         Parameters(req): Parameters<SetNodeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -2124,7 +2124,7 @@ impl ScryerServer {
          go with them. If the code is fine and just shouldn't be modeled, use descope instead.\n\
          Rules: descope-vs-delete"
     )]
-    fn delete_nodes(
+    pub fn delete_nodes(
         &self,
         Parameters(req): Parameters<DeleteNodeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -2199,7 +2199,7 @@ impl ScryerServer {
          remove the CODE itself, use delete_nodes.\n\
          Rules: descope-vs-delete, node-justification"
     )]
-    fn descope(
+    pub fn descope(
         &self,
         Parameters(req): Parameters<DescopeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -2280,7 +2280,7 @@ impl ScryerServer {
          moved.\n\
          Rules: altitude"
     )]
-    fn move_responsibilities(
+    pub fn move_responsibilities(
         &self,
         Parameters(req): Parameters<MoveResponsibilitiesRequest>,
     ) -> Result<CallToolResult, McpError> {

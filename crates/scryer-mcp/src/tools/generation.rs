@@ -15,9 +15,7 @@ use rmcp::{
     tool, tool_router, ErrorData as McpError,
 };
 use scryer_core::history::{EventKind, EventRow, HistoryEvent};
-use scryer_core::{
-    Group, Kind, Link, Node, Responsibility, SchemaProperty, SourceLocation,
-};
+use scryer_core::{Group, Kind, Link, Node, Responsibility, SchemaProperty, SourceLocation};
 use std::collections::{HashMap, HashSet};
 
 fn err(msg: impl Into<String>) -> CallToolResult {
@@ -32,7 +30,9 @@ struct IdMinter {
 
 impl IdMinter {
     fn new(model: &scryer_core::ScryModel) -> Self {
-        let mut me = Self { taken: HashSet::new() };
+        let mut me = Self {
+            taken: HashSet::new(),
+        };
         me.absorb(model);
         me
     }
@@ -215,7 +215,7 @@ impl ScryerServer {
          retry. Attach existing tests right after (update_source_map `test_entries`).\n\
          Rules: generation-fill, components, symbols, altitude, test-attachment"
     )]
-    fn fill_container(
+    pub fn fill_container(
         &self,
         Parameters(req): Parameters<CommitContainerModelRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -331,7 +331,10 @@ impl ScryerServer {
                     symbol.source_file.trim().to_string(),
                     symbol.name.trim().to_string(),
                 );
-                if symbol_node_by_loc.insert(loc.clone(), symbol_id.clone()).is_some() {
+                if symbol_node_by_loc
+                    .insert(loc.clone(), symbol_id.clone())
+                    .is_some()
+                {
                     ambiguous_locs.insert(loc);
                 }
                 symbol_component.insert(symbol_id.clone(), component_id.clone());
@@ -399,8 +402,11 @@ impl ScryerServer {
         // be wired legally is dropped and reported, not allowed to reject the
         // whole proposal (which forced the agent into expensive regeneration).
         let link_start = model.links.len();
-        let mut seen_pairs: HashSet<(String, String)> =
-            model.links.iter().map(|l| (l.src.clone(), l.dst.clone())).collect();
+        let mut seen_pairs: HashSet<(String, String)> = model
+            .links
+            .iter()
+            .map(|l| (l.src.clone(), l.dst.clone()))
+            .collect();
         let mut agent_pairs: HashSet<(String, String)> = HashSet::new();
         let mut dropped_links: Vec<String> = Vec::new();
         for proposed in &req.links {
@@ -456,7 +462,8 @@ impl ScryerServer {
         // authorizes it. Both are legal by construction (same-parent siblings),
         // so the agent never has to author — or mis-author — them.
         let mut derived_links = 0usize;
-        if let Some(cache) = scryer_core::build_edges::read_build_edges(&model_ref.build_edges_path())
+        if let Some(cache) =
+            scryer_core::build_edges::read_build_edges(&model_ref.build_edges_path())
         {
             let lookup = |key: &str| -> Option<&String> {
                 let (path, name) = scryer_core::build_edges::BuildEdges::split_symbol_key(key)?;
@@ -525,15 +532,22 @@ impl ScryerServer {
         // Ids were minted against the union of both layers, so the mirrored
         // subtree can't collide with anything already in the draft.
         let mut planned = planned_before;
-        planned.nodes.extend(model.nodes[node_start..].iter().cloned());
-        let planned_pairs: HashSet<(String, String)> =
-            planned.links.iter().map(|l| (l.src.clone(), l.dst.clone())).collect();
+        planned
+            .nodes
+            .extend(model.nodes[node_start..].iter().cloned());
+        let planned_pairs: HashSet<(String, String)> = planned
+            .links
+            .iter()
+            .map(|l| (l.src.clone(), l.dst.clone()))
+            .collect();
         for link in &model.links[link_start..] {
             if !planned_pairs.contains(&(link.src.clone(), link.dst.clone())) {
                 planned.links.push(link.clone());
             }
         }
-        planned.groups.extend(model.groups[group_start..].iter().cloned());
+        planned
+            .groups
+            .extend(model.groups[group_start..].iter().cloned());
         for key in &new_sm_keys {
             if let Some(locs) = model.source_map.get(key) {
                 planned.source_map.insert(key.clone(), locs.clone());
@@ -558,7 +572,9 @@ impl ScryerServer {
             let sym_count = model
                 .nodes
                 .iter()
-                .filter(|n| n.parent_id.as_deref() == Some(comp_id.as_str()) && n.kind == Kind::Symbol)
+                .filter(|n| {
+                    n.parent_id.as_deref() == Some(comp_id.as_str()) && n.kind == Kind::Symbol
+                })
                 .count();
             let text = format!(
                 "{resp_count} responsibilit{} · {sym_count} symbol{} · component",
@@ -731,7 +747,12 @@ mod tests {
         // System pass: append a person to the planned layer, minting an id beyond
         // the committed max (node-2) exactly as the live authoring tools do.
         let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        let person = blank_node("node-3".into(), Kind::Person, "Developer".into(), String::new());
+        let person = blank_node(
+            "node-3".into(),
+            Kind::Person,
+            "Developer".into(),
+            String::new(),
+        );
         planned.nodes.push(person);
         scryer_core::write_planned_at(&model_ref, &planned).unwrap();
 
@@ -742,7 +763,10 @@ mod tests {
 
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert!(
-            planned.nodes.iter().any(|n| n.id == "node-3" && n.kind == Kind::Person),
+            planned
+                .nodes
+                .iter()
+                .any(|n| n.id == "node-3" && n.kind == Kind::Person),
             "the concurrent planned-only person must survive the container commit"
         );
         assert_eq!(
@@ -756,7 +780,11 @@ mod tests {
         );
         // No two nodes share an id — the union minter skipped node-3.
         let ids: HashSet<&str> = planned.nodes.iter().map(|n| n.id.as_str()).collect();
-        assert_eq!(ids.len(), planned.nodes.len(), "ids must stay unique across layers");
+        assert_eq!(
+            ids.len(),
+            planned.nodes.len(),
+            "ids must stay unique across layers"
+        );
 
         // The committed layer carries the container subtree but not the
         // planned-only person (that lands at the build-end fold).
@@ -838,7 +866,11 @@ mod tests {
             scryer_core::read_model_at(&ModelRef::ProjectLocal(dir.path().to_path_buf())).unwrap();
         // Components + symbols survive; only the illegal link is dropped.
         assert_eq!(
-            model.nodes.iter().filter(|n| n.kind == Kind::Symbol).count(),
+            model
+                .nodes
+                .iter()
+                .filter(|n| n.kind == Kind::Symbol)
+                .count(),
             2
         );
         assert_eq!(

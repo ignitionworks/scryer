@@ -4,7 +4,7 @@ use serde::Deserialize;
 /// Which layer of the model a read returns.
 #[derive(Debug, Clone, Copy, Default, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Layer {
+pub enum Layer {
     /// The editable draft you author and the canvas shows (default).
     #[default]
     Plan,
@@ -13,14 +13,14 @@ pub(crate) enum Layer {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct DescopeRequest {
+pub struct DescopeRequest {
     pub project: Option<String>,
     /// Node ids to remove from the model; the code stays.
     pub node_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ReadModelRequest {
+pub struct ReadModelRequest {
     pub project: Option<String>,
     /// Node id to read as a full subtree; omit for the overview down to components.
     pub node: Option<String>,
@@ -30,7 +30,7 @@ pub(crate) struct ReadModelRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct LocateRequest {
+pub struct LocateRequest {
     pub project: Option<String>,
     /// Project-relative source file to look up.
     pub file: String,
@@ -39,7 +39,7 @@ pub(crate) struct LocateRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SearchModelRequest {
+pub struct SearchModelRequest {
     pub project: Option<String>,
     /// Text to find; space-separated terms must ALL match on the node (name, description, technology, statements, labels).
     pub query: String,
@@ -52,7 +52,7 @@ pub(crate) struct SearchModelRequest {
 
 /// One predicate: a `field`, an `op`, and (except for exists/absent) a `value`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct QueryCondition {
+pub struct QueryCondition {
     /// One of kind, name, description, technology (strings); external, empty, vagrant (booleans); responsibilityCount, propertyCount, childCount (numbers).
     pub field: String,
     /// eq, ne (any type); gt, gte, lt, lte (numbers); contains (substring); exists, absent (no value).
@@ -63,7 +63,7 @@ pub(crate) struct QueryCondition {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct QueryModelRequest {
+pub struct QueryModelRequest {
     pub project: Option<String>,
     /// Predicates that must ALL hold (AND); at least one.
     #[serde(rename = "where", alias = "conditions")]
@@ -76,14 +76,14 @@ pub(crate) struct QueryModelRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct GetPendingRequest {
+pub struct GetPendingRequest {
     pub project: Option<String>,
     /// A change id, or "unfiled", to filter the queue to one task.
     pub change: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct OpenChangeRequest {
+pub struct OpenChangeRequest {
     pub project: Option<String>,
     /// Open a NEW change: the task in one sentence, as the dev put it.
     pub rationale: Option<String>,
@@ -92,21 +92,21 @@ pub(crate) struct OpenChangeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SignOffRequest {
+pub struct SignOffRequest {
     pub project: Option<String>,
     /// The change to sign off; defaults to the session's current one.
     pub change_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct CloseChangeRequest {
+pub struct CloseChangeRequest {
     pub project: Option<String>,
     /// The EMPTY open change to close; refused while it has tagged entries.
     pub change_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct RefileRequest {
+pub struct RefileRequest {
     pub project: Option<String>,
     /// Bare ids of pending work to MOVE: node/group (carrier + everything under it), responsibility/link, a change id, or "unfiled".
     pub ids: Vec<String>,
@@ -115,56 +115,56 @@ pub(crate) struct RefileRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct GetDriftRequest {
+pub struct GetDriftRequest {
     pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct NodeMove {
+pub struct NodeMove {
     pub node_id: String,
     /// The new parent; omit to make the node top-level (system/person only).
     pub new_parent_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct MoveNodesRequest {
+pub struct MoveNodesRequest {
     pub project: Option<String>,
     pub moves: Vec<NodeMove>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct GetHealthRequest {
+pub struct GetHealthRequest {
     pub project: Option<String>,
     /// Scope the report to one node's subtree; omit for the whole-model summary.
     pub node_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ReconcileDriftRequest {
+pub struct ReconcileDriftRequest {
     pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct IngestTestReportRequest {
+pub struct IngestTestReportRequest {
     pub project: Option<String>,
     /// The JUnit XML report file, absolute or project-relative.
     pub path: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct GetTestRadiusRequest {
+pub struct GetTestRadiusRequest {
     pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ProbeClaimRequest {
+pub struct ProbeClaimRequest {
     pub project: Option<String>,
     /// The claim to probe; it needs an attached test with a current passing verdict.
     pub resp_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct EndProbeRequest {
+pub struct EndProbeRequest {
     pub project: Option<String>,
     pub resp_id: String,
     /// How many deliberate breaks you tried in total, survivors included.
@@ -175,7 +175,7 @@ pub(crate) struct EndProbeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct MarkImplementedRequest {
+pub struct MarkImplementedRequest {
     pub project: Option<String>,
     /// The node whose planned work you implemented; optional when folding only link_ids / group_ids or a change.
     pub node_id: Option<String>,
@@ -200,7 +200,7 @@ pub(crate) struct MarkImplementedRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct OrientRequest {
+pub struct OrientRequest {
     pub project: Option<String>,
     /// The task in a few words; give this, `files`, or both.
     pub task: Option<String>,
@@ -209,7 +209,7 @@ pub(crate) struct OrientRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct GetRulesRequest {
+pub struct GetRulesRequest {
     /// Rule slug(s) to fetch in full, comma-separated.
     pub id: Option<String>,
     /// Free-text topic matched against titles, tags, and slugs.
@@ -217,24 +217,24 @@ pub(crate) struct GetRulesRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ReadCodebaseRequest {
+pub struct ReadCodebaseRequest {
     pub path: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ValidateModelRequest {
+pub struct ValidateModelRequest {
     pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SetModelRequest {
+pub struct SetModelRequest {
     pub project: Option<String>,
     /// The complete model as a JSON string (version, nodes, links, groups).
     pub data: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateGroupItem {
+pub struct UpdateGroupItem {
     pub group_id: String,
     pub name: Option<String>,
     pub description: Option<String>,
@@ -245,14 +245,14 @@ pub(crate) struct UpdateGroupItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateGroupRequest {
+pub struct UpdateGroupRequest {
     pub project: Option<String>,
     /// Groups to patch by id; only fields present change.
     pub items: Vec<UpdateGroupItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateNodeItem {
+pub struct UpdateNodeItem {
     pub node_id: String,
     /// Node kind: "person", "system", "container", "component", or "symbol".
     pub kind: Option<String>,
@@ -272,26 +272,26 @@ pub(crate) struct UpdateNodeItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct MoveResponsibilityItem {
+pub struct MoveResponsibilityItem {
     pub responsibility_id: String,
     pub from_node_id: String,
     pub to_node_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct MoveResponsibilitiesRequest {
+pub struct MoveResponsibilitiesRequest {
     pub project: Option<String>,
     pub moves: Vec<MoveResponsibilityItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateNodeRequest {
+pub struct UpdateNodeRequest {
     pub project: Option<String>,
     pub nodes: Vec<UpdateNodeItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SetDirectivesItem {
+pub struct SetDirectivesItem {
     /// Node id whose node-level directives (binding its subtree) are replaced; exactly one of node_id / responsibility_id.
     pub node_id: Option<String>,
     /// Responsibility id whose directives are replaced; exactly one of node_id / responsibility_id.
@@ -301,13 +301,13 @@ pub(crate) struct SetDirectivesItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SetDirectivesRequest {
+pub struct SetDirectivesRequest {
     pub project: Option<String>,
     pub items: Vec<SetDirectivesItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SetNodeRequest {
+pub struct SetNodeRequest {
     pub project: Option<String>,
     pub node_id: String,
     /// JSON `{nodes, links}`; nodes are the descendants rooted at node_id, replacing the existing ones.
@@ -315,13 +315,13 @@ pub(crate) struct SetNodeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct DeleteNodeRequest {
+pub struct DeleteNodeRequest {
     pub project: Option<String>,
     pub node_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddLinkItem {
+pub struct AddLinkItem {
     pub src: String,
     pub dst: String,
     /// Short relationship label (max 30 characters).
@@ -331,53 +331,53 @@ pub(crate) struct AddLinkItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddLinkRequest {
+pub struct AddLinkRequest {
     pub project: Option<String>,
     pub links: Vec<AddLinkItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateLinkItem {
+pub struct UpdateLinkItem {
     pub link_id: String,
     pub label: Option<String>,
     pub method: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateLinkRequest {
+pub struct UpdateLinkRequest {
     pub project: Option<String>,
     pub links: Vec<UpdateLinkItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct DeleteLinkRequest {
+pub struct DeleteLinkRequest {
     pub project: Option<String>,
     pub link_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SourceMapEntry {
+pub struct SourceMapEntry {
     pub responsibility_id: String,
     /// Source locations; empty clears the entry.
     pub locations: Vec<SourceLocation>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct BoundaryEntry {
+pub struct BoundaryEntry {
     pub node_id: String,
     /// Boundary globs the node owns; empty clears.
     pub sources: Vec<Source>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SchemaSourceEntry {
+pub struct SchemaSourceEntry {
     pub node_id: String,
     /// Declaration location: `pattern` = file, `symbol` = the type name; empty clears.
     pub locations: Vec<SourceLocation>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UpdateSourceMapRequest {
+pub struct UpdateSourceMapRequest {
     pub project: Option<String>,
     #[serde(default)]
     pub entries: Vec<SourceMapEntry>,
@@ -391,14 +391,14 @@ pub(crate) struct UpdateSourceMapRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SetGroupsRequest {
+pub struct SetGroupsRequest {
     pub project: Option<String>,
     /// JSON: one group or an array; each with name, memberIds, and parentNodeId (the members' parent).
     pub data: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct DeleteGroupRequest {
+pub struct DeleteGroupRequest {
     pub project: Option<String>,
     pub group_id: String,
 }
@@ -412,7 +412,7 @@ pub(crate) struct DeleteGroupRequest {
 // symbols) writes the source map. The agent never constructs the JSON shape.
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct PersonItem {
+pub struct PersonItem {
     pub name: String,
     pub description: Option<String>,
     /// Responsibility statements, each a plain string or `{statement, concern?}`.
@@ -421,14 +421,14 @@ pub(crate) struct PersonItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddPersonRequest {
+pub struct AddPersonRequest {
     pub project: Option<String>,
     pub items: Vec<PersonItem>,
 }
 
 /// System to add at the top level: the one being modeled, or an external it depends on.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SystemItem {
+pub struct SystemItem {
     pub name: String,
     pub description: Option<String>,
     /// Technology badge, mainly for externals; omit for the system being modeled.
@@ -442,13 +442,13 @@ pub(crate) struct SystemItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddSystemRequest {
+pub struct AddSystemRequest {
     pub project: Option<String>,
     pub items: Vec<SystemItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ContainerItem {
+pub struct ContainerItem {
     pub parent_id: String,
     pub name: String,
     /// What it IS as software, a short badge (e.g. PostgreSQL 16).
@@ -465,13 +465,13 @@ pub(crate) struct ContainerItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddContainerRequest {
+pub struct AddContainerRequest {
     pub project: Option<String>,
     pub items: Vec<ContainerItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ComponentItem {
+pub struct ComponentItem {
     pub parent_id: String,
     pub name: String,
     pub description: Option<String>,
@@ -481,14 +481,14 @@ pub(crate) struct ComponentItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddComponentRequest {
+pub struct AddComponentRequest {
     pub project: Option<String>,
     pub items: Vec<ComponentItem>,
 }
 
 /// A group: sibling nodes that ship or package together — a SECONDARY axis, never a substitute for decomposition.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct GroupItem {
+pub struct GroupItem {
     /// Id of the node whose children are being grouped.
     pub parent_id: String,
     pub name: String,
@@ -502,13 +502,13 @@ pub(crate) struct GroupItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddGroupRequest {
+pub struct AddGroupRequest {
     pub project: Option<String>,
     pub items: Vec<GroupItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct PropertyInput {
+pub struct PropertyInput {
     pub label: String,
     #[serde(default)]
     pub description: String,
@@ -517,7 +517,7 @@ pub(crate) struct PropertyInput {
 /// A responsibility: a plain string or `{statement, concern?, line?, endLine?}` (see statement-ears).
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
-pub(crate) enum ResponsibilityInput {
+pub enum ResponsibilityInput {
     Rich {
         statement: String,
         /// ONE kebab-case concern slug; omit for core domain flow.
@@ -559,7 +559,7 @@ impl ResponsibilityInput {
 /// A responsibility: a plain string or `{statement, concern?}` (see statement-ears).
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
-pub(crate) enum StatementInput {
+pub enum StatementInput {
     Rich {
         statement: String,
         /// ONE kebab-case concern slug; omit for core domain flow.
@@ -596,7 +596,7 @@ impl From<String> for StatementInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct SymbolItem {
+pub struct SymbolItem {
     pub parent_id: String,
     pub name: String,
     /// Project-relative file the symbol is defined in; the source map is anchored for you.
@@ -612,7 +612,7 @@ pub(crate) struct SymbolItem {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct AddSymbolRequest {
+pub struct AddSymbolRequest {
     pub project: Option<String>,
     pub items: Vec<SymbolItem>,
 }
@@ -620,7 +620,7 @@ pub(crate) struct AddSymbolRequest {
 // --- Atomic codebase-to-model generation ---
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ProposedComponent {
+pub struct ProposedComponent {
     pub key: String,
     pub name: String,
     pub description: Option<String>,
@@ -632,7 +632,7 @@ pub(crate) struct ProposedComponent {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ProposedSymbol {
+pub struct ProposedSymbol {
     pub key: String,
     pub name: String,
     pub source_file: String,
@@ -646,7 +646,7 @@ pub(crate) struct ProposedSymbol {
 
 /// Optional cross-boundary link the dependency graph cannot infer; endpoints are keys or node ids.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ProposedLink {
+pub struct ProposedLink {
     pub src: String,
     pub dst: String,
     pub label: String,
@@ -654,7 +654,7 @@ pub(crate) struct ProposedLink {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct ProposedGroup {
+pub struct ProposedGroup {
     pub name: String,
     pub description: Option<String>,
     pub member_keys: Vec<String>,
@@ -664,7 +664,7 @@ pub(crate) struct ProposedGroup {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct CommitContainerModelRequest {
+pub struct CommitContainerModelRequest {
     pub project: Option<String>,
     pub container_id: String,
     pub components: Vec<ProposedComponent>,
@@ -676,7 +676,7 @@ pub(crate) struct CommitContainerModelRequest {
 
 /// A behaviour the code has that no responsibility describes — semantic drift.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UndescribedItem {
+pub struct UndescribedItem {
     pub statement: String,
     pub source_file: String,
     pub symbol: Option<String>,
@@ -693,7 +693,7 @@ pub(crate) struct UndescribedItem {
 
 /// A declared field no property describes; lands as a vagrant property.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct UndescribedProperty {
+pub struct UndescribedProperty {
     pub label: String,
     /// What the field holds; omit if self-evident.
     #[serde(default)]
@@ -711,7 +711,7 @@ pub(crate) struct UndescribedProperty {
 
 /// A property whose backing field is gone or changed, addressed by node + label.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct StaleProperty {
+pub struct StaleProperty {
     pub node_id: String,
     pub label: String,
     pub reason: String,
@@ -719,7 +719,7 @@ pub(crate) struct StaleProperty {
 
 /// A node minted vagrant to home code the model has no node for.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct NewNode {
+pub struct NewNode {
     /// Temporary key unique within this call, referenced by nodeKey / parentKey.
     pub key: String,
     pub kind: String,
@@ -737,7 +737,7 @@ pub(crate) struct NewNode {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct StaleResponsibility {
+pub struct StaleResponsibility {
     pub responsibility_id: String,
     pub reason: String,
     /// Corrected wording when the behaviour diverged rather than vanished (see drift-directions).
@@ -746,13 +746,13 @@ pub(crate) struct StaleResponsibility {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct StaleNode {
+pub struct StaleNode {
     pub node_id: String,
     pub reason: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct FlagDriftRequest {
+pub struct FlagDriftRequest {
     pub project: Option<String>,
     pub node_id: String,
     /// Behaviours no responsibility describes; each lands as a vagrant claim.

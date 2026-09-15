@@ -19,7 +19,7 @@ impl ScryerServer {
          tool to attach a test AFTER a fold.\n\
          Rules: source-map, anchor-completeness, test-attachment"
     )]
-    fn update_source_map(
+    pub fn update_source_map(
         &self,
         Parameters(mut req): Parameters<UpdateSourceMapRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -249,7 +249,7 @@ impl ScryerServer {
          / delete_group.\n\
          Rules: groups, generation-fill"
     )]
-    fn replace_groups(
+    pub fn replace_groups(
         &self,
         Parameters(req): Parameters<SetGroupsRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -358,7 +358,7 @@ impl ScryerServer {
          parent).\n\
          Rules: groups"
     )]
-    fn update_group(
+    pub fn update_group(
         &self,
         Parameters(mut req): Parameters<UpdateGroupRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -478,7 +478,7 @@ impl ScryerServer {
         description = "Delete a group by id. Fold the deletion with mark_implemented `group_ids`.\n\
          Rules: fold-in-layers"
     )]
-    fn delete_group(
+    pub fn delete_group(
         &self,
         Parameters(req): Parameters<DeleteGroupRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -538,7 +538,7 @@ impl ScryerServer {
          change is open.\n\
          Rules: change-ledger, loop-plan"
     )]
-    pub(crate) fn open_change(
+    pub fn open_change(
         &self,
         Parameters(req): Parameters<OpenChangeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -658,7 +658,7 @@ impl ScryerServer {
          afterwards lands as an amendment for the developer's verdict instead of folding.\n\
          Rules: sign-off, loop-sign-off, fold-after-sign-off"
     )]
-    pub(crate) fn sign_off(
+    pub fn sign_off(
         &self,
         Parameters(req): Parameters<SignOffRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -765,7 +765,7 @@ impl ScryerServer {
          reverted. Use it to end a task that filed nothing in the plan.\n\
          Rules: change-ledger"
     )]
-    pub(crate) fn close_change(
+    pub fn close_change(
         &self,
         Parameters(req): Parameters<CloseChangeRequest>,
     ) -> Result<CallToolResult, McpError> {
@@ -825,7 +825,7 @@ impl ScryerServer {
          default the session's change.\n\
          Rules: change-ledger"
     )]
-    pub(crate) fn refile(
+    pub fn refile(
         &self,
         Parameters(req): Parameters<RefileRequest>,
     ) -> Result<CallToolResult, McpError> {

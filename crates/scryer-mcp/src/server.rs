@@ -1,6 +1,5 @@
 use crate::instructions::INSTRUCTIONS;
 use rmcp::{
-    handler::server::{router::tool::ToolRouter, tool::ToolCallContext},
     model::{
         CallToolRequestParams, CallToolResult, InitializeRequestParams, InitializeResult,
         ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
@@ -11,9 +10,12 @@ use rmcp::{
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// The MCP server handler: the tool list it advertises and the session state a
+/// call may touch. The handlers themselves are the `impl` blocks in `tools/`,
+/// and every call — from this server or from an embedder's [`crate::Engine`] —
+/// goes through `crate::engine`.
 #[derive(Clone)]
 pub struct ScryerServer {
-    tool_router: ToolRouter<Self>,
     /// The tool list as advertised: the router's tools with their input
     /// schemas slimmed once at construction (see [`slim_schema`]).
     tools: Vec<Tool>,
@@ -49,16 +51,21 @@ impl ScryerServer {
             })
             .collect();
         Self {
-            tool_router,
             tools,
             current_change: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// The advertised tools (slimmed schemas) — what `tools/list` returns.
-    #[cfg(test)]
-    pub(crate) fn tools(&self) -> &[Tool] {
+    /// The advertised tools (slimmed schemas) — what `tools/list` returns and
+    /// what [`crate::catalogue`] is built from.
+    pub fn advertised_tools(&self) -> &[Tool] {
         &self.tools
+    }
+
+    /// The change this session is writing into, with the project it was opened
+    /// in.
+    pub fn current_change(&self) -> Option<(PathBuf, String)> {
+        self.current_change.lock().ok()?.clone()
     }
 
     /// A server whose session already has an open change on `project`, so a
@@ -119,14 +126,25 @@ pub(crate) fn slim_schema(v: &mut serde_json::Value) {
     }
 }
 
+impl Default for ScryerServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ServerHandler for ScryerServer {
+    /// Dispatches through `crate::engine`, the same path an embedder calls, so
+    /// a tool cannot answer one thing over stdio and another in-process.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        context: RequestContext<RoleServer>,
+        _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let tcc = ToolCallContext::new(self, request, context);
-        self.tool_router.call(tcc).await
+        let arguments = request
+            .arguments
+            .map(serde_json::Value::Object)
+            .unwrap_or(serde_json::Value::Null);
+        crate::engine::call_for_server(self, &request.name, arguments)
     }
 
     async fn list_tools(
@@ -160,7 +178,8 @@ impl ServerHandler for ScryerServer {
         &self,
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<InitializeResult, rmcp::ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<InitializeResult, rmcp::ErrorData>> + Send + '_
+    {
         if context.peer.peer_info().is_none() {
             context.peer.set_peer_info(request);
         }
@@ -180,7 +199,7 @@ mod rule_wiring {
 
     fn descriptions() -> Vec<(String, String)> {
         ScryerServer::new()
-            .tools()
+            .advertised_tools()
             .iter()
             .cloned()
             .map(|t| {
@@ -196,7 +215,12 @@ mod rule_wiring {
     fn rules_line(desc: &str) -> Option<Vec<&str>> {
         let last = desc.lines().last()?;
         let rest = last.strip_prefix("Rules: ")?;
-        Some(rest.split(',').map(str::trim).filter(|s| !s.is_empty()).collect())
+        Some(
+            rest.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect(),
+        )
     }
 
     fn cites_a_rule_number(text: &str) -> bool {
@@ -215,7 +239,10 @@ mod rule_wiring {
                 .unwrap_or_else(|| panic!("{name}: description has no trailing `Rules:` line"));
             assert!(!slugs.is_empty(), "{name}: empty Rules line");
             for s in slugs {
-                assert!(rules::get(s).is_some(), "{name} cites unknown rule slug `{s}`");
+                assert!(
+                    rules::get(s).is_some(),
+                    "{name} cites unknown rule slug `{s}`"
+                );
             }
         }
         for s in rules::citations(INSTRUCTIONS) {
@@ -250,12 +277,19 @@ mod rule_wiring {
 
     #[test]
     fn nothing_on_the_surface_cites_a_rule_by_number() {
-        assert!(!cites_a_rule_number(INSTRUCTIONS), "instructions cite a rule number");
+        assert!(
+            !cites_a_rule_number(INSTRUCTIONS),
+            "instructions cite a rule number"
+        );
         for (name, desc) in descriptions() {
             assert!(!cites_a_rule_number(&desc), "{name} cites a rule number");
         }
         for r in rules::RULES {
-            assert!(!cites_a_rule_number(r.body), "rule {} cites a rule number", r.slug);
+            assert!(
+                !cites_a_rule_number(r.body),
+                "rule {} cites a rule number",
+                r.slug
+            );
         }
         assert!(cites_a_rule_number("see rule 22"));
         assert!(!cites_a_rule_number("the rule is"));
@@ -272,9 +306,16 @@ mod rule_wiring {
         );
         let descs = descriptions();
         let total: usize = descs.iter().map(|(_, d)| d.len()).sum();
-        assert!(total <= 16_000, "descriptions total {total} chars (budget 16000)");
+        assert!(
+            total <= 16_000,
+            "descriptions total {total} chars (budget 16000)"
+        );
         for (name, d) in &descs {
-            assert!(d.len() <= 800, "{name} description is {} chars (max 800)", d.len());
+            assert!(
+                d.len() <= 800,
+                "{name} description is {} chars (max 800)",
+                d.len()
+            );
         }
     }
 
@@ -339,7 +380,7 @@ mod rule_wiring {
     fn tool_schemas_stay_within_budget() {
         let server = ScryerServer::new();
         let mut total = 0;
-        for t in server.tools() {
+        for t in server.advertised_tools() {
             let schema = serde_json::Value::Object((*t.input_schema).clone());
             let text = serde_json::to_string(&schema).unwrap();
             let desc = t.description.as_deref().unwrap_or("").len();
@@ -350,8 +391,19 @@ mod rule_wiring {
                 t.name,
                 text.len()
             );
-            for noise in ["\"$schema\"", "\"nullable\"", "\"format\"", "\"minimum\"", "\"title\"", "\"default\":null"] {
-                assert!(!text.contains(noise), "{}: schema still carries {noise}", t.name);
+            for noise in [
+                "\"$schema\"",
+                "\"nullable\"",
+                "\"format\"",
+                "\"minimum\"",
+                "\"title\"",
+                "\"default\":null",
+            ] {
+                assert!(
+                    !text.contains(noise),
+                    "{}: schema still carries {noise}",
+                    t.name
+                );
             }
             let mut strings = Vec::new();
             schema_strings(&schema, "", &mut strings);
@@ -364,6 +416,9 @@ mod rule_wiring {
                 );
             }
         }
-        assert!(total <= 30_000, "schemas total {total} chars (budget 30000)");
+        assert!(
+            total <= 30_000,
+            "schemas total {total} chars (budget 30000)"
+        );
     }
 }

@@ -5,6 +5,10 @@ edition = "2021"
 description = "MCP server for Scryer architecture models"
 authors = ["Alexander Klos"]
 
+[lib]
+name = "scryer_mcp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "scryer-mcp"
 path = "src/main.rs"
