@@ -112,6 +112,16 @@ pub struct CloseChangeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AbandonChangeRequest {
+    pub project: Option<String>,
+    /// The open change to abandon: its planned entries go with it.
+    pub change_id: String,
+    /// Why the work is not going to happen. Required: the rationale leaves the
+    /// ledger with the change, so one with no reason cannot be read after.
+    pub why: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RefileRequest {
     pub project: Option<String>,
     /// Bare ids of pending work to MOVE: node/group (carrier + everything under it), responsibility/link, a change id, or "unfiled".

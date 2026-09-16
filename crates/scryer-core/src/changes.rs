@@ -1093,7 +1093,16 @@ fn revert_one(plan: &mut ScryModel, committed: &ScryModel, ec: &ElementChange) {
 /// a caller asks for by name, never a fallback. Refused if dropping an ADDED
 /// node would strand plan children this change does not own — a dangling parent
 /// is worse than a refusal. The caller must hold the model lock.
-pub fn abandon_change(r: &ModelRef, change_id: &str) -> Result<Abandoned, String> {
+///
+/// `why` is the caller's reason for dropping the work, recorded beside the
+/// change's own rationale: the rationale leaves the ledger with the change, and
+/// "it was abandoned" with no reason is the one shape of this a reader cannot
+/// make sense of afterwards.
+pub fn abandon_change(
+    r: &ModelRef,
+    change_id: &str,
+    why: Option<&str>,
+) -> Result<Abandoned, String> {
     let committed = crate::read_model_at(r)?;
     let mut plan = crate::read_planned_seeded_at(r)?;
     let Some(pos) = plan.changes.iter().position(|c| c.id == change_id) else {
@@ -1149,7 +1158,7 @@ pub fn abandon_change(r: &ModelRef, change_id: &str) -> Result<Abandoned, String
     plan.change_map.retain(|k, _| !keys.contains(k));
     let meta = plan.changes.remove(pos);
     crate::write_planned_at(r, &plan)?;
-    record_abandoned(r, &meta, &dropped);
+    record_abandoned(r, &meta, &dropped, why);
     Ok(Abandoned { meta, dropped })
 }
 
@@ -1192,10 +1201,17 @@ pub fn opened_by(before: &ScryModel, after: &ScryModel) -> Vec<ChangeMeta> {
 }
 
 /// The history record of an abandonment: the change, its title and rationale,
-/// and a row per entry that went with it — so "what did this change hold when it
-/// was dropped?" has an answer after the registry entry is gone.
-fn record_abandoned(r: &ModelRef, meta: &ChangeMeta, dropped: &[DroppedEntry]) {
+/// a row per entry that went with it, and the caller's reason when one was
+/// given — so "what did this change hold when it was dropped, and why?" has an
+/// answer after the registry entry is gone.
+fn record_abandoned(r: &ModelRef, meta: &ChangeMeta, dropped: &[DroppedEntry], why: Option<&str>) {
     let mut rows = vec![EventRow::new("✓", meta.rationale.clone())];
+    // The reason rides as a said-thing beside the rationale, labelled in its
+    // own text: two different facts, and a reader has to be able to tell the
+    // change's purpose from the reason it was dropped.
+    if let Some(why) = why.map(str::trim).filter(|w| !w.is_empty()) {
+        rows.push(EventRow::new("✓", format!("why: {why}")));
+    }
     for d in dropped {
         rows.push(EventRow::new("−", format!("{} ({})", d.label, d.what)));
     }
@@ -1811,7 +1827,7 @@ mod tests {
         );
         write_planned_at(&r, &plan).unwrap();
 
-        let abandoned = abandon_change(&r, &doomed).unwrap();
+        let abandoned = abandon_change(&r, &doomed, None).unwrap();
 
         assert_eq!(abandoned.meta.id, doomed);
         let mut what: Vec<(String, String)> = abandoned
@@ -1905,7 +1921,7 @@ mod tests {
         );
         write_planned_at(&r, &plan).unwrap();
 
-        let err = abandon_change(&r, &doomed).unwrap_err();
+        let err = abandon_change(&r, &doomed, None).unwrap_err();
         assert!(err.contains("Child"), "{err}");
         assert!(err.contains("Refile or fold"), "{err}");
 

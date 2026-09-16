@@ -847,7 +847,7 @@ impl ScryerServer {
             Err(e) => return Ok(e),
         };
         if req.drop_entries {
-            let abandoned = match scryer_core::changes::abandon_change(&model_ref, cid) {
+            let abandoned = match scryer_core::changes::abandon_change(&model_ref, cid, None) {
                 Ok(a) => a,
                 Err(e) => {
                     let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
@@ -892,6 +892,81 @@ impl ScryerServer {
              the history log.",
             scryer_core::changes::title_of(&meta)
         ))]))
+    }
+
+    #[tool(
+        description = "ABANDON an open change in ONE call: its planned entries dropped, the \
+         abandonment recorded in history with its rationale, your reason and a row per entry, \
+         and the change closed. Not a close — `close_change` refuses a change that still carries \
+         entries. `why` is required. Discards authored intent; ask for it by name.\n\
+         Rules: change-ledger"
+    )]
+    pub fn abandon_change(
+        &self,
+        Parameters(req): Parameters<AbandonChangeRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let model_ref = resolve_model_ref(req.project.as_deref())?;
+        let open_changes_line = |m: &scryer_core::ScryModel| -> String {
+            if m.changes.is_empty() {
+                return "No open changes.".to_string();
+            }
+            let mut s = String::from("Open changes:");
+            for c in &m.changes {
+                let entries = m.change_map.values().filter(|v| *v == &c.id).count();
+                s.push_str(&format!(
+                    "\n  {} — \"{}\" ({} tagged entr{})",
+                    c.id,
+                    c.rationale,
+                    entries,
+                    if entries == 1 { "y" } else { "ies" }
+                ));
+            }
+            s
+        };
+        let cid = req.change_id.trim();
+        if cid.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Pass change_id — the open change to abandon.".to_string(),
+            )]));
+        }
+        let why = req.why.trim();
+        if why.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Pass why — a reason is required to abandon a change: the rationale leaves the \
+                 ledger with the change, and an abandonment nobody can say the reason for is the \
+                 one shape of this that costs a team anything."
+                    .to_string(),
+            )]));
+        }
+        let _lock = match lock_or_err(&model_ref) {
+            Ok(l) => l,
+            Err(e) => return Ok(e),
+        };
+        let abandoned = match scryer_core::changes::abandon_change(&model_ref, cid, Some(why)) {
+            Ok(a) => a,
+            Err(e) => {
+                let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "{e}\n{}",
+                    open_changes_line(&plan)
+                ))]));
+            }
+        };
+        if self.session_change(&model_ref).as_deref() == Some(cid) {
+            self.set_session_change(None);
+        }
+        let n = abandoned.dropped.len();
+        let mut msg = format!(
+            "Abandoned {cid} — \"{}\": {n} planned entr{} dropped with it, the plan back to \
+             what the committed model says. The abandonment, your reason and what it held are \
+             in the history log.",
+            scryer_core::changes::title_of(&abandoned.meta),
+            if n == 1 { "y" } else { "ies" }
+        );
+        for d in &abandoned.dropped {
+            msg.push_str(&format!("\n  − {} ({})", d.label, d.what));
+        }
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 
     #[tool(
@@ -1612,5 +1687,145 @@ mod tests {
                 .all(|r| r.id != "resp-2"),
             "the added claim went with the change"
         );
+    }
+
+    /// A doomed change, one claim reworded and one added, both tagged to it.
+    fn doomed(dir: &std::path::Path) -> (ModelRef, String, String) {
+        let model_ref = ModelRef::ProjectLocal(dir.to_path_buf());
+        let mut committed = ScryModel::new();
+        let mut n = node("node-1", Kind::Component, "C", None);
+        n.responsibilities = vec![resp("resp-1")];
+        committed.nodes.push(n);
+        scryer_core::write_model_at(&model_ref, &committed).unwrap();
+
+        let mut plan = committed.clone();
+        plan.nodes[0].responsibilities.push(resp("resp-2"));
+        let cid = scryer_core::changes::open_change_titled(
+            &mut plan,
+            Some("Doomed"),
+            "why it existed",
+            100,
+        )
+        .unwrap();
+        scryer_core::changes::tag(
+            &mut plan,
+            &[scryer_core::changes::element_key(
+                scryer_core::diff::ElementKind::Responsibility,
+                None,
+                "resp-2",
+            )],
+            &cid,
+        );
+        scryer_core::write_planned_at(&model_ref, &plan).unwrap();
+        (model_ref, cid, dir.to_string_lossy().to_string())
+    }
+
+    /// Abandoning by NAME is the whole act in one call: the entries go, the
+    /// change leaves the ledger, and the history carries the rationale, the
+    /// caller's reason and a row per entry that went.
+    #[test]
+    fn abandon_change_drops_the_entries_closes_the_change_and_records_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = doomed(dir.path());
+        let server = ScryerServer::new();
+
+        let out = server
+            .abandon_change(Parameters(AbandonChangeRequest {
+                project: Some(project),
+                change_id: cid.clone(),
+                why: "the approach was wrong".into(),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("Doomed"), "{}", said(&out));
+        assert!(said(&out).contains("(added)"), "{}", said(&out));
+
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(after.changes.is_empty(), "the change left the ledger");
+        assert!(after.change_map.is_empty(), "its tags went with it");
+        assert!(
+            after.nodes[0]
+                .responsibilities
+                .iter()
+                .all(|r| r.id != "resp-2"),
+            "the added claim went with the change"
+        );
+
+        let log = scryer_core::history::read_history(&model_ref);
+        let ev = log
+            .iter()
+            .find(|e| e.driver == "abandoned" && e.change_id.as_deref() == Some(cid.as_str()))
+            .expect("the abandonment is in the history log");
+        let rows: Vec<&str> = ev.rows.iter().map(|r| r.text.as_str()).collect();
+        assert!(
+            rows.contains(&"why it existed"),
+            "the change's own rationale: {rows:?}"
+        );
+        assert!(
+            rows.contains(&"why: the approach was wrong"),
+            "the caller's reason, labelled and beside it: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|t| t.contains("(added)")),
+            "a row per entry that went: {rows:?}"
+        );
+    }
+
+    /// The reason is not optional: without it the record loses the only account
+    /// of the change that survives the ledger, so the tool refuses and the
+    /// change is still open.
+    #[test]
+    fn abandon_change_refuses_without_a_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = doomed(dir.path());
+        let server = ScryerServer::new();
+
+        let out = server
+            .abandon_change(Parameters(AbandonChangeRequest {
+                project: Some(project),
+                change_id: cid.clone(),
+                why: "   ".into(),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("why"), "{}", said(&out));
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(
+            after.changes.iter().any(|c| c.id == cid),
+            "the change is untouched"
+        );
+        assert!(after.nodes[0]
+            .responsibilities
+            .iter()
+            .any(|r| r.id == "resp-2"));
+    }
+
+    /// An id that names no open change is told so, with the open ones listed —
+    /// never a silent success on nothing.
+    #[test]
+    fn abandon_change_refuses_a_change_that_is_not_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = doomed(dir.path());
+        let server = ScryerServer::new();
+
+        let out = server
+            .abandon_change(Parameters(AbandonChangeRequest {
+                project: Some(project),
+                change_id: "chg-nope0".into(),
+                why: "a typo".into(),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("chg-nope0"), "{}", said(&out));
+        assert!(
+            said(&out).contains(&cid),
+            "the open ones are listed: {}",
+            said(&out)
+        );
+        assert!(scryer_core::read_planned_at(&model_ref)
+            .unwrap()
+            .changes
+            .iter()
+            .any(|c| c.id == cid));
     }
 }

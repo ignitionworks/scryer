@@ -321,8 +321,8 @@ mod rule_wiring {
         let descs = descriptions();
         let total: usize = descs.iter().map(|(_, d)| d.len()).sum();
         assert!(
-            total <= 16_000,
-            "descriptions total {total} chars (budget 16000)"
+            total <= 16_400,
+            "descriptions total {total} chars (budget 16400)"
         );
         for (name, d) in &descs {
             assert!(
@@ -468,8 +468,8 @@ mod rule_wiring {
             }
         }
         assert!(
-            total <= 30_000,
-            "schemas total {total} chars (budget 30000)"
+            total <= 30_200,
+            "schemas total {total} chars (budget 30200)"
         );
     }
 }

@@ -310,6 +310,7 @@ dispatch_table! {
     open_change => OpenChangeRequest,
     sign_off => SignOffRequest,
     close_change => CloseChangeRequest,
+    abandon_change => AbandonChangeRequest,
     refile => RefileRequest,
     // generation.rs
     fill_container => CommitContainerModelRequest,
@@ -387,6 +388,7 @@ const CLASSIFIED: &[(&str, ToolEffect)] = &[
     ("delete_group", ToolEffect::PlanWrite),
     ("open_change", ToolEffect::PlanWrite),
     ("close_change", ToolEffect::PlanWrite),
+    ("abandon_change", ToolEffect::PlanWrite),
     ("refile", ToolEffect::PlanWrite),
     ("fill_container", ToolEffect::PlanWrite),
     ("open_probe", ToolEffect::PlanWrite),
