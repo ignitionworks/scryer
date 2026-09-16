@@ -454,7 +454,7 @@ pub(crate) fn gate(
                 tests: files.clone(),
             };
         }
-        if ev.verified() {
+        if ev.permits_fold() {
             continue;
         }
         let host = find_resp(planned, id)
@@ -465,7 +465,7 @@ pub(crate) fn gate(
             Evidence::NoVerdict { .. } => "no-verdict",
             Evidence::Stale { .. } => "stale",
             Evidence::Failing { .. } => "failing",
-            Evidence::Verified => unreachable!(),
+            Evidence::Verified | Evidence::External { .. } => unreachable!(),
         };
         let reason = ev.reason();
         if force {

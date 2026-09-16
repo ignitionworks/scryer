@@ -171,10 +171,14 @@ impl ScryerServer {
         };
         let verdicts = test_statuses(&model_ref).unwrap_or_default();
         let stale = verdicts.iter().filter(|s| s.stale).count();
+        // Attachment-only evidence is named, never counted as stale: nobody can
+        // clear it by running anything here, so counting it would put a number
+        // in the line that only ever grows.
+        let external = verdicts.iter().filter(|s| s.external).count();
         let count_fresh = |o: TestOutcome| {
             verdicts
                 .iter()
-                .filter(|s| !s.stale && s.outcome == o)
+                .filter(|s| !s.stale && !s.external && s.outcome == o)
                 .count()
         };
         let mut msg = radius_lines(&radius);
@@ -186,6 +190,11 @@ impl ScryerServer {
             stale,
             verdicts.len()
         ));
+        if external > 0 {
+            msg.push_str(&format!(
+                " {external} on external systems — evidence kept, freshness not computed here."
+            ));
+        }
         Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 

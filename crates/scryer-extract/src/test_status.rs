@@ -89,8 +89,18 @@ pub struct ClaimTestStatus {
     pub outcome: TestOutcome,
     pub cases: usize,
     /// The code behind the claim (implementation or attached test) no longer
-    /// hashes as it did when this outcome was reported.
+    /// hashes as it did when this outcome was reported. Always `false` when
+    /// [`ClaimTestStatus::external`] — read that first, since "not stale" and
+    /// "not computed" are different answers.
     pub stale: bool,
+    /// ATTACHMENT-ONLY evidence: the claim sits on an EXTERNAL system whose
+    /// code this project does not hold, so there is nothing here to fingerprint
+    /// and neither freshness nor staleness is computed. The outcome and its
+    /// moment stand as what a run reported, and nothing beyond that is claimed
+    /// — a fingerprint over code the project cannot see would be a guess either
+    /// way, and a guess is what a verdict must never be.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub external: bool,
     pub recorded_at: u64,
 }
 
@@ -314,6 +324,40 @@ fn provably_fresh(model: &ScryModel, rec: &ClaimRecord, project: &Path) -> Optio
     Some(true)
 }
 
+/// Whether the node that owns `resp_id` is marked EXTERNAL — a system the model
+/// describes but this project does not build.
+fn owner_is_external(model: &ScryModel, resp_id: &str) -> bool {
+    model
+        .nodes
+        .iter()
+        .find(|n| n.responsibilities.iter().any(|r| r.id == resp_id))
+        .is_some_and(|n| n.external == Some(true))
+}
+
+/// Whether this project can SEE the code a verdict would be fingerprinted over:
+/// every file the claim's anchors and attached tests name. A claim with no
+/// locations at all names nothing here, so there is nothing to see.
+///
+/// External and INVISIBLE is the pair that matters: an external node whose code
+/// IS vendored into the checkout fingerprints like any other claim, and must
+/// keep doing so — being external is not on its own a reason to stop checking.
+fn evidence_is_visible(model: &ScryModel, resp_id: &str, project: &Path) -> bool {
+    let locs = model
+        .source_map
+        .get(resp_id)
+        .into_iter()
+        .flatten()
+        .chain(model.test_map.get(resp_id).into_iter().flatten());
+    let mut any = false;
+    for loc in locs {
+        any = true;
+        if !project.join(&loc.pattern).exists() {
+            return false;
+        }
+    }
+    any
+}
+
 /// Read every cached verdict, re-verified against the working tree: the same
 /// anchors are re-resolved and re-hashed, and ANY difference from the record
 /// — content changed, an anchor now unresolvable, an attachment added or
@@ -343,7 +387,14 @@ pub fn test_statuses(r: &ModelRef) -> Result<Vec<ClaimTestStatus>, String> {
         if !live.contains(rec.resp_id.as_str()) {
             continue;
         }
-        let stale = if rec.fingerprints.is_empty() {
+        // A claim on an external system whose code this project does not hold
+        // is attachment-only evidence: there is nothing here to hash, so
+        // neither answer is computed rather than guessed.
+        let external = owner_is_external(&model, &rec.resp_id)
+            && !evidence_is_visible(&model, &rec.resp_id, project);
+        let stale = if external {
+            false
+        } else if rec.fingerprints.is_empty() {
             true
         } else if provably_fresh(&model, rec, project) == Some(true) {
             false
@@ -357,6 +408,7 @@ pub fn test_statuses(r: &ModelRef) -> Result<Vec<ClaimTestStatus>, String> {
             ) != rec.fingerprints
         };
         out.push(ClaimTestStatus {
+            external,
             resp_id: rec.resp_id.clone(),
             outcome: rec.outcome,
             cases: rec.cases,
@@ -385,6 +437,13 @@ pub enum Evidence {
     NoVerdict { tests: Vec<String> },
     /// The recorded verdict's fingerprints no longer match the tree.
     Stale { tests: Vec<String> },
+    /// ATTACHMENT-ONLY evidence: the claim sits on an external system whose
+    /// code this project does not hold. The outcome a run reported stands as
+    /// recorded; whether it still holds is not something this checkout can say.
+    External {
+        outcome: TestOutcome,
+        tests: Vec<String>,
+    },
     /// The current verdict is not `Passed` (failed, errored, or skipped).
     Failing {
         outcome: TestOutcome,
@@ -395,8 +454,20 @@ pub enum Evidence {
 }
 
 impl Evidence {
+    /// A passing verdict this checkout can still vouch for.
     pub fn verified(&self) -> bool {
         matches!(self, Evidence::Verified)
+    }
+
+    /// Whether this evidence lets a claim FOLD. Verified does; so does external
+    /// attachment-only evidence of a passing run, because the alternative is
+    /// that a claim on a system this project does not build could never fold at
+    /// all — the fold would be waiting on a check nobody here can perform. It
+    /// is not the same as [`Evidence::verified`], and the two are kept apart on
+    /// purpose: one says the code was checked, the other says there is nothing
+    /// here to check it against.
+    pub fn permits_fold(&self) -> bool {
+        matches!(self, Evidence::Verified | Evidence::External { .. })
     }
 
     /// The missing fact, in the words a refusal uses.
@@ -418,6 +489,13 @@ impl Evidence {
             Evidence::Failing { outcome, tests } => {
                 format!("verdict {outcome:?}: fix and re-run {}", tests.join(", "))
             }
+            Evidence::External { outcome, tests } => {
+                format!(
+                    "external: {outcome:?} as last reported by {} — this project does not \
+                     hold the code, so the verdict is evidence, not a current check",
+                    tests.join(", ")
+                )
+            }
             Evidence::Verified => "verified".to_string(),
         }
     }
@@ -427,6 +505,7 @@ impl Evidence {
         match self {
             Evidence::NoVerdict { tests }
             | Evidence::Stale { tests }
+            | Evidence::External { tests, .. }
             | Evidence::Failing { tests, .. } => tests,
             _ => &[],
         }
@@ -459,11 +538,17 @@ pub fn claim_evidence(
         } else {
             match verdicts.iter().find(|s| &s.resp_id == id) {
                 None => Evidence::NoVerdict { tests },
-                Some(s) if s.stale => Evidence::Stale { tests },
+                // A failing run is a failing run wherever it ran — the
+                // external case is only about whether it STILL holds.
                 Some(s) if s.outcome != TestOutcome::Passed => Evidence::Failing {
                     outcome: s.outcome,
                     tests,
                 },
+                Some(s) if s.external => Evidence::External {
+                    outcome: s.outcome,
+                    tests,
+                },
+                Some(s) if s.stale => Evidence::Stale { tests },
                 Some(_) => Evidence::Verified,
             }
         };
@@ -497,6 +582,11 @@ pub fn test_blast_radius(r: &ModelRef) -> Result<Vec<RadiusFile>, String> {
         .iter()
         .map(|s| (s.resp_id.as_str(), s.stale))
         .collect();
+    let external_of: BTreeSet<&str> = verdicts
+        .iter()
+        .filter(|s| s.external)
+        .map(|s| s.resp_id.as_str())
+        .collect();
     let live: BTreeSet<&str> = model
         .nodes
         .iter()
@@ -507,6 +597,12 @@ pub fn test_blast_radius(r: &ModelRef) -> Result<Vec<RadiusFile>, String> {
     let mut by_file: BTreeMap<&str, RadiusFile> = BTreeMap::new();
     for (resp_id, locs) in &model.test_map {
         if !live.contains(resp_id.as_str()) {
+            continue;
+        }
+        // External, attachment-only evidence never enters the radius: the
+        // project cannot re-run what it does not hold, and asking for it every
+        // time would make the radius a list nobody can ever finish.
+        if external_of.contains(resp_id.as_str()) {
             continue;
         }
         let stale = match stale_of.get(resp_id.as_str()) {
@@ -915,6 +1011,130 @@ mod tests {
         m.test_map.clear();
         scryer_core::write_model_at(&r, &m).unwrap();
         assert!(test_statuses(&r).unwrap().is_empty());
+    }
+
+    /// Turn the fixture's node into an EXTERNAL system whose code this project
+    /// does not hold: the anchors and the attached test file go the way they
+    /// would if the code lived in another repository.
+    fn make_external_and_absent(r: &ModelRef) {
+        let mut m = working_model(r).unwrap();
+        m.nodes[0].external = Some(true);
+        scryer_core::write_model_at(r, &m).unwrap();
+        std::fs::remove_file(r.project_path().join("src/m.ts")).unwrap();
+        std::fs::remove_file(r.project_path().join("src/m.spec.ts")).unwrap();
+    }
+
+    /// THE CLAIM: a verdict on an external system whose code this project does
+    /// not hold reads as EXTERNAL, never as stale. The same record on a node
+    /// that is NOT external still reads stale — being unreadable is not on its
+    /// own enough; the model has to say the code lives elsewhere.
+    #[test]
+    fn an_external_claim_with_no_fingerprints_reads_external_not_stale() {
+        let (_dir, r) = project();
+        ingest_report(&r, REPORT).unwrap();
+
+        // Not external yet: the old behaviour, unchanged.
+        std::fs::remove_file(r.project_path().join("src/m.ts")).unwrap();
+        std::fs::remove_file(r.project_path().join("src/m.spec.ts")).unwrap();
+        let before = test_statuses(&r).unwrap();
+        assert!(before[0].stale, "a local claim it cannot read is stale");
+        assert!(!before[0].external);
+
+        // Now the model says the code lives on a system this project does not build.
+        let mut m = working_model(&r).unwrap();
+        m.nodes[0].external = Some(true);
+        scryer_core::write_model_at(&r, &m).unwrap();
+
+        let after = test_statuses(&r).unwrap();
+        assert!(after[0].external, "it reads as external");
+        assert!(
+            !after[0].stale,
+            "and NOT as stale — a fingerprint over code the project cannot see \
+             would be a guess either way"
+        );
+        assert_eq!(after[0].outcome, TestOutcome::Passed, "the outcome stands");
+        assert_eq!(
+            after[0].recorded_at, before[0].recorded_at,
+            "so does its moment"
+        );
+    }
+
+    /// Being external is not on its own a reason to stop checking: a claim on an
+    /// external node whose code IS in this checkout — vendored — fingerprints
+    /// like any other, and goes stale when it moves.
+    #[test]
+    fn an_external_claim_whose_code_is_vendored_here_is_still_checked() {
+        let (_dir, r) = project();
+        let mut m = working_model(&r).unwrap();
+        m.nodes[0].external = Some(true);
+        scryer_core::write_model_at(&r, &m).unwrap();
+        ingest_report(&r, REPORT).unwrap();
+
+        let fresh = test_statuses(&r).unwrap();
+        assert!(
+            !fresh[0].external,
+            "the project holds the code, so it is checked"
+        );
+        assert!(!fresh[0].stale);
+
+        std::fs::write(
+            r.project_path().join("src/m.ts"),
+            IMPL_TS.replace("return 1", "return 2"),
+        )
+        .unwrap();
+        let moved = test_statuses(&r).unwrap();
+        assert!(
+            moved[0].stale,
+            "and it still goes stale when the code moves"
+        );
+        assert!(!moved[0].external);
+    }
+
+    /// What the surfaces do with it: the radius never asks for a re-run nobody
+    /// here can perform, and the evidence names the outcome as last reported
+    /// rather than claiming it is current.
+    #[test]
+    fn external_evidence_leaves_the_radius_and_names_itself() {
+        let (_dir, r) = project();
+        ingest_report(&r, REPORT).unwrap();
+        make_external_and_absent(&r);
+
+        let radius = test_blast_radius(&r).unwrap();
+        assert!(
+            radius.is_empty(),
+            "the project cannot re-run what it does not hold: {radius:?}"
+        );
+
+        let ev = claim_evidence(&r, &["r1".to_string()]).unwrap();
+        match &ev["r1"] {
+            Evidence::External { outcome, tests } => {
+                assert_eq!(*outcome, TestOutcome::Passed);
+                assert_eq!(tests, &vec!["src/m.spec.ts".to_string()]);
+            }
+            other => panic!("expected External, got {other:?}"),
+        }
+        assert!(!ev["r1"].verified(), "not the same as verified");
+        assert!(ev["r1"].permits_fold(), "but it does let the claim fold");
+        assert!(ev["r1"].reason().contains("external"));
+    }
+
+    /// A failing run is a failing run wherever it ran: external says nothing
+    /// about whether the outcome was good, only about whether it can be
+    /// re-checked here.
+    #[test]
+    fn an_external_claim_that_failed_still_reads_failing() {
+        let (_dir, r) = project();
+        let failing = REPORT.replace("/>", "><failure message=\"nope\"/></testcase>");
+        ingest_report(&r, &failing).unwrap();
+        make_external_and_absent(&r);
+
+        let ev = claim_evidence(&r, &["r1".to_string()]).unwrap();
+        assert!(
+            matches!(ev["r1"], Evidence::Failing { .. }),
+            "got {:?}",
+            ev["r1"]
+        );
+        assert!(!ev["r1"].permits_fold(), "a failure never folds");
     }
 
     #[test]
