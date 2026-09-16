@@ -235,14 +235,14 @@ mod tests {
         let remote = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7));
 
         assert_eq!(
-            ActorHeader::read(&headers("jesseh"), Some(loopback))
+            ActorHeader::read(&headers("morgan"), Some(loopback))
                 .0
                 .as_deref(),
-            Some("jesseh")
+            Some("morgan")
         );
-        assert_eq!(ActorHeader::read(&headers("jesseh"), Some(remote)).0, None);
+        assert_eq!(ActorHeader::read(&headers("morgan"), Some(remote)).0, None);
         // No peer to check is no ground to believe it either.
-        assert_eq!(ActorHeader::read(&headers("jesseh"), None).0, None);
+        assert_eq!(ActorHeader::read(&headers("morgan"), None).0, None);
         // A blank claim names nobody.
         assert_eq!(ActorHeader::read(&headers("   "), Some(loopback)).0, None);
         assert_eq!(ActorHeader::read(&HeaderMap::new(), Some(loopback)).0, None);

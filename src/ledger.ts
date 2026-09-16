@@ -62,7 +62,7 @@ export const AGENT_ACTOR = "agent";
  *
  *  The agent gets a name a reader recognises — "AI" — rather than the model's
  *  internal word, and an act it made for someone reads as that person's, done
- *  by the AI: "AI on behalf of jesseh". Never the bare actor, never the
+ *  by the AI: "AI on behalf of morgan". Never the bare actor, never the
  *  person's name alone (that would read as the person having done it
  *  themselves, which is the one reading the two-name record exists to
  *  prevent), and never the name of whatever product the agent runs inside —
@@ -84,7 +84,7 @@ export function staleNote(signedOff: SignOff | undefined): string | null {
   return who ? `${who} has edited the plan since` : null;
 }
 
-/** How a sign-off reads to a person: "jesseh", or "AI on behalf of jesseh"
+/** How a sign-off reads to a person: "morgan", or "AI on behalf of morgan"
  *  when the agent gave it on their say-so. `null` when nobody is named — an
  *  unattributed signature says only that one was given. */
 export function signatureLabel(signedOff: SignOff | undefined): string | null {

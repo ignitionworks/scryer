@@ -4770,7 +4770,7 @@ mod tests {
         let cid = countersign_project(&model_ref, true);
         let author = author_of(&model_ref, &cid);
         assert_ne!(author, "agent-session-7");
-        sign_as(&model_ref, &cid, "agent-session-7", Some("jesseh"));
+        sign_as(&model_ref, &cid, "agent-session-7", Some("morgan"));
 
         // Recorded as a proxy before the fold ever looks at it.
         let signed = scryer_core::read_planned_at(&model_ref)
@@ -4781,12 +4781,12 @@ mod tests {
             .and_then(|c| c.signed_off.clone())
             .expect("signed");
         assert_eq!(signed.by.as_deref(), Some("agent-session-7"));
-        assert_eq!(signed.on_behalf_of.as_deref(), Some("jesseh"));
+        assert_eq!(signed.on_behalf_of.as_deref(), Some("morgan"));
 
         let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
         assert!(
             text.contains(&format!(
-                "COUNTERSIGNED {cid} by agent-session-7 on behalf of jesseh"
+                "COUNTERSIGNED {cid} by agent-session-7 on behalf of morgan"
             )),
             "the fold names the proxy it folded on: {text}"
         );
@@ -4880,8 +4880,8 @@ mod tests {
             author_one_claim(&server, &project, "Verifies the token")
         });
 
-        // The host runs its agent for jesseh, and the agent signs.
-        let text = as_actor_for(Some("agent-session-7"), Some("jesseh"), || {
+        // The host runs its agent for morgan, and the agent signs.
+        let text = as_actor_for(Some("agent-session-7"), Some("morgan"), || {
             tool_text(
                 &server
                     .sign_off(Parameters(SignOffRequest {
@@ -4892,7 +4892,7 @@ mod tests {
             )
         });
         assert!(
-            text.contains("Signed by agent-session-7 on behalf of jesseh"),
+            text.contains("Signed by agent-session-7 on behalf of morgan"),
             "{text}"
         );
 
@@ -4903,7 +4903,7 @@ mod tests {
         assert_eq!(approval.by, "agent-session-7", "the actor that signed");
         assert_eq!(
             approval.on_behalf_of.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "and the person it signed for — without this it reads as the agent's own call"
         );
         assert_eq!(approval.change_id.as_deref(), Some(cid.as_str()));
@@ -4917,7 +4917,7 @@ mod tests {
             .and_then(|c| c.signed_off.clone())
             .expect("signed off");
         assert_eq!(snap.by.as_deref(), Some("agent-session-7"));
-        assert_eq!(snap.on_behalf_of.as_deref(), Some("jesseh"));
+        assert_eq!(snap.on_behalf_of.as_deref(), Some("morgan"));
 
         // A developer signing for themselves names nobody else, anywhere.
         let dir2 = tempfile::tempdir().unwrap();
@@ -4927,7 +4927,7 @@ mod tests {
         let cid2 = as_actor(Some("ada-fixture"), || {
             author_one_claim(&server2, &project2, "Verifies the token")
         });
-        as_actor_for(Some("jesseh"), None, || {
+        as_actor_for(Some("morgan"), None, || {
             server2
                 .sign_off(Parameters(SignOffRequest {
                     project: project2.clone(),
@@ -4939,7 +4939,7 @@ mod tests {
             .into_iter()
             .find(|e| e.driver == "signed off")
             .unwrap();
-        assert_eq!(direct.by, "jesseh");
+        assert_eq!(direct.by, "morgan");
         assert!(
             direct.on_behalf_of.is_none(),
             "their own signature is nobody's proxy"
@@ -5082,7 +5082,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
 
-        as_actor_for(Some("agent"), Some("jesseh"), || {
+        as_actor_for(Some("agent"), Some("morgan"), || {
             crate::helpers::record_event(
                 &model_ref,
                 scryer_core::history::HistoryEvent::new(
@@ -5111,7 +5111,7 @@ mod tests {
         assert_eq!(log[0].by, "agent");
         assert_eq!(
             log[0].on_behalf_of.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "the person the fold was made for travels with it"
         );
         assert_eq!(log[1].by, "agent");
@@ -5126,7 +5126,7 @@ mod tests {
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let project = countersign_project_for_mcp(&model_ref);
 
-        let cid = as_actor_for(Some("agent"), Some("jesseh"), || {
+        let cid = as_actor_for(Some("agent"), Some("morgan"), || {
             author_one_claim(&ScryerServer::new(), &project, "Verifies the token")
         });
         let event = scryer_core::history::read_history(&model_ref)
@@ -5136,7 +5136,7 @@ mod tests {
         assert_eq!(event.by, "agent");
         assert_eq!(
             event.on_behalf_of.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "the developer whose say-so the plan was edited on"
         );
 

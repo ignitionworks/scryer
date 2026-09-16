@@ -6,7 +6,7 @@
  * on someone's say-so, the person it acted for. Rendering the record raw put
  * the word "agent" in front of a reader — the engine's internal word for a
  * machine writer, which says nothing about who decided anything — and the
- * proxy form read "by agent, as jesseh's proxy", which is a sentence about
+ * proxy form read "by agent, as morgan's proxy", which is a sentence about
  * bookkeeping rather than about who did the work.
  *
  * The rule, on every surface that names an actor: the agent reads as AI, an
@@ -69,15 +69,15 @@ const event = (over: Partial<HistoryEvent> = {}): HistoryEvent => ({
 
 describe("resp-chsmkg — a sign-off the agent gave reads as the AI's", () => {
   it("resp-chsmkg: the agent signing for a person reads AI on behalf of that person", () => {
-    expect(signatureLabel(snapshot({ by: "agent", onBehalfOf: "jesseh" }))).toBe(
-      "AI on behalf of jesseh",
+    expect(signatureLabel(snapshot({ by: "agent", onBehalfOf: "morgan" }))).toBe(
+      "AI on behalf of morgan",
     );
 
-    // Never the person alone — that would read as jesseh having approved it
+    // Never the person alone — that would read as morgan having approved it
     // himself, which is exactly what the two-name record denies. And never the
     // engine's own word for the writer.
-    const label = signatureLabel(snapshot({ by: "agent", onBehalfOf: "jesseh" }));
-    expect(label).not.toBe("jesseh");
+    const label = signatureLabel(snapshot({ by: "agent", onBehalfOf: "morgan" }));
+    expect(label).not.toBe("morgan");
     expect(label).not.toContain("agent");
   });
 
@@ -86,14 +86,14 @@ describe("resp-chsmkg — a sign-off the agent gave reads as the AI's", () => {
 
     // An actor a host asserted is a name the app knows nothing about, so it
     // passes through — with the person beside it when there is one.
-    expect(signatureLabel(snapshot({ by: "jesseh" }))).toBe("jesseh");
-    expect(signatureLabel(snapshot({ by: "sam", onBehalfOf: "jesseh" }))).toBe(
-      "sam on behalf of jesseh",
+    expect(signatureLabel(snapshot({ by: "morgan" }))).toBe("morgan");
+    expect(signatureLabel(snapshot({ by: "sam", onBehalfOf: "morgan" }))).toBe(
+      "sam on behalf of morgan",
     );
 
     // Unchanged: an unattributed signature says only that one was given.
     expect(signatureLabel(snapshot())).toBeNull();
-    expect(signatureLabel(snapshot({ onBehalfOf: "jesseh" }))).toBeNull();
+    expect(signatureLabel(snapshot({ onBehalfOf: "morgan" }))).toBeNull();
     expect(actorLabel(undefined)).toBeNull();
   });
 });
@@ -129,22 +129,22 @@ describe("resp-chsmkg / resp-tmmzts — the Changes page says it", () => {
   });
 
   it("resp-chsmkg: the signature beside the badge, and its tooltip, both say it", () => {
-    render(snapshot({ by: "agent", onBehalfOf: "jesseh" }));
+    render(snapshot({ by: "agent", onBehalfOf: "morgan" }));
 
     const text = host.textContent ?? "";
-    expect(text).toContain("by AI on behalf of jesseh");
+    expect(text).toContain("by AI on behalf of morgan");
     expect(text).not.toContain("by agent");
     expect(text).not.toContain("proxy");
 
     // The hover text a reader reaches for when the badge is not enough.
     const titles = [...host.querySelectorAll("[title]")].map((el) => el.getAttribute("title") ?? "");
-    expect(titles.some((t) => t.includes("Signed off") && t.includes("by AI on behalf of jesseh"))).toBe(
+    expect(titles.some((t) => t.includes("Signed off") && t.includes("by AI on behalf of morgan"))).toBe(
       true,
     );
   });
 
   it("resp-tmmzts: the re-signing note names the agent as AI", () => {
-    render(snapshot({ by: "jesseh", staledBy: "agent" }));
+    render(snapshot({ by: "morgan", staledBy: "agent" }));
 
     // A plan edit is an act like any other: the hand that moved it is the AI,
     // not "agent".
@@ -180,15 +180,15 @@ describe("resp-h27gc7 — the node timeline says it", () => {
   });
 
   it("resp-h27gc7: a fold the agent made for a person reads AI on behalf of that person", () => {
-    render(event({ by: "agent", onBehalfOf: "jesseh" }));
+    render(event({ by: "agent", onBehalfOf: "morgan" }));
 
     const text = host.textContent ?? "";
-    expect(text).toContain("AI on behalf of jesseh · build");
+    expect(text).toContain("AI on behalf of morgan · build");
     expect(text).not.toContain("agent ·");
-    // Not the person's own act: a fold the AI made on jesseh's say-so is not
-    // jesseh having built it, so the driver is never his name alone.
-    expect(actorLabel("agent", "jesseh")).not.toBe("jesseh");
-    expect(text).not.toMatch(/(^|[^f] )jesseh · build/);
+    // Not the person's own act: a fold the AI made on morgan's say-so is not
+    // morgan having built it, so the driver is never his name alone.
+    expect(actorLabel("agent", "morgan")).not.toBe("morgan");
+    expect(text).not.toMatch(/(^|[^f] )morgan · build/);
   });
 
   it("resp-h27gc7: the agent acting alone reads AI, and a named actor as given", () => {
@@ -206,9 +206,9 @@ describe("resp-h27gc7 — the node timeline says it", () => {
     // while the client mirror did not, the person was dropped on the way in and
     // every act read as the agent's own.
     const parsed = JSON.parse(
-      '{"at":1,"by":"agent","onBehalfOf":"jesseh","driver":"build","kind":"impl","nodeId":"n1","rows":[]}',
+      '{"at":1,"by":"agent","onBehalfOf":"morgan","driver":"build","kind":"impl","nodeId":"n1","rows":[]}',
     ) as HistoryEvent;
-    expect(parsed.onBehalfOf).toBe("jesseh");
-    expect(actorLabel(parsed.by, parsed.onBehalfOf)).toBe("AI on behalf of jesseh");
+    expect(parsed.onBehalfOf).toBe("morgan");
+    expect(actorLabel(parsed.by, parsed.onBehalfOf)).toBe("AI on behalf of morgan");
   });
 });

@@ -12,7 +12,7 @@
 //! anchor tripwire trusts (`anchors`).
 
 use crate::anchors::{is_glob_pattern, resolve_span, span_hash, FileCache};
-use scryer_core::test_results::{parse_junit, match_report, ReportMatch, TestOutcome};
+use scryer_core::test_results::{match_report, parse_junit, ReportMatch, TestOutcome};
 use scryer_core::{read_model_at, read_planned_at, test_key, working_view, ModelRef, ScryModel};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -170,7 +170,11 @@ fn claim_fingerprints(
                     return;
                 };
                 let lines: Vec<&str> = source.lines().collect();
-                let (line, end_line) = if from_glob { (None, None) } else { (loc.line, loc.end_line) };
+                let (line, end_line) = if from_glob {
+                    (None, None)
+                } else {
+                    (loc.line, loc.end_line)
+                };
                 let Ok((start, end)) = resolve_span(
                     source,
                     parse.as_ref(),
@@ -190,8 +194,7 @@ fn claim_fingerprints(
                 let Ok(pattern) = glob::Pattern::new(&loc.pattern) else {
                     continue;
                 };
-                let files =
-                    project_files.get_or_insert_with(|| crate::list_project_files(project));
+                let files = project_files.get_or_insert_with(|| crate::list_project_files(project));
                 for file in files.iter().filter(|f| pattern.matches(f)) {
                     fingerprint(file, true);
                 }
@@ -301,7 +304,9 @@ fn provably_fresh(model: &ScryModel, rec: &ClaimRecord, project: &Path) -> Optio
         return None;
     }
     for file in files {
-        let mtime = std::fs::metadata(project.join(file)).and_then(|m| m.modified()).ok()?;
+        let mtime = std::fs::metadata(project.join(file))
+            .and_then(|m| m.modified())
+            .ok()?;
         if mtime >= recorded_at {
             return None; // touched since the record — the hashes decide
         }
@@ -343,8 +348,13 @@ pub fn test_statuses(r: &ModelRef) -> Result<Vec<ClaimTestStatus>, String> {
         } else if provably_fresh(&model, rec, project) == Some(true) {
             false
         } else {
-            claim_fingerprints(&model, &rec.resp_id, project, &mut files, &mut project_files)
-                != rec.fingerprints
+            claim_fingerprints(
+                &model,
+                &rec.resp_id,
+                project,
+                &mut files,
+                &mut project_files,
+            ) != rec.fingerprints
         };
         out.push(ClaimTestStatus {
             resp_id: rec.resp_id.clone(),
@@ -363,7 +373,11 @@ pub fn test_statuses(r: &ModelRef) -> Result<Vec<ClaimTestStatus>, String> {
 /// current-and-passing or it isn't. `tests` names the attached test files so a
 /// refusal can say exactly what to run.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind", rename_all_fields = "camelCase")]
+#[serde(
+    rename_all = "camelCase",
+    tag = "kind",
+    rename_all_fields = "camelCase"
+)]
 pub enum Evidence {
     /// No test attached at all.
     NoTest,
@@ -372,7 +386,10 @@ pub enum Evidence {
     /// The recorded verdict's fingerprints no longer match the tree.
     Stale { tests: Vec<String> },
     /// The current verdict is not `Passed` (failed, errored, or skipped).
-    Failing { outcome: TestOutcome, tests: Vec<String> },
+    Failing {
+        outcome: TestOutcome,
+        tests: Vec<String>,
+    },
     /// A test is attached and its verdict is current and passing.
     Verified,
 }
@@ -387,10 +404,16 @@ impl Evidence {
         match self {
             Evidence::NoTest => "no test attached".to_string(),
             Evidence::NoVerdict { tests } => {
-                format!("no verdict recorded: run {} and ingest_test_report", tests.join(", "))
+                format!(
+                    "no verdict recorded: run {} and ingest_test_report",
+                    tests.join(", ")
+                )
             }
             Evidence::Stale { tests } => {
-                format!("verdict stale: run {} and ingest_test_report", tests.join(", "))
+                format!(
+                    "verdict stale: run {} and ingest_test_report",
+                    tests.join(", ")
+                )
             }
             Evidence::Failing { outcome, tests } => {
                 format!("verdict {outcome:?}: fix and re-run {}", tests.join(", "))
@@ -437,9 +460,10 @@ pub fn claim_evidence(
             match verdicts.iter().find(|s| &s.resp_id == id) {
                 None => Evidence::NoVerdict { tests },
                 Some(s) if s.stale => Evidence::Stale { tests },
-                Some(s) if s.outcome != TestOutcome::Passed => {
-                    Evidence::Failing { outcome: s.outcome, tests }
-                }
+                Some(s) if s.outcome != TestOutcome::Passed => Evidence::Failing {
+                    outcome: s.outcome,
+                    tests,
+                },
                 Some(_) => Evidence::Verified,
             }
         };
@@ -469,8 +493,10 @@ pub struct RadiusFile {
 pub fn test_blast_radius(r: &ModelRef) -> Result<Vec<RadiusFile>, String> {
     let model = working_model(r)?;
     let verdicts = test_statuses(r)?;
-    let stale_of: BTreeMap<&str, bool> =
-        verdicts.iter().map(|s| (s.resp_id.as_str(), s.stale)).collect();
+    let stale_of: BTreeMap<&str, bool> = verdicts
+        .iter()
+        .map(|s| (s.resp_id.as_str(), s.stale))
+        .collect();
     let live: BTreeSet<&str> = model
         .nodes
         .iter()
@@ -524,7 +550,11 @@ pub fn ingest_report_as(
     let cases = parse_junit(xml)?;
     let report = match_report(&model.test_map, &cases);
     let recorded = record_test_results_as(r, &report, actor)?;
-    Ok(IngestSummary { cases: cases.len(), recorded, report })
+    Ok(IngestSummary {
+        cases: cases.len(),
+        recorded,
+        report,
+    })
 }
 
 /// Where a probe should aim, and what to run afterwards.
@@ -708,8 +738,13 @@ pub fn probe_statuses(r: &ModelRef) -> Result<Vec<ClaimProbeStatus>, String> {
             continue;
         }
         let stale = rec.fingerprints.is_empty()
-            || claim_fingerprints(&model, &rec.resp_id, project, &mut files, &mut project_files)
-                != rec.fingerprints;
+            || claim_fingerprints(
+                &model,
+                &rec.resp_id,
+                project,
+                &mut files,
+                &mut project_files,
+            ) != rec.fingerprints;
         out.push(ClaimProbeStatus {
             resp_id: rec.resp_id.clone(),
             probes: rec.probes,
@@ -804,16 +839,18 @@ mod tests {
         let (_dir, r) = project();
         let model = working_model(&r).unwrap();
         let report = match_report(&model.test_map, &parse_junit(REPORT).unwrap());
-        record_test_results_as(&r, &report, Some("jesseh")).unwrap();
-        assert_eq!(read_cache(&r).results[0].by.as_deref(), Some("jesseh"));
+        record_test_results_as(&r, &report, Some("morgan")).unwrap();
+        assert_eq!(read_cache(&r).results[0].by.as_deref(), Some("morgan"));
 
         record_test_results(&r, &report).unwrap();
-        assert!(read_cache(&r).results[0].by.is_none(), "no actor: unattributed");
+        assert!(
+            read_cache(&r).results[0].by.is_none(),
+            "no actor: unattributed"
+        );
 
-        let legacy: ClaimRecord = serde_json::from_str(
-            r#"{"respId":"r1","outcome":"passed","cases":1,"recordedAt":0}"#,
-        )
-        .unwrap();
+        let legacy: ClaimRecord =
+            serde_json::from_str(r#"{"respId":"r1","outcome":"passed","cases":1,"recordedAt":0}"#)
+                .unwrap();
         assert!(legacy.by.is_none());
     }
 
@@ -905,10 +942,7 @@ mod tests {
         )
         .unwrap();
         assert!(test_statuses(&r).unwrap()[0].stale);
-        let failing = REPORT.replace(
-            "/>",
-            "><failure message=\"expected 1\"/></testcase>",
-        );
+        let failing = REPORT.replace("/>", "><failure message=\"expected 1\"/></testcase>");
         ingest_report(&r, &failing).unwrap();
         let statuses = test_statuses(&r).unwrap();
         assert_eq!(statuses.len(), 1);
@@ -1019,7 +1053,11 @@ mod tests {
         let summary = ingest_report(&r, stranger).unwrap();
         assert_eq!(summary.recorded, 0);
         assert_eq!(summary.report.unmatched_cases, 1);
-        assert_eq!(summary.report.unseen.len(), 1, "the attached test went unseen");
+        assert_eq!(
+            summary.report.unseen.len(),
+            1,
+            "the attached test went unseen"
+        );
     }
 
     // --- probes ---
@@ -1073,7 +1111,11 @@ mod tests {
 
         assert_eq!(target.file, "src/m.ts");
         assert_eq!(target.symbol.as_deref(), Some("alpha"));
-        assert_eq!((target.start_line, target.end_line), (1, 3), "the whole symbol");
+        assert_eq!(
+            (target.start_line, target.end_line),
+            (1, 3),
+            "the whole symbol"
+        );
         assert_eq!(target.tests, vec!["src/m.spec.ts :: answers one"]);
     }
 
@@ -1083,7 +1125,10 @@ mod tests {
     fn probe_results_report_runs_and_survivors_and_omit_the_unprobed() {
         let (_dir, r) = project();
         fresh_statuses(&r);
-        assert!(probe_statuses(&r).unwrap().is_empty(), "unprobed is absent, not clean");
+        assert!(
+            probe_statuses(&r).unwrap().is_empty(),
+            "unprobed is absent, not clean"
+        );
 
         record_probe_result(&r, "r1", 3, vec!["boundary at line 2 survived".into()]).unwrap();
 
@@ -1156,8 +1201,17 @@ mod tests {
         let ids = vec!["r1".to_string(), "ghost".to_string()];
         let ev = claim_evidence(&r, &ids).unwrap();
         assert_eq!(ev["ghost"], Evidence::NoTest);
-        assert_eq!(ev["r1"], Evidence::NoVerdict { tests: vec!["src/m.spec.ts".into()] });
-        assert!(ev["r1"].reason().contains("src/m.spec.ts"), "{}", ev["r1"].reason());
+        assert_eq!(
+            ev["r1"],
+            Evidence::NoVerdict {
+                tests: vec!["src/m.spec.ts".into()]
+            }
+        );
+        assert!(
+            ev["r1"].reason().contains("src/m.spec.ts"),
+            "{}",
+            ev["r1"].reason()
+        );
 
         ingest_report(&r, REPORT).unwrap();
         let ev = claim_evidence(&r, &ids).unwrap();
@@ -1166,7 +1220,12 @@ mod tests {
 
         std::fs::write(dir.path().join("src/m.ts"), IMPL_TS.replace("1", "2")).unwrap();
         let ev = claim_evidence(&r, &ids).unwrap();
-        assert_eq!(ev["r1"], Evidence::Stale { tests: vec!["src/m.spec.ts".into()] });
+        assert_eq!(
+            ev["r1"],
+            Evidence::Stale {
+                tests: vec!["src/m.spec.ts".into()]
+            }
+        );
     }
 
     /// A claim that lives only in the PLAN — with its test attached there —
@@ -1211,8 +1270,14 @@ mod tests {
         let summary = ingest_report(&r, report).unwrap();
         assert_eq!(summary.recorded, 1, "{:?}", summary.report);
         let statuses = test_statuses(&r).unwrap();
-        let s = statuses.iter().find(|s| s.resp_id == "r2").expect("plan-only claim has a verdict");
+        let s = statuses
+            .iter()
+            .find(|s| s.resp_id == "r2")
+            .expect("plan-only claim has a verdict");
         assert!(!s.stale);
-        assert_eq!(claim_evidence(&r, &["r2".to_string()]).unwrap()["r2"], Evidence::Verified);
+        assert_eq!(
+            claim_evidence(&r, &["r2".to_string()]).unwrap()["r2"],
+            Evidence::Verified
+        );
     }
 }

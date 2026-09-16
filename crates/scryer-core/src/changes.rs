@@ -1265,10 +1265,10 @@ mod tests {
             &cid,
         );
 
-        sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
+        sign_off_as(&mut plan, &cid, 200, Some("morgan")).unwrap();
         assert_eq!(
             plan.changes[0].signed_off.as_ref().unwrap().by.as_deref(),
-            Some("jesseh")
+            Some("morgan")
         );
 
         // A canvas save re-stamps with no actor: the signature survives.
@@ -1277,7 +1277,7 @@ mod tests {
         assert_eq!(snap.at, 300);
         assert_eq!(
             snap.by.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "a re-stamp never erases who signed"
         );
 
@@ -1382,7 +1382,7 @@ mod tests {
             &cid,
             200,
             Some("agent-session-7"),
-            Some("jesseh"),
+            Some("morgan"),
         )
         .unwrap();
         record_signed_off(&r, &plan.changes[0]);
@@ -1391,7 +1391,7 @@ mod tests {
         assert_eq!(log[0].by, "agent-session-7", "the signer");
         assert_eq!(
             log[0].on_behalf_of.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "the person it was for"
         );
         assert_eq!(log[0].change_id.as_deref(), Some(cid.as_str()));
@@ -1414,10 +1414,10 @@ mod tests {
             &[element_key(ElementKind::Responsibility, None, "r1")],
             &cid2,
         );
-        sign_off_as(&mut direct, &cid2, 200, Some("jesseh")).unwrap();
+        sign_off_as(&mut direct, &cid2, 200, Some("morgan")).unwrap();
         record_signed_off(&r2, &direct.changes[0]);
         let log = signed_off(&r2);
-        assert_eq!(log[0].by, "jesseh");
+        assert_eq!(log[0].by, "morgan");
         assert!(
             log[0].on_behalf_of.is_none(),
             "not a proxy, so there is nobody to name"
@@ -1452,14 +1452,14 @@ mod tests {
     /// both at once.
     #[test]
     fn resp_pt49rq_a_staled_sign_off_names_the_write_that_staled_it() {
-        let mut plan = model_with_resps(&[("r1", "the sentence jesseh approved")]);
+        let mut plan = model_with_resps(&[("r1", "the sentence morgan approved")]);
         let cid = open_change(&mut plan, "the change", 100);
         tag(
             &mut plan,
             &[element_key(ElementKind::Responsibility, None, "r1")],
             &cid,
         );
-        sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
+        sign_off_as(&mut plan, &cid, 200, Some("morgan")).unwrap();
         plan.nodes[0].responsibilities[0].statement = "a sentence they never read".into();
 
         restamp_signoffs_as(&mut plan, 300, Some("sam"));
@@ -1472,8 +1472,8 @@ mod tests {
         );
         assert_eq!(
             snap.by.as_deref(),
-            Some("jesseh"),
-            "still jesseh's approval, not sam's"
+            Some("morgan"),
+            "still morgan's approval, not sam's"
         );
 
         // The last hand to move it is the one named: a signer chasing this
@@ -1491,7 +1491,7 @@ mod tests {
 
         // Signing again clears the fact and the name together — one field, so
         // there is no way to leave a name behind on a fresh approval.
-        sign_off_as(&mut plan, &cid, 500, Some("jesseh")).unwrap();
+        sign_off_as(&mut plan, &cid, 500, Some("morgan")).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert!(!snap.is_stale());
         assert!(snap.staled_by.is_none());
@@ -1510,7 +1510,7 @@ mod tests {
     /// they always have, which is every solo user and the desktop canvas.
     #[test]
     fn resp_gc5m1s_a_plan_write_by_someone_other_than_the_signer_stales_the_sign_off() {
-        let approved = "the sentence jesseh approved";
+        let approved = "the sentence morgan approved";
         let signed_plan = || {
             let mut plan = model_with_resps(&[("r1", approved)]);
             let cid = open_change(&mut plan, "the change", 100);
@@ -1519,7 +1519,7 @@ mod tests {
                 &[element_key(ElementKind::Responsibility, None, "r1")],
                 &cid,
             );
-            sign_off_as(&mut plan, &cid, 200, Some("jesseh")).unwrap();
+            sign_off_as(&mut plan, &cid, 200, Some("morgan")).unwrap();
             (plan, cid)
         };
         let reworded = |plan: &mut ScryModel| {
@@ -1529,7 +1529,7 @@ mod tests {
         // The signer's own save: re-stamped, as it always was.
         let (mut mine, cid) = signed_plan();
         reworded(&mut mine);
-        let out = restamp_signoffs_as(&mut mine, 300, Some("jesseh"));
+        let out = restamp_signoffs_as(&mut mine, 300, Some("morgan"));
         assert_eq!(out.restamped, vec![cid.clone()]);
         assert!(out.staled.is_empty());
         let snap = mine.changes[0].signed_off.as_ref().unwrap();
@@ -1555,11 +1555,11 @@ mod tests {
         );
         assert_eq!(
             snap.at, 200,
-            "and not re-dated: jesseh signed then, not now"
+            "and not re-dated: morgan signed then, not now"
         );
         assert_eq!(
             snap.by.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "nor re-attributed to the writer"
         );
         assert_eq!(
@@ -1568,8 +1568,8 @@ mod tests {
             "the snapshot still holds what they actually approved"
         );
 
-        // jesseh looks and signs again: a named signature is a fresh approval.
-        sign_off_as(&mut theirs, &cid, 400, Some("jesseh")).unwrap();
+        // morgan looks and signs again: a named signature is a fresh approval.
+        sign_off_as(&mut theirs, &cid, 400, Some("morgan")).unwrap();
         assert!(!theirs.changes[0].signed_off.as_ref().unwrap().is_stale());
 
         // Neither hand named: today's behaviour, untouched. An anonymous save
@@ -1635,7 +1635,7 @@ mod tests {
             &cid,
             200,
             Some("agent-session-7"),
-            Some("jesseh"),
+            Some("morgan"),
         )
         .unwrap();
         let snap = plan.changes[0].signed_off.clone().unwrap();
@@ -1646,7 +1646,7 @@ mod tests {
         );
         assert_eq!(
             snap.on_behalf_of.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "the person it is for"
         );
         assert_eq!(snap.entries.len(), 1, "it is still a real snapshot");
@@ -1658,15 +1658,15 @@ mod tests {
         assert_eq!(snap.by.as_deref(), Some("agent-session-7"));
         assert_eq!(
             snap.on_behalf_of.as_deref(),
-            Some("jesseh"),
+            Some("morgan"),
             "a re-stamp is not a disavowal"
         );
 
         // A named signer owns the whole attribution: signing directly over a
         // proxy signature clears the person, it does not inherit them.
-        sign_off_for(&mut plan, &cid, 400, Some("jesseh"), None).unwrap();
+        sign_off_for(&mut plan, &cid, 400, Some("morgan"), None).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
-        assert_eq!(snap.by.as_deref(), Some("jesseh"));
+        assert_eq!(snap.by.as_deref(), Some("morgan"));
         assert!(
             snap.on_behalf_of.is_none(),
             "a direct sign-off is nobody's proxy"
@@ -1675,7 +1675,7 @@ mod tests {
         // The plain call is a direct sign-off.
         let mut direct = model_with_resps(&[("r1", "exists")]);
         let cid = open_change(&mut direct, "direct", 100);
-        sign_off_as(&mut direct, &cid, 200, Some("jesseh")).unwrap();
+        sign_off_as(&mut direct, &cid, 200, Some("morgan")).unwrap();
         assert!(direct.changes[0]
             .signed_off
             .as_ref()
@@ -1684,7 +1684,7 @@ mod tests {
             .is_none());
 
         // Upstream's shape (no `onBehalfOf`) still loads.
-        let legacy: SignOff = serde_json::from_str(r#"{"at":1,"by":"jesseh"}"#).unwrap();
+        let legacy: SignOff = serde_json::from_str(r#"{"at":1,"by":"morgan"}"#).unwrap();
         assert!(legacy.on_behalf_of.is_none());
     }
 
@@ -1956,7 +1956,7 @@ mod tests {
         let mut plan = read_planned_at(&r).unwrap();
         let cid = open_change_titled(&mut plan, Some("The title"), "why it exists", 1_700_000_000)
             .unwrap();
-        crate::write_planned_for(&r, &plan, Some("the-agent"), Some("the-developer")).unwrap();
+        crate::write_planned_for(&r, &plan, Some("the-agent"), Some("morgan")).unwrap();
 
         let opened: Vec<_> = read_history(&r)
             .into_iter()
@@ -1968,7 +1968,7 @@ mod tests {
         assert_eq!(ev.change_title.as_deref(), Some("The title"));
         assert_eq!(ev.rows[0].text, "why it exists");
         assert_eq!(ev.by, "the-agent");
-        assert_eq!(ev.on_behalf_of.as_deref(), Some("the-developer"));
+        assert_eq!(ev.on_behalf_of.as_deref(), Some("morgan"));
         assert_eq!(
             ev.at, 1_700_000_000,
             "stamped at the change's own moment, not at the write"

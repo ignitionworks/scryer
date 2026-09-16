@@ -433,21 +433,21 @@ mod tests {
         scryer_core::changes::tag(&mut plan, &["resp:resp-1".to_string()], &cid);
         scryer_core::write_planned_at(&r, &plan).unwrap();
 
-        sign_off_change(&state, &path, &cid, Some("jesseh")).unwrap();
+        sign_off_change(&state, &path, &cid, Some("morgan")).unwrap();
         let plan = scryer_core::read_planned_at(&r).unwrap();
         assert_eq!(
             plan.changes[0].signed_off.as_ref().unwrap().by.as_deref(),
-            Some("jesseh")
+            Some("morgan")
         );
 
         // Closing an empty change names the actor on the history record.
         let mut plan = scryer_core::read_planned_at(&r).unwrap();
         let empty = scryer_core::changes::open_change(&mut plan, "never started", 200);
         scryer_core::write_planned_at(&r, &plan).unwrap();
-        close_change(&state, &path, &empty, Some("jesseh")).unwrap();
+        close_change(&state, &path, &empty, Some("morgan")).unwrap();
         let log = scryer_core::history::read_history(&r);
         let abandoned = log.iter().find(|e| e.driver == "abandoned").unwrap();
-        assert_eq!(abandoned.by, "jesseh");
+        assert_eq!(abandoned.by, "morgan");
 
         // And with no actor: recorded, unattributed, never refused.
         let mut plan = scryer_core::read_planned_at(&r).unwrap();
@@ -458,7 +458,6 @@ mod tests {
         assert_eq!(log.last().unwrap().by, "agent");
     }
 
-
     /// resp-gc5m1s — the same rule at the seam a team actually writes through:
     /// a save by the developer who signed follows their approval, a save by
     /// anyone else leaves it where it was and marks it stale. The snapshot,
@@ -468,7 +467,7 @@ mod tests {
         let (_dir, state, path) = project();
         let r = state.model_ref(&path).unwrap();
 
-        let approved = "**When** asked, **answer** the thing jesseh approved";
+        let approved = "**When** asked, **answer** the thing morgan approved";
         let mut plan = scryer_core::read_planned_at(&r).unwrap();
         plan.nodes[0].responsibilities.push(
             serde_json::from_value(serde_json::json!({ "id": "resp-1", "statement": approved }))
@@ -477,7 +476,7 @@ mod tests {
         let cid = scryer_core::changes::open_change(&mut plan, "the change", 100);
         scryer_core::changes::tag(&mut plan, &["resp:resp-1".to_string()], &cid);
         scryer_core::write_planned_at(&r, &plan).unwrap();
-        sign_off_change(&state, &path, &cid, Some("jesseh")).unwrap();
+        sign_off_change(&state, &path, &cid, Some("morgan")).unwrap();
         let signed_at = scryer_core::read_planned_at(&r).unwrap().changes[0]
             .signed_off
             .as_ref()
@@ -492,34 +491,59 @@ mod tests {
             let data = serde_json::to_string(&plan).unwrap();
             write_planned(state, path, &data, Some(&read.revision), who).unwrap();
         };
-        reworded(&state, &path, Some("sam"), "**When** asked, **answer** something else");
+        reworded(
+            &state,
+            &path,
+            Some("sam"),
+            "**When** asked, **answer** something else",
+        );
 
         let plan = scryer_core::read_planned_at(&r).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
-        assert!(snap.is_stale(), "jesseh has not seen what sam wrote");
-        assert_eq!(snap.staled_by.as_deref(), Some("sam"), "and the plan says whose save did it");
-        assert_eq!(snap.at, signed_at, "their signature is not re-dated by someone else's save");
-        assert_eq!(snap.by.as_deref(), Some("jesseh"), "nor re-attributed");
+        assert!(snap.is_stale(), "morgan has not seen what sam wrote");
+        assert_eq!(
+            snap.staled_by.as_deref(),
+            Some("sam"),
+            "and the plan says whose save did it"
+        );
+        assert_eq!(
+            snap.at, signed_at,
+            "their signature is not re-dated by someone else's save"
+        );
+        assert_eq!(snap.by.as_deref(), Some("morgan"), "nor re-attributed");
         assert_eq!(
             snap.entries["resp:resp-1"].statement.as_deref(),
             Some(approved),
             "the snapshot still holds the approved text, so the fold still sees the amendment"
         );
 
-        // jesseh saves their own edit: intent, as it always was.
-        reworded(&state, &path, Some("jesseh"), "**When** asked, **answer** jesseh's own wording");
+        // morgan saves their own edit: intent, as it always was.
+        reworded(
+            &state,
+            &path,
+            Some("morgan"),
+            "**When** asked, **answer** morgan's own wording",
+        );
         let plan = scryer_core::read_planned_at(&r).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
-        assert!(!snap.is_stale(), "the signer's own save is not a surprise to them");
+        assert!(
+            !snap.is_stale(),
+            "the signer's own save is not a surprise to them"
+        );
         assert!(snap.at >= signed_at);
         assert_eq!(
             snap.entries["resp:resp-1"].statement.as_deref(),
-            Some("**When** asked, **answer** jesseh's own wording"),
+            Some("**When** asked, **answer** morgan's own wording"),
             "and the snapshot followed it"
         );
 
         // The desktop names nobody, and behaves exactly as it did before.
-        reworded(&state, &path, None, "**When** asked, **answer** after a canvas save");
+        reworded(
+            &state,
+            &path,
+            None,
+            "**When** asked, **answer** after a canvas save",
+        );
         let plan = scryer_core::read_planned_at(&r).unwrap();
         let snap = plan.changes[0].signed_off.as_ref().unwrap();
         assert!(!snap.is_stale());
@@ -551,20 +575,25 @@ mod tests {
             )
             .unwrap(),
         );
-        plan.change_map.insert("resp:resp-1".to_string(), cid.clone());
+        plan.change_map
+            .insert("resp:resp-1".to_string(), cid.clone());
         let body = serde_json::to_string(&plan).unwrap();
 
         let before = scryer_core::history::read_history(&r).len();
         let write =
-            write_planned(&state, &path, &body, Some(&read.revision), Some("jesseh")).unwrap();
+            write_planned(&state, &path, &body, Some(&read.revision), Some("morgan")).unwrap();
 
         let log = scryer_core::history::read_history(&r);
         let appended: Vec<_> = log.iter().skip(before).collect();
         assert_eq!(appended.len(), 1, "one node touched, one event");
         let ev = appended[0];
-        assert_eq!(ev.kind, scryer_core::history::EventKind::Plan, "its own kind, not a fold");
+        assert_eq!(
+            ev.kind,
+            scryer_core::history::EventKind::Plan,
+            "its own kind, not a fold"
+        );
         assert_eq!(ev.node_id, "node-1");
-        assert_eq!(ev.by, "jesseh", "the actor who saved");
+        assert_eq!(ev.by, "morgan", "the actor who saved");
         assert_eq!(ev.driver, cid, "the change the edits are tagged to");
         assert_eq!(ev.change_id.as_deref(), Some(cid.as_str()));
         assert_eq!(ev.rows.len(), 1);
@@ -573,7 +602,7 @@ mod tests {
 
         // Writing the same plan back changes no claim: nothing is appended.
         let n = scryer_core::history::read_history(&r).len();
-        write_planned(&state, &path, &body, Some(&write.revision), Some("jesseh")).unwrap();
+        write_planned(&state, &path, &body, Some(&write.revision), Some("morgan")).unwrap();
         assert_eq!(
             scryer_core::history::read_history(&r).len(),
             n,

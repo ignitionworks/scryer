@@ -20,17 +20,17 @@ const snapshot = (over: Partial<SignOff> = {}): SignOff => ({
 
 describe("resp-z5zzvj — a signature says who signed, and who for", () => {
   it("resp-z5zzvj: reads a proxy signature apart from the person's own", () => {
-    expect(signatureLabel(snapshot({ by: "jesseh" }))).toBe("jesseh");
+    expect(signatureLabel(snapshot({ by: "morgan" }))).toBe("morgan");
     // An actor a host asserted is a name the app knows nothing about, so it
     // reads as given — with the person it signed for beside it.
-    expect(signatureLabel(snapshot({ by: "agent-session-7", onBehalfOf: "jesseh" }))).toBe(
-      "agent-session-7 on behalf of jesseh",
+    expect(signatureLabel(snapshot({ by: "agent-session-7", onBehalfOf: "morgan" }))).toBe(
+      "agent-session-7 on behalf of morgan",
     );
 
     // Never the person alone: that is precisely the reading the record exists
     // to prevent.
-    expect(signatureLabel(snapshot({ by: "agent-session-7", onBehalfOf: "jesseh" }))).not.toBe(
-      "jesseh",
+    expect(signatureLabel(snapshot({ by: "agent-session-7", onBehalfOf: "morgan" }))).not.toBe(
+      "morgan",
     );
   });
 
@@ -38,27 +38,27 @@ describe("resp-z5zzvj — a signature says who signed, and who for", () => {
     // An unattributed sign-off — the desktop's, and every plan written before
     // the field existed — says only that one was given. No invented name.
     expect(signatureLabel(snapshot())).toBeNull();
-    expect(signatureLabel(snapshot({ onBehalfOf: "jesseh" }))).toBeNull();
+    expect(signatureLabel(snapshot({ onBehalfOf: "morgan" }))).toBeNull();
     expect(signatureLabel(undefined)).toBeNull();
   });
 
   it("resp-h4rf4g: a stale signature says it needs re-signing, and who moved the plan", () => {
     // "Out of date" alone sends the signer looking. The hand that moved it is
     // the difference between that and a question they can ask.
-    expect(staleNote(snapshot({ by: "jesseh", staledBy: "sam" }))).toBe(
+    expect(staleNote(snapshot({ by: "morgan", staledBy: "sam" }))).toBe(
       "sam has edited the plan since",
     );
 
     // A signature that still covers what the plan holds says nothing at all —
     // which is every signature in a project one person writes to.
-    expect(staleNote(snapshot({ by: "jesseh" }))).toBeNull();
+    expect(staleNote(snapshot({ by: "morgan" }))).toBeNull();
     expect(staleNote(snapshot())).toBeNull();
     expect(staleNote(undefined)).toBeNull();
 
     // Stale is about the PLAN moving, never about who approved: the signature
     // still reads as the signer's, so the two never get confused.
-    const staled = snapshot({ by: "jesseh", staledBy: "sam" });
-    expect(signatureLabel(staled)).toBe("jesseh");
+    const staled = snapshot({ by: "morgan", staledBy: "sam" });
+    expect(signatureLabel(staled)).toBe("morgan");
   });
 
   it("resp-h4rf4g: the Changes page renders it beside the signature", () => {

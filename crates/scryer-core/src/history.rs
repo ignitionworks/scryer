@@ -403,7 +403,7 @@ mod tests {
 
         append_event(
             &r,
-            &HistoryEvent::new(100, EventKind::Impl, "n1", "build").by_actor(Some("jesseh")),
+            &HistoryEvent::new(100, EventKind::Impl, "n1", "build").by_actor(Some("morgan")),
         )
         .unwrap();
         append_event(&r, &HistoryEvent::new(200, EventKind::Impl, "n1", "build")).unwrap();
@@ -414,7 +414,7 @@ mod tests {
         .unwrap();
 
         let log = read_history(&r);
-        assert_eq!(log[0].by, "jesseh", "the named actor drove it");
+        assert_eq!(log[0].by, "morgan", "the named actor drove it");
         assert_eq!(log[1].by, "agent", "no actor supplied: unattributed");
         assert_eq!(log[2].by, "agent", "a blank actor names nobody");
     }
@@ -588,7 +588,7 @@ mod tests {
             "an anchor landing and a tag are not claims"
         );
 
-        append_plan_events(&r, &before, &after, Some("jesseh"));
+        append_plan_events(&r, &before, &after, Some("morgan"));
         assert!(
             read_history(&r).is_empty(),
             "nothing appended, so no log at all"
@@ -637,12 +637,12 @@ mod tests {
         let before = plan_of(&[]);
         let after = plan_of(&[("resp-1", "**Retry** once")]);
 
-        append_plan_events(&r, &before, &after, Some("jesseh"));
+        append_plan_events(&r, &before, &after, Some("morgan"));
         append_plan_events(&r, &before, &after, None);
 
         let log = read_history(&r);
         assert_eq!(log.len(), 2);
-        assert_eq!(log[0].by, "jesseh");
+        assert_eq!(log[0].by, "morgan");
         assert_eq!(log[1].by, "agent");
         assert!(log.iter().all(|e| e.kind == EventKind::Plan));
     }
