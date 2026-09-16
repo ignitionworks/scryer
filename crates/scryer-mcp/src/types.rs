@@ -87,6 +87,8 @@ pub struct OpenChangeRequest {
     pub project: Option<String>,
     /// Open a NEW change: the task in one sentence, as the dev put it.
     pub rationale: Option<String>,
+    /// A short name, at most 80 characters. With `change_id`, names that change.
+    pub title: Option<String>,
     /// Resume an EXISTING open change by id instead.
     pub change_id: Option<String>,
 }
@@ -101,8 +103,12 @@ pub struct SignOffRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CloseChangeRequest {
     pub project: Option<String>,
-    /// The EMPTY open change to close; refused while it has tagged entries.
+    /// The open change to close; refused while it has entries unless `drop_entries`.
     pub change_id: String,
+    /// Abandon a change that still HAS entries: each is taken back to what the
+    /// committed model says. Discards authored intent — ask for it by name.
+    #[serde(default)]
+    pub drop_entries: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

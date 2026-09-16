@@ -531,8 +531,9 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "Open a NEW change from `rationale` (the task in one sentence, as the dev put it), or \
-         resume an open one with `change_id` (listed in get_pending's `openChanges`). This \
+        description = "Open a NEW change from `rationale` (the task in one sentence, as the dev put it), \
+         optionally with a `title` (a short name, at most 80 chars); or resume an open one with \
+         `change_id` (listed in get_pending's `openChanges`), where `title` names it. This \
          session's plan writes tag to it from here; `mark_implemented {change}` folds exactly its \
          entries. Open one before any task beyond a one-line fix: plan writes are refused while no \
          change is open.\n\
@@ -603,18 +604,33 @@ impl ScryerServer {
                         ))]));
                     }
                 };
-                let id = scryer_core::changes::open_change(
+                // The title policy is the PROJECT's, and it rides the committed
+                // model; the plan's copy may be a draft that never saw it.
+                if let Ok(committed) = scryer_core::read_model_at(&model_ref) {
+                    plan.policy = committed.policy.clone();
+                }
+                let id = match scryer_core::changes::open_change_titled(
                     &mut plan,
+                    req.title.as_deref(),
                     rationale,
                     scryer_core::drift::now_secs(),
-                );
+                ) {
+                    Ok(id) => id,
+                    Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+                };
+                let named = plan
+                    .changes
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| scryer_core::changes::title_of(c).to_string())
+                    .unwrap_or_default();
                 if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
                     return Ok(CallToolResult::error(vec![Content::text(e)]));
                 }
                 drop(_lock);
                 self.set_session_change(Some((model_ref.project_path().to_path_buf(), id.clone())));
                 Ok(CallToolResult::success(vec![Content::text(format!(
-                    "Opened {id} — \"{rationale}\". Plan writes in this session are now \
+                    "Opened {id} — \"{named}\" ({rationale}). Plan writes in this session are now \
                      tagged to it; fold it with mark_implemented {{change: \"{id}\"}} when \
                      the code is done."
                 ))]))
@@ -622,7 +638,19 @@ impl ScryerServer {
             // Resume: the change object persists in the plan; the session just
             // points at it again.
             (None, Some(cid)) => {
-                let plan = match scryer_core::read_planned_at(&model_ref) {
+                // Naming a change is a plan write; reading one is not.
+                let lock = req
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(|_| lock_or_err(&model_ref));
+                let _lock = match lock {
+                    Some(Ok(l)) => Some(l),
+                    Some(Err(e)) => return Ok(e),
+                    None => None,
+                };
+                let mut plan = match scryer_core::read_planned_at(&model_ref) {
                     Ok(p) => p,
                     Err(e) => {
                         return Ok(CallToolResult::error(vec![Content::text(read_fail(
@@ -630,21 +658,40 @@ impl ScryerServer {
                         ))]));
                     }
                 };
-                let Some(meta) = plan.changes.iter().find(|c| c.id == cid) else {
+                if plan.changes.iter().all(|c| c.id != cid) {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
                         "No open change '{cid}'.\n{}",
                         open_changes_line(&plan)
                     ))]));
-                };
+                }
+                if let Some(t) = req
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                {
+                    if let Err(e) = scryer_core::changes::set_title(&mut plan, cid, t) {
+                        return Ok(CallToolResult::error(vec![Content::text(e)]));
+                    }
+                    if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
+                        return Ok(CallToolResult::error(vec![Content::text(e)]));
+                    }
+                }
+                drop(_lock);
+                let meta = plan
+                    .changes
+                    .iter()
+                    .find(|c| c.id == cid)
+                    .expect("presence checked above");
+                let named = scryer_core::changes::title_of(meta).to_string();
                 let entries = plan.change_map.values().filter(|v| *v == cid).count();
                 self.set_session_change(Some((
                     model_ref.project_path().to_path_buf(),
                     cid.to_string(),
                 )));
                 Ok(CallToolResult::success(vec![Content::text(format!(
-                    "Resumed {cid} — \"{}\" ({} tagged entr{}). Plan writes in this \
+                    "Resumed {cid} — \"{named}\" ({} tagged entr{}). Plan writes in this \
                      session are now tagged to it.",
-                    meta.rationale,
                     entries,
                     if entries == 1 { "y" } else { "ies" }
                 ))]))
@@ -760,9 +807,10 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "Close an EMPTY open change by id, recording it as abandoned with its rationale in history. \
-         Refused while it has tagged entries: those close the change when they fold or are \
-         reverted. Use it to end a task that filed nothing in the plan.\n\
+        description = "Close an open change by id, recorded as abandoned with its rationale in history. \
+         An EMPTY one closes outright; one with tagged entries is refused — those close it by \
+         folding or reverting — unless `drop_entries` abandons it WITH its planned work, each \
+         entry taken back to committed and named in history.\n\
          Rules: change-ledger"
     )]
     pub fn close_change(
@@ -798,12 +846,40 @@ impl ScryerServer {
             Ok(l) => l,
             Err(e) => return Ok(e),
         };
+        if req.drop_entries {
+            let abandoned = match scryer_core::changes::abandon_change(&model_ref, cid) {
+                Ok(a) => a,
+                Err(e) => {
+                    let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
+                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                        "{e}\n{}",
+                        open_changes_line(&plan)
+                    ))]));
+                }
+            };
+            if self.session_change(&model_ref).as_deref() == Some(cid) {
+                self.set_session_change(None);
+            }
+            let n = abandoned.dropped.len();
+            let mut msg = format!(
+                "Abandoned {cid} — \"{}\": {n} planned entr{} dropped with it, the plan \
+                 back to what the committed model says. The abandonment and what it held \
+                 are in the history log.",
+                scryer_core::changes::title_of(&abandoned.meta),
+                if n == 1 { "y" } else { "ies" }
+            );
+            for d in &abandoned.dropped {
+                msg.push_str(&format!("\n  − {} ({})", d.label, d.what));
+            }
+            return Ok(CallToolResult::success(vec![Content::text(msg)]));
+        }
+
         let meta = match scryer_core::changes::close_change(&model_ref, cid) {
             Ok(m) => m,
             Err(e) => {
                 let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
                 return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "{e}\n{}",
+                    "{e}\n{}\nTo close it WITH its planned work, pass drop_entries: true.",
                     open_changes_line(&plan)
                 ))]));
             }
@@ -814,7 +890,7 @@ impl ScryerServer {
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Closed {cid} — \"{}\" (abandoned, no entries). The rationale is kept in \
              the history log.",
-            meta.rationale
+            scryer_core::changes::title_of(&meta)
         ))]))
     }
 
@@ -1319,6 +1395,222 @@ mod tests {
         assert!(
             text.contains(&format!("group-1: 'new' → {minted}")),
             "reports the re-mint: {text}"
+        );
+    }
+
+    /// The text a tool answered with, joined.
+    fn said(r: &CallToolResult) -> String {
+        r.content
+            .iter()
+            .filter_map(|c| c.raw.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A project with an empty model on disk, and a server with no open change.
+    fn bare_project() -> (ScryerServer, tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        m.nodes.push(node("node-1", Kind::System, "Acme", None));
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let project = dir.path().to_string_lossy().to_string();
+        (ScryerServer::new(), dir, project)
+    }
+
+    /// `open_change` takes the title beside the rationale and stores it; over 80
+    /// characters is refused; a change opened without one reads by its
+    /// rationale's first line until `open_change {change_id, title}` names it.
+    #[test]
+    fn open_change_takes_a_title_and_names_a_change_that_had_none() {
+        let (server, dir, project) = bare_project();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                project: Some(project.clone()),
+                rationale: Some("the long why, at length".into()),
+                title: Some("Give a change a title".into()),
+                change_id: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(
+            said(&out).contains("Give a change a title"),
+            "{}",
+            said(&out)
+        );
+        let plan = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            plan.changes[0].title.as_deref(),
+            Some("Give a change a title")
+        );
+
+        // Too long: refused, and nothing is opened.
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                project: Some(project.clone()),
+                rationale: Some("why".into()),
+                title: Some("x".repeat(81)),
+                change_id: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("81 characters"), "{}", said(&out));
+        assert_eq!(
+            scryer_core::read_planned_at(&model_ref)
+                .unwrap()
+                .changes
+                .len(),
+            1,
+            "a refused open leaves the ledger alone"
+        );
+
+        // Untitled: reads by the rationale's first line, until it is named.
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                project: Some(project.clone()),
+                rationale: Some("first line\nsecond line".into()),
+                title: None,
+                change_id: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        let cid = scryer_core::read_planned_at(&model_ref).unwrap().changes[1]
+            .id
+            .clone();
+        assert!(said(&out).contains("first line"), "{}", said(&out));
+
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                project: Some(project),
+                rationale: None,
+                title: Some("Named on resume".into()),
+                change_id: Some(cid.clone()),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("Named on resume"), "{}", said(&out));
+        let plan = scryer_core::read_planned_at(&model_ref).unwrap();
+        let meta = plan.changes.iter().find(|c| c.id == cid).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("Named on resume"));
+    }
+
+    /// The project asks for the check: an open with no title is refused, where
+    /// the same call against a project with no policy opens as it always has.
+    #[test]
+    fn a_project_can_require_every_change_to_be_titled() {
+        let (server, dir, project) = bare_project();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut committed = scryer_core::read_model_at(&model_ref).unwrap();
+        committed.policy = Some(scryer_core::changes::Policy {
+            require_countersigned_folds: false,
+            require_change_titles: true,
+        });
+        scryer_core::write_model_at(&model_ref, &committed).unwrap();
+
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                project: Some(project.clone()),
+                rationale: Some("why".into()),
+                title: None,
+                change_id: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(
+            said(&out).contains("requires a change to have a title"),
+            "{}",
+            said(&out)
+        );
+        assert!(scryer_core::read_planned_at(&model_ref)
+            .unwrap()
+            .changes
+            .is_empty());
+
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                project: Some(project),
+                rationale: Some("why".into()),
+                title: Some("A name".into()),
+                change_id: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+    }
+
+    /// A change with planned entries is refused by a plain close and told about
+    /// the other door; `drop_entries` takes it, its entries going back to what
+    /// committed says and the drop named in the answer.
+    #[test]
+    fn close_change_drops_the_planned_entries_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut committed = ScryModel::new();
+        let mut n = node("node-1", Kind::Component, "C", None);
+        n.responsibilities = vec![resp("resp-1")];
+        committed.nodes.push(n);
+        scryer_core::write_model_at(&model_ref, &committed).unwrap();
+
+        let mut plan = committed.clone();
+        plan.nodes[0].responsibilities.push(resp("resp-2"));
+        let cid = scryer_core::changes::open_change_titled(
+            &mut plan,
+            Some("Doomed"),
+            "why it existed",
+            100,
+        )
+        .unwrap();
+        scryer_core::changes::tag(
+            &mut plan,
+            &[scryer_core::changes::element_key(
+                scryer_core::diff::ElementKind::Responsibility,
+                None,
+                "resp-2",
+            )],
+            &cid,
+        );
+        scryer_core::write_planned_at(&model_ref, &plan).unwrap();
+        let project = dir.path().to_string_lossy().to_string();
+        let server = ScryerServer::new();
+
+        // Plain close: refused, and it says what the other door is.
+        let out = server
+            .close_change(Parameters(CloseChangeRequest {
+                project: Some(project.clone()),
+                change_id: cid.clone(),
+                drop_entries: false,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("drop_entries"), "{}", said(&out));
+        assert!(scryer_core::read_planned_at(&model_ref)
+            .unwrap()
+            .changes
+            .iter()
+            .any(|c| c.id == cid));
+
+        // Asked for by name: the change and its entry go.
+        let out = server
+            .close_change(Parameters(CloseChangeRequest {
+                project: Some(project),
+                change_id: cid.clone(),
+                drop_entries: true,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("Doomed"), "{}", said(&out));
+        assert!(said(&out).contains("(added)"), "{}", said(&out));
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(after.changes.is_empty());
+        assert!(after.change_map.is_empty());
+        assert!(
+            after.nodes[0]
+                .responsibilities
+                .iter()
+                .all(|r| r.id != "resp-2"),
+            "the added claim went with the change"
         );
     }
 }

@@ -1413,6 +1413,9 @@ impl ScryerServer {
             .map(|c| {
                 serde_json::json!({
                     "id": c.id,
+                    // A change with no title of its own reads by its rationale's
+                    // first line, so a caller always has a short name to show.
+                    "title": scryer_core::changes::title_of(c),
                     "rationale": c.rationale,
                     "entries": planned.change_map.values().filter(|v| *v == &c.id).count(),
                 })
@@ -2434,6 +2437,72 @@ mod tests {
         assert_eq!(v["results"][0]["id"], "node-4");
         assert_eq!(v["results"][0]["path"], "Acme / API / Auth / verify_token");
         assert_eq!(v["results"][0]["matched"][0]["in"], "responsibility");
+    }
+
+    /// `openChanges` answers each change's TITLE beside its rationale — the
+    /// title when it has one, the rationale's first line when it does not, so a
+    /// caller reading the queue always has a short name to show.
+    #[test]
+    fn get_pending_answers_each_open_changes_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        let mut m = ScryModel::new();
+        let mut c = node("node-1", Kind::Component, "Billing", None);
+        c.responsibilities = vec![resp("resp-1", "charges the card")];
+        m.nodes.push(c);
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+
+        let mut planned = m.clone();
+        planned.nodes[0]
+            .responsibilities
+            .push(resp("resp-2", "issues refunds"));
+        let titled = scryer_core::changes::open_change_titled(
+            &mut planned,
+            Some("Refunds"),
+            "the long why of refunds",
+            100,
+        )
+        .unwrap();
+        let untitled = scryer_core::changes::open_change(
+            &mut planned,
+            "first line of the why\nand the rest",
+            110,
+        );
+        scryer_core::changes::tag(
+            &mut planned,
+            &[scryer_core::changes::element_key(
+                scryer_core::diff::ElementKind::Responsibility,
+                None,
+                "resp-2",
+            )],
+            &titled,
+        );
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+
+        let out = ScryerServer::new()
+            .get_pending(Parameters(GetPendingRequest {
+                project: Some(dir.path().to_string_lossy().to_string()),
+                change: None,
+            }))
+            .unwrap();
+        let text = out
+            .content
+            .iter()
+            .filter_map(|c| c.raw.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let open = v["openChanges"].as_array().unwrap();
+
+        let by_id = |id: &str| {
+            open.iter()
+                .find(|c| c["id"] == id)
+                .unwrap_or_else(|| panic!("{id} in openChanges: {open:?}"))
+        };
+        assert_eq!(by_id(&titled)["title"], "Refunds");
+        assert_eq!(by_id(&titled)["rationale"], "the long why of refunds");
+        assert_eq!(by_id(&untitled)["title"], "first line of the why");
     }
 
     #[test]

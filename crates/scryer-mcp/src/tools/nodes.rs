@@ -4586,6 +4586,7 @@ mod tests {
             .push(node("vt", Kind::Symbol, "verify_token", None));
         if opted_in {
             committed.policy = Some(scryer_core::changes::Policy {
+                require_change_titles: false,
                 require_countersigned_folds: true,
             });
         }
@@ -4833,6 +4834,7 @@ mod tests {
             .nodes
             .push(node("vt", Kind::Symbol, "verify_token", None));
         committed.policy = Some(scryer_core::changes::Policy {
+            require_change_titles: false,
             require_countersigned_folds: true,
         });
         scryer_core::write_model_at(model_ref, &committed).unwrap();
@@ -4844,6 +4846,7 @@ mod tests {
         let cid = opened(
             &server
                 .open_change(Parameters(OpenChangeRequest {
+                    title: None,
                     project: project.clone(),
                     rationale: Some("verify tokens".into()),
                     change_id: None,
@@ -5366,6 +5369,7 @@ mod tests {
         let server = ScryerServer::new();
         let r = server
             .open_change(Parameters(OpenChangeRequest {
+                title: None,
                 project: Some(project.clone()),
                 rationale: Some("give the API rate limiting".into()),
                 change_id: None,
@@ -5439,6 +5443,7 @@ mod tests {
         let session2 = ScryerServer::new();
         let r = session2
             .open_change(Parameters(OpenChangeRequest {
+                title: None,
                 project: Some(project.clone()),
                 rationale: None,
                 change_id: Some(chg.clone()),
@@ -5509,6 +5514,7 @@ mod tests {
         let open = |rationale: &str| {
             server
                 .open_change(Parameters(OpenChangeRequest {
+                    title: None,
                     project: Some(project.clone()),
                     rationale: Some(rationale.into()),
                     change_id: None,
@@ -5604,6 +5610,7 @@ mod tests {
         let chg1 = opened(
             &server
                 .open_change(Parameters(OpenChangeRequest {
+                    title: None,
                     project: Some(project.clone()),
                     rationale: Some("rate limiting".into()),
                     change_id: None,
@@ -5624,6 +5631,7 @@ mod tests {
         let chg2 = opened(
             &server
                 .open_change(Parameters(OpenChangeRequest {
+                    title: None,
                     project: Some(project.clone()),
                     rationale: Some("opened then orphaned".into()),
                     change_id: None,
@@ -5632,6 +5640,7 @@ mod tests {
         );
         let close = |id: &str| {
             server.close_change(Parameters(CloseChangeRequest {
+                drop_entries: false,
                 project: Some(project.clone()),
                 change_id: id.into(),
             }))
@@ -5698,6 +5707,7 @@ mod tests {
         let chg1 = opened(
             &session1
                 .open_change(Parameters(OpenChangeRequest {
+                    title: None,
                     project: Some(project.clone()),
                     rationale: Some("rate limiting".into()),
                     change_id: None,
@@ -5721,6 +5731,7 @@ mod tests {
         let chg2 = opened(
             &session2
                 .open_change(Parameters(OpenChangeRequest {
+                    title: None,
                     project: Some(project.clone()),
                     rationale: Some("rename things".into()),
                     change_id: None,
@@ -6079,6 +6090,7 @@ mod tests {
         let server = ScryerServer::new();
         let r = server
             .open_change(Parameters(OpenChangeRequest {
+                title: None,
                 project: project.clone(),
                 rationale: Some("verify tokens".into()),
                 change_id: None,

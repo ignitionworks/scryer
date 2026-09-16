@@ -98,6 +98,13 @@ pub struct HistoryEvent {
     /// "which change introduced this claim?" gets answered after the fold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change_id: Option<String>,
+    /// The change's TITLE as it stood — what a reader calls it, where the rows
+    /// carry what was said about it. Absent on every event written before the
+    /// field existed and on every change that never had one, in which case a
+    /// reader falls back to the rationale's first line the same way
+    /// `changes::title_of` does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_title: Option<String>,
     /// The PERSON [`HistoryEvent::by`] acted for, when it acted as their proxy
     /// — an agent a host runs on a developer's behalf. Two names, never one:
     /// with only `by` the record reads as the agent's own act, and with only
@@ -118,6 +125,7 @@ impl HistoryEvent {
             kind,
             node_id: node_id.into(),
             change_id: None,
+            change_title: None,
             on_behalf_of: None,
             rows: Vec::new(),
         }
@@ -130,6 +138,17 @@ impl HistoryEvent {
 
     pub fn with_change(mut self, change_id: impl Into<String>) -> Self {
         self.change_id = Some(change_id.into());
+        self
+    }
+
+    /// Name the change's TITLE beside its id. Empty records nothing: a change
+    /// with no title reads by its rationale, and a blank field would say it had
+    /// one.
+    pub fn with_change_title(mut self, title: &str) -> Self {
+        let t = title.trim();
+        if !t.is_empty() {
+            self.change_title = Some(t.to_string());
+        }
         self
     }
 

@@ -61,6 +61,14 @@ pub struct Policy {
     /// approved by someone else".
     #[serde(default, skip_serializing_if = "is_false")]
     pub require_countersigned_folds: bool,
+    /// `true` = opening a change without a title is refused ([`open_change_titled`]).
+    /// Off by default: a title is optional, and a change that has none reads by
+    /// the first line of its rationale ([`title_of`]). A project whose surfaces
+    /// show changes by name opts in, and then every session against the project
+    /// is held to it — which is the point: a check one caller can forget is not
+    /// a check.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub require_change_titles: bool,
 }
 
 /// `skip_serializing_if` for a bool that defaults to false — off stays absent
@@ -80,6 +88,56 @@ pub fn requires_countersigned_folds(model: &ScryModel) -> bool {
         .is_some_and(|p| p.require_countersigned_folds)
 }
 
+/// Whether this project refuses to open a change with no title. False for every
+/// model that carries no policy — the default, and the only behaviour upstream
+/// has.
+pub fn requires_change_titles(model: &ScryModel) -> bool {
+    model
+        .policy
+        .as_ref()
+        .is_some_and(|p| p.require_change_titles)
+}
+
+/// The longest a change's title may be, in CHARACTERS — not bytes, so the limit
+/// means the same thing in every script.
+pub const MAX_TITLE_LEN: usize = 80;
+
+/// Check a title and return it trimmed. Length is always checked; whether an
+/// ABSENT title is refused is the project's policy ([`requires_change_titles`]),
+/// because a title is a thing a reader needs, not a thing the ledger needs.
+pub fn validate_title(title: &str) -> Result<String, String> {
+    let t = title.trim();
+    if t.is_empty() {
+        return Err("a title is empty — give the change a short name, or pass none".to_string());
+    }
+    let n = t.chars().count();
+    if n > MAX_TITLE_LEN {
+        return Err(format!(
+            "title is {n} characters; at most {MAX_TITLE_LEN} — say what the change is, \
+             not what it does (the rationale is where that goes)"
+        ));
+    }
+    Ok(t.to_string())
+}
+
+/// What a reader shows for a change: its title, or — for a change opened before
+/// titles existed, or by a caller that gave none — the FIRST LINE of its
+/// rationale. Never empty for a change with either, so no surface has to decide
+/// what to draw when a title is missing.
+pub fn title_of(meta: &ChangeMeta) -> &str {
+    if let Some(t) = meta.title.as_deref() {
+        let t = t.trim();
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    meta.rationale
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+}
+
 /// One open change in the plan's registry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +147,13 @@ pub struct ChangeMeta {
     /// The dev's original sentence — why this change exists. Survives the fold
     /// as the history record's text.
     pub rationale: String,
+    /// A short name for the change, at most [`MAX_TITLE_LEN`] characters — what
+    /// a person calls it, where the rationale is what they said about it.
+    /// Absent on every change opened before the field existed and on every
+    /// caller that passes none; [`title_of`] then reads the rationale's first
+    /// line, so a reader always has something short to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Unix seconds.
     pub created_at: u64,
     /// The developer's sign-off, when given: a snapshot of every entry tagged
@@ -571,6 +636,34 @@ pub fn parse_key(key: &str) -> Option<(ElementKind, Option<String>, String)> {
 /// has seen, registry or map, so a re-open never collides with a tag left by
 /// a closed twin) and register it. The caller persists the plan.
 pub fn open_change(model: &mut ScryModel, rationale: &str, now: u64) -> String {
+    open_change_titled(model, None, rationale, now)
+        .expect("a change with no title is refused only under a policy this path cannot reach")
+}
+
+/// [`open_change`] with the change's TITLE. `None` opens an untitled change,
+/// which reads by its rationale's first line ([`title_of`]) — unless the project
+/// requires titles ([`requires_change_titles`]), when it is refused. A title
+/// longer than [`MAX_TITLE_LEN`] is refused whatever the policy.
+///
+/// The policy is read from the model this writes, so a caller holding only the
+/// plan gets the plan's copy; the fold reads committed for the same reason
+/// [`requires_countersigned_folds`] does.
+pub fn open_change_titled(
+    model: &mut ScryModel,
+    title: Option<&str>,
+    rationale: &str,
+    now: u64,
+) -> Result<String, String> {
+    let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => Some(validate_title(t)?),
+        None if requires_change_titles(model) => {
+            return Err(format!(
+                "this project requires a change to have a title: pass one of at most \
+                 {MAX_TITLE_LEN} characters beside the rationale"
+            ));
+        }
+        None => None,
+    };
     let id = crate::ids::mint_id_from(
         "chg",
         model
@@ -582,10 +675,22 @@ pub fn open_change(model: &mut ScryModel, rationale: &str, now: u64) -> String {
     model.changes.push(ChangeMeta {
         id: id.clone(),
         rationale: rationale.trim().to_string(),
+        title,
         created_at: now,
         signed_off: None,
     });
-    id
+    Ok(id)
+}
+
+/// Give an open change a title, or replace the one it has — how a change opened
+/// before the field existed stops reading by its rationale's first line.
+pub fn set_title(model: &mut ScryModel, change_id: &str, title: &str) -> Result<(), String> {
+    let title = validate_title(title)?;
+    let Some(meta) = model.changes.iter_mut().find(|c| c.id == change_id) else {
+        return Err(format!("no open change '{change_id}'"));
+    };
+    meta.title = Some(title);
+    Ok(())
 }
 
 /// Tag plan elements as belonging to `change_id`. Last writer wins — a re-tag
@@ -835,6 +940,234 @@ pub fn close_change(r: &ModelRef, change_id: &str) -> Result<ChangeMeta, String>
     Ok(meta)
 }
 
+/// One planned entry an abandonment dropped, for the caller's report and the
+/// history row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DroppedEntry {
+    /// The element key ([`element_key`]) that was tagged to the change.
+    pub key: String,
+    /// The element's name or statement, as the plan had it.
+    pub label: String,
+    /// What the plan was doing to it — "added", "reworded", "deleted", "moved".
+    pub what: String,
+}
+
+/// What [`abandon_change`] took out of the plan.
+#[derive(Debug, Clone)]
+pub struct Abandoned {
+    pub meta: ChangeMeta,
+    pub dropped: Vec<DroppedEntry>,
+}
+
+/// The single word for what the plan is doing to an element, for a reader.
+fn what_of(ec: &ElementChange) -> &'static str {
+    use crate::diff::Change as C;
+    if ec.changes.iter().any(|c| matches!(c, C::Added)) {
+        "added"
+    } else if ec.changes.iter().any(|c| matches!(c, C::Deleted)) {
+        "deleted"
+    } else if ec.changes.iter().any(|c| matches!(c, C::Moved { .. })) {
+        "moved"
+    } else {
+        "reworded"
+    }
+}
+
+fn is_added(ec: &ElementChange) -> bool {
+    ec.changes
+        .iter()
+        .any(|c| matches!(c, crate::diff::Change::Added))
+}
+
+/// Undo ONE pending entry: take the plan back to what committed says about that
+/// element. An entry the plan ADDED is removed; anything else — reworded, moved,
+/// deleted — is restored from committed.
+///
+/// Scoped to the element the key names and nothing else: a node's own fields are
+/// restored while its claims and properties are left alone, because each of
+/// those is a pending entry in its own right and may belong to another change.
+fn revert_one(plan: &mut ScryModel, committed: &ScryModel, ec: &ElementChange) {
+    let added = is_added(ec);
+    match ec.kind {
+        ElementKind::Responsibility => {
+            for n in &mut plan.nodes {
+                n.responsibilities.retain(|r| r.id != ec.id);
+            }
+            for g in &mut plan.groups {
+                g.responsibilities.retain(|r| r.id != ec.id);
+            }
+            if !added {
+                for n in &committed.nodes {
+                    if let Some(r) = n.responsibilities.iter().find(|r| r.id == ec.id) {
+                        if let Some(target) = plan.nodes.iter_mut().find(|p| p.id == n.id) {
+                            target.responsibilities.push(r.clone());
+                        }
+                    }
+                }
+                for cg in &committed.groups {
+                    if let Some(r) = cg.responsibilities.iter().find(|r| r.id == ec.id) {
+                        if let Some(target) = plan.groups.iter_mut().find(|p| p.id == cg.id) {
+                            target.responsibilities.push(r.clone());
+                        }
+                    }
+                }
+            }
+        }
+        ElementKind::Property => {
+            // A property has no id of its own: the diff names it by LABEL on the
+            // node `owner_id` names (diff.rs), and `element_key` keys it that way.
+            let Some(owner) = ec.owner_id.as_deref() else {
+                return;
+            };
+            if let Some(n) = plan.nodes.iter_mut().find(|n| n.id == owner) {
+                n.properties.retain(|p| p.label != ec.id);
+            }
+            if !added {
+                let restored = committed
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == owner)
+                    .and_then(|n| n.properties.iter().find(|p| p.label == ec.id))
+                    .cloned();
+                if let (Some(prop), Some(n)) =
+                    (restored, plan.nodes.iter_mut().find(|n| n.id == owner))
+                {
+                    n.properties.push(prop);
+                }
+            }
+        }
+        ElementKind::Link => {
+            plan.links.retain(|l| l.id != ec.id);
+            if !added {
+                if let Some(l) = committed.links.iter().find(|l| l.id == ec.id) {
+                    plan.links.push(l.clone());
+                }
+            }
+        }
+        ElementKind::Group => {
+            plan.groups.retain(|g| g.id != ec.id);
+            if !added {
+                if let Some(g) = committed.groups.iter().find(|g| g.id == ec.id) {
+                    plan.groups.push(g.clone());
+                }
+            }
+        }
+        ElementKind::Node => {
+            if added {
+                plan.nodes.retain(|n| n.id != ec.id);
+                plan.links.retain(|l| l.src != ec.id && l.dst != ec.id);
+                for g in &mut plan.groups {
+                    g.member_ids.retain(|m| m != &ec.id);
+                }
+                plan.boundaries.remove(&ec.id);
+            } else if let Some(c) = committed.nodes.iter().find(|n| n.id == ec.id) {
+                // The node's OWN fields only. Its claims and properties are
+                // their own keys and may be another change's work.
+                if let Some(n) = plan.nodes.iter_mut().find(|n| n.id == ec.id) {
+                    n.kind = c.kind;
+                    n.name = c.name.clone();
+                    n.parent_id = c.parent_id.clone();
+                    n.external = c.external;
+                    n.technology = c.technology.clone();
+                    n.description = c.description.clone();
+                    n.directives = c.directives.clone();
+                    n.icon = c.icon.clone();
+                    n.notes = c.notes.clone();
+                    n.position = c.position;
+                } else {
+                    plan.nodes.push(c.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Close a change that STILL CARRIES planned entries, dropping them with it —
+/// the caller having said so explicitly. Every entry the change owns is taken
+/// back to what committed says ([`revert_one`]), the tags go, the registry entry
+/// goes, and the close is recorded in history as an abandonment naming what was
+/// dropped.
+///
+/// This is the deliberate counterpart to [`close_change`], which refuses exactly
+/// this case: the plan is somebody's authored intent, so discarding it is an act
+/// a caller asks for by name, never a fallback. Refused if dropping an ADDED
+/// node would strand plan children this change does not own — a dangling parent
+/// is worse than a refusal. The caller must hold the model lock.
+pub fn abandon_change(r: &ModelRef, change_id: &str) -> Result<Abandoned, String> {
+    let committed = crate::read_model_at(r)?;
+    let mut plan = crate::read_planned_seeded_at(r)?;
+    let Some(pos) = plan.changes.iter().position(|c| c.id == change_id) else {
+        return Err(format!("no open change '{change_id}'"));
+    };
+
+    let keys: HashSet<String> = plan
+        .change_map
+        .iter()
+        .filter(|(_, v)| v.as_str() == change_id)
+        .map(|(k, _)| k.clone())
+        .collect();
+
+    let d = diff(&committed, &plan);
+    let mine: Vec<ElementChange> = d
+        .changes
+        .into_iter()
+        .filter(|c| keys.contains(&key_for(c)))
+        .collect();
+
+    for ec in &mine {
+        if ec.kind == ElementKind::Node && is_added(ec) {
+            let stranded: Vec<String> = plan
+                .nodes
+                .iter()
+                .filter(|n| n.parent_id.as_deref() == Some(ec.id.as_str()))
+                .filter(|n| !keys.contains(&element_key(ElementKind::Node, None, &n.id)))
+                .map(|n| n.name.clone())
+                .collect();
+            if !stranded.is_empty() {
+                return Err(format!(
+                    "{change_id} adds '{}', and {} under it {} not this change's to drop: {}. \
+                     Refile or fold those first.",
+                    ec.label,
+                    stranded.len(),
+                    if stranded.len() == 1 { "is" } else { "are" },
+                    stranded.join(", ")
+                ));
+            }
+        }
+    }
+
+    let mut dropped: Vec<DroppedEntry> = Vec::new();
+    for ec in &mine {
+        revert_one(&mut plan, &committed, ec);
+        dropped.push(DroppedEntry {
+            key: key_for(ec),
+            label: ec.label.clone(),
+            what: what_of(ec).to_string(),
+        });
+    }
+
+    plan.change_map.retain(|k, _| !keys.contains(k));
+    let meta = plan.changes.remove(pos);
+    crate::write_planned_at(r, &plan)?;
+    record_abandoned(r, &meta, &dropped);
+    Ok(Abandoned { meta, dropped })
+}
+
+/// The history record of an abandonment: the change, its title and rationale,
+/// and a row per entry that went with it — so "what did this change hold when it
+/// was dropped?" has an answer after the registry entry is gone.
+fn record_abandoned(r: &ModelRef, meta: &ChangeMeta, dropped: &[DroppedEntry]) {
+    let mut rows = vec![EventRow::new("✓", meta.rationale.clone())];
+    for d in dropped {
+        rows.push(EventRow::new("−", format!("{} ({})", d.label, d.what)));
+    }
+    let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", "abandoned")
+        .with_change(&meta.id)
+        .with_change_title(title_of(meta))
+        .with_rows(rows);
+    let _ = append_event(r, &ev);
+}
+
 /// Append a closed change's durable record to the history log — the rationale
 /// finally survives the fold ("which change introduced this claim?" has an
 /// answer). `driver` says how it closed: "folded" (its entries reached
@@ -865,6 +1198,7 @@ pub fn record_signed_off(r: &ModelRef, meta: &ChangeMeta) {
 pub fn record_closed(r: &ModelRef, meta: &ChangeMeta, driver: &str) {
     let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", driver)
         .with_change(&meta.id)
+        .with_change_title(title_of(meta))
         .with_rows(vec![EventRow::new("✓", meta.rationale.clone())]);
     let _ = append_event(r, &ev);
 }
@@ -944,6 +1278,7 @@ mod tests {
 
         // Opting in survives the committed write that strips change state.
         model.policy = Some(Policy {
+            require_change_titles: false,
             require_countersigned_folds: true,
         });
         let cid = open_change(&mut model, "not the committed layer's business", 100);
@@ -1327,6 +1662,244 @@ mod tests {
             "links": [],
         }))
         .unwrap()
+    }
+
+    /// A title is a short name a reader uses; the rationale is what was said.
+    /// A change with no title of its own still reads — by the rationale's first
+    /// line — so no surface has to decide what to draw for one opened before the
+    /// field existed.
+    #[test]
+    fn a_change_reads_by_its_title_or_its_rationales_first_line() {
+        let mut plan = model_with_resps(&[("r1", "exists")]);
+
+        let titled = open_change_titled(
+            &mut plan,
+            Some("  Give a change a title  "),
+            "the long why",
+            100,
+        )
+        .unwrap();
+        let untitled = open_change(&mut plan, "first line\nsecond line", 200);
+
+        fn by_id(plan: &ScryModel, id: &str) -> ChangeMeta {
+            plan.changes.iter().find(|c| c.id == id).unwrap().clone()
+        }
+        assert_eq!(
+            by_id(&plan, &titled).title.as_deref(),
+            Some("Give a change a title")
+        );
+        assert_eq!(title_of(&by_id(&plan, &titled)), "Give a change a title");
+        assert_eq!(by_id(&plan, &untitled).title, None);
+        assert_eq!(title_of(&by_id(&plan, &untitled)), "first line");
+
+        // A change opened before the field existed loads with no title and reads
+        // the same way — the field is absent from the file, not null.
+        let json = serde_json::to_string(&by_id(&plan, &untitled)).unwrap();
+        assert!(!json.contains("title"), "{json}");
+
+        // Naming it afterwards is how it stops reading by its rationale.
+        set_title(&mut plan, &untitled, "Named later").unwrap();
+        assert_eq!(title_of(&by_id(&plan, &untitled)), "Named later");
+        assert_eq!(
+            set_title(&mut plan, "chg-nope", "x"),
+            Err("no open change 'chg-nope'".to_string())
+        );
+    }
+
+    /// Length is always checked — 80 CHARACTERS, not bytes, so the limit means
+    /// the same thing in every script. Whether an ABSENT title is refused is the
+    /// project's policy, and a model carrying no policy never meets the gate.
+    #[test]
+    fn a_title_is_refused_when_too_long_and_when_absent_under_the_policy() {
+        let mut plan = model_with_resps(&[("r1", "exists")]);
+
+        let eighty = "x".repeat(MAX_TITLE_LEN);
+        assert!(open_change_titled(&mut plan, Some(&eighty), "why", 100).is_ok());
+        let over = "x".repeat(MAX_TITLE_LEN + 1);
+        let err = open_change_titled(&mut plan, Some(&over), "why", 100).unwrap_err();
+        assert!(err.contains("81 characters"), "{err}");
+
+        // Multi-byte: 80 characters is 80 characters, whatever they weigh.
+        let eighty_wide = "é".repeat(MAX_TITLE_LEN);
+        assert_eq!(eighty_wide.len(), MAX_TITLE_LEN * 2);
+        assert!(open_change_titled(&mut plan, Some(&eighty_wide), "why", 100).is_ok());
+
+        // No policy: an untitled change opens, as it always has.
+        assert!(!requires_change_titles(&plan));
+        assert!(open_change_titled(&mut plan, None, "why", 100).is_ok());
+
+        // The project asks for the check: absent is refused, present is not.
+        plan.policy = Some(Policy {
+            require_countersigned_folds: false,
+            require_change_titles: true,
+        });
+        let err = open_change_titled(&mut plan, None, "why", 100).unwrap_err();
+        assert!(err.contains("requires a change to have a title"), "{err}");
+        let err = open_change_titled(&mut plan, Some("   "), "why", 100).unwrap_err();
+        assert!(err.contains("requires a change to have a title"), "{err}");
+        assert!(open_change_titled(&mut plan, Some("a name"), "why", 100).is_ok());
+    }
+
+    /// A change closed with its planned work still in it: every entry goes back
+    /// to what committed says — an ADD removed, a REWORD restored — the tags and
+    /// the registry entry go, and the history says what was dropped. The other
+    /// change's entry is untouched.
+    #[test]
+    fn abandoning_a_change_drops_its_entries_and_records_what_went() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        write_model_at(&r, &model_with_resps(&[("r1", "as committed")])).unwrap();
+
+        let mut plan =
+            model_with_resps(&[("r1", "reworded by the doomed change"), ("r2", "added")]);
+        let doomed = open_change_titled(&mut plan, Some("Doomed"), "why it existed", 100).unwrap();
+        let other = open_change(&mut plan, "a neighbour", 110);
+        tag(
+            &mut plan,
+            &[
+                element_key(ElementKind::Responsibility, None, "r1"),
+                element_key(ElementKind::Responsibility, None, "r2"),
+            ],
+            &doomed,
+        );
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(serde_json::json!({"id": "r3", "statement": "the neighbour's"}))
+                .unwrap(),
+        );
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r3")],
+            &other,
+        );
+        write_planned_at(&r, &plan).unwrap();
+
+        let abandoned = abandon_change(&r, &doomed).unwrap();
+
+        assert_eq!(abandoned.meta.id, doomed);
+        let mut what: Vec<(String, String)> = abandoned
+            .dropped
+            .iter()
+            .map(|d| (d.key.clone(), d.what.clone()))
+            .collect();
+        what.sort();
+        assert_eq!(
+            what,
+            vec![
+                ("resp:r1".to_string(), "reworded".to_string()),
+                ("resp:r2".to_string(), "added".to_string()),
+            ]
+        );
+
+        let after = read_planned_at(&r).unwrap();
+        let resp = |id: &str| {
+            after.nodes[0]
+                .responsibilities
+                .iter()
+                .find(|x| x.id == id)
+                .map(|x| x.statement.clone())
+        };
+        assert_eq!(resp("r1").as_deref(), Some("as committed"), "reword undone");
+        assert_eq!(resp("r2"), None, "the added claim went with the change");
+        assert_eq!(
+            resp("r3").as_deref(),
+            Some("the neighbour's"),
+            "another change's entry is not this one's to drop"
+        );
+        assert!(after.changes.iter().all(|c| c.id != doomed));
+        assert!(after.changes.iter().any(|c| c.id == other));
+        assert!(!after.change_map.contains_key("resp:r1"));
+        assert!(after.change_map.contains_key("resp:r3"));
+
+        let ev = read_history(&r)
+            .into_iter()
+            .find(|e| {
+                e.kind == EventKind::Change && e.change_id.as_deref() == Some(doomed.as_str())
+            })
+            .expect("the abandonment is in the history");
+        assert_eq!(ev.driver, "abandoned");
+        assert_eq!(ev.change_title.as_deref(), Some("Doomed"));
+        assert_eq!(ev.rows[0].text, "why it existed");
+        let dropped_rows: Vec<&str> = ev.rows[1..].iter().map(|x| x.text.as_str()).collect();
+        assert_eq!(dropped_rows.len(), 2, "{dropped_rows:?}");
+        assert!(
+            dropped_rows.iter().any(|t| t.contains("(added)"))
+                && dropped_rows.iter().any(|t| t.contains("(reworded)")),
+            "{dropped_rows:?}"
+        );
+    }
+
+    /// Abandonment refuses rather than orphans: a node this change ADDED, with a
+    /// child under it that belongs to somebody else, would leave that child
+    /// hanging off a dead parent.
+    #[test]
+    fn abandoning_refuses_to_strand_another_changes_node() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        write_model_at(&r, &model_with_resps(&[("r1", "exists")])).unwrap();
+
+        let mut plan = model_with_resps(&[("r1", "exists")]);
+        plan.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "n2", "kind": "component", "name": "Parent", "responsibilities": []
+            }))
+            .unwrap(),
+        );
+        plan.nodes.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "n3", "kind": "component", "name": "Child",
+                "parentId": "n2", "responsibilities": []
+            }))
+            .unwrap(),
+        );
+        let doomed = open_change(&mut plan, "adds the parent", 100);
+        let other = open_change(&mut plan, "adds the child", 110);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Node, None, "n2")],
+            &doomed,
+        );
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Node, None, "n3")],
+            &other,
+        );
+        write_planned_at(&r, &plan).unwrap();
+
+        let err = abandon_change(&r, &doomed).unwrap_err();
+        assert!(err.contains("Child"), "{err}");
+        assert!(err.contains("Refile or fold"), "{err}");
+
+        // Nothing moved: a refusal leaves the plan exactly as it was.
+        let after = read_planned_at(&r).unwrap();
+        assert!(after.nodes.iter().any(|n| n.id == "n2"));
+        assert!(after.changes.iter().any(|c| c.id == doomed));
+        assert!(after.changes.iter().any(|c| c.id == other));
+    }
+
+    /// The empty-change close is unchanged, and still refuses a change with
+    /// entries — abandonment is the deliberate other door, never a fallback.
+    #[test]
+    fn closing_still_refuses_a_change_that_carries_entries() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        write_model_at(&r, &model_with_resps(&[("r1", "exists")])).unwrap();
+
+        let mut plan = model_with_resps(&[("r1", "exists"), ("r2", "added")]);
+        let cid = open_change(&mut plan, "has work", 100);
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r2")],
+            &cid,
+        );
+        write_planned_at(&r, &plan).unwrap();
+
+        let err = close_change(&r, &cid).unwrap_err();
+        assert!(err.contains("still has 1 tagged entry"), "{err}");
+        assert!(read_planned_at(&r)
+            .unwrap()
+            .changes
+            .iter()
+            .any(|c| c.id == cid));
     }
 
     /// The full lifecycle: two changes tag pending claims; folding one claim

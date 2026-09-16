@@ -103,6 +103,12 @@ impl ScryerServer {
 /// Runs once per tool at construction, so the generator's output shape can
 /// change under a schemars upgrade without touching the request types.
 pub(crate) fn slim_schema(v: &mut serde_json::Value) {
+    /// Keys whose VALUES are a map of NAMES to schemas. Their keys are the
+    /// caller's vocabulary, not the generator's: an argument named `title` or
+    /// `format` is a field of the request, and stripping it would advertise a
+    /// tool that quietly takes an argument no client can see.
+    const NAMED_SCHEMAS: [&str; 3] = ["properties", "$defs", "definitions"];
+
     match v {
         serde_json::Value::Object(map) => {
             map.retain(|k, val| {
@@ -113,7 +119,15 @@ pub(crate) fn slim_schema(v: &mut serde_json::Value) {
                     || k == "title"
                     || (k == "default" && val.is_null()))
             });
-            for val in map.values_mut() {
+            for (k, val) in map.iter_mut() {
+                if NAMED_SCHEMAS.contains(&k.as_str()) {
+                    if let serde_json::Value::Object(named) = val {
+                        for schema in named.values_mut() {
+                            slim_schema(schema);
+                        }
+                        continue;
+                    }
+                }
                 slim_schema(val);
             }
         }
@@ -319,6 +333,44 @@ mod rule_wiring {
         }
     }
 
+    /// Generator metadata left in a schema, by JSON path. Walks STRUCTURALLY so
+    /// an argument NAMED like a metadata key — a request field called `title` or
+    /// `format` — is not mistaken for noise; a textual scan cannot tell the two
+    /// apart, and reading one as the other is what hid a whole argument from
+    /// every client (`slim_schema` used to strip it).
+    fn generator_noise(v: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+        const NAMED_SCHEMAS: [&str; 3] = ["properties", "$defs", "definitions"];
+        match v {
+            serde_json::Value::Object(map) => {
+                for (k, val) in map {
+                    let p = format!("{path}/{k}");
+                    if matches!(
+                        k.as_str(),
+                        "$schema" | "nullable" | "format" | "minimum" | "title"
+                    ) || (k == "default" && val.is_null())
+                    {
+                        out.push(p.clone());
+                    }
+                    if NAMED_SCHEMAS.contains(&k.as_str()) {
+                        if let serde_json::Value::Object(named) = val {
+                            for (name, schema) in named {
+                                generator_noise(schema, &format!("{p}/{name}"), out);
+                            }
+                            continue;
+                        }
+                    }
+                    generator_noise(val, &p, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    generator_noise(item, &format!("{path}/{i}"), out);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Every schema string a client sees, with the JSON path it sits at.
     fn schema_strings(v: &serde_json::Value, path: &str, out: &mut Vec<(String, String)>) {
         match v {
@@ -352,6 +404,10 @@ mod rule_wiring {
                 "n": {"type": "integer", "format": "uint32", "minimum": 0, "nullable": true},
                 "s": {"type": "string", "default": null, "description": "kept"},
                 "d": {"type": "string", "default": ""},
+                // An ARGUMENT named like a generator key: a field of the
+                // request, not metadata, and it must survive.
+                "title": {"type": "string", "title": "Title", "description": "kept too"},
+                "format": {"type": "string"},
                 "items": {"type": "array", "items": {"$ref": "#/$defs/X", "nullable": true}}
             },
             "required": ["n"],
@@ -366,6 +422,8 @@ mod rule_wiring {
                     "n": {"type": "integer"},
                     "s": {"type": "string", "description": "kept"},
                     "d": {"type": "string", "default": ""},
+                    "title": {"type": "string", "description": "kept too"},
+                    "format": {"type": "string"},
                     "items": {"type": "array", "items": {"$ref": "#/$defs/X"}}
                 },
                 "required": ["n"],
@@ -391,20 +449,13 @@ mod rule_wiring {
                 t.name,
                 text.len()
             );
-            for noise in [
-                "\"$schema\"",
-                "\"nullable\"",
-                "\"format\"",
-                "\"minimum\"",
-                "\"title\"",
-                "\"default\":null",
-            ] {
-                assert!(
-                    !text.contains(noise),
-                    "{}: schema still carries {noise}",
-                    t.name
-                );
-            }
+            let mut noise = Vec::new();
+            generator_noise(&schema, "", &mut noise);
+            assert!(
+                noise.is_empty(),
+                "{}: schema still carries generator noise at {noise:?}",
+                t.name
+            );
             let mut strings = Vec::new();
             schema_strings(&schema, "", &mut strings);
             for (path, s) in strings {
