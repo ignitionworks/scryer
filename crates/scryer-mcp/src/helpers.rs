@@ -381,11 +381,18 @@ impl ResolvedProject {
     }
 }
 
-/// Error text for a failed model/plan read. A missing file means NO MODEL
-/// EXISTS yet — steer at the bootstrap path instead of stranding the agent
-/// with a raw "os error 2".
+/// Error text for a failed model/plan read. When there really is NO MODEL yet,
+/// steer at the bootstrap path rather than strand the agent with an IO error.
+///
+/// Whether the model is absent is ASKED, not inferred from the error's wording.
+/// It used to be read off `e.contains("os error 2")`, which is true of ANY
+/// missing file — a lock, a temp file, a change's piece — so a read that
+/// stumbled over something else told the caller to start a model that already
+/// existed (judgement 535). The engine now names the file and the act in the
+/// error itself, so the guess has nothing left to do and the question has an
+/// answer: look.
 pub(crate) fn read_fail(layer: &str, model_ref: &ModelRef, e: &str) -> String {
-    if e.contains("os error 2") || e.contains("No such file") {
+    if !model_ref.model_path().exists() {
         format!(
             "No model exists at {model_ref} yet ({layer} file is absent). Start with \
              `read_codebase` to see the codebase, then build top-down: `add_system` / \
@@ -1043,4 +1050,45 @@ pub(crate) fn apply_resp_anchor_entries(
         }
     }
     (normalized, committed_dirty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// read_fail decides "there is no model yet" by LOOKING, not by reading the
+    /// error's wording. The wording test was true of any missing file, so a
+    /// read that stumbled over a lock or a temp file answered with the
+    /// bootstrap speech and told the caller to start a model that was already
+    /// there (judgement 535).
+    #[test]
+    fn read_fail_asks_whether_the_model_is_there_rather_than_reading_the_errors_wording() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        // No model: the bootstrap answer is the right one.
+        let absent = read_fail("model", &model_ref, "could not read x: os error 2");
+        assert!(absent.contains("No model exists at"), "{absent}");
+
+        // A model IS there, and something ELSE was missing — the engine's error
+        // already names which file and which act, so say it.
+        scryer_core::write_model_at(&model_ref, &ScryModel::new()).unwrap();
+        let other = format!(
+            "could not read {}: No such file or directory (os error 2)",
+            model_ref.lock_path().display()
+        );
+        let said = read_fail("plan", &model_ref, &other);
+        assert!(
+            !said.contains("No model exists at"),
+            "the model is right there: {said}"
+        );
+        assert!(
+            said.contains(&other),
+            "the error is passed through whole: {said}"
+        );
+        assert!(
+            said.contains(&model_ref.lock_path().display().to_string()),
+            "and it names the file that was actually missing: {said}"
+        );
+    }
 }

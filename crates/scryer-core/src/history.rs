@@ -185,14 +185,16 @@ fn agent() -> String {
 /// the event, so callers ignore the result.
 pub fn append_event(r: &ModelRef, ev: &HistoryEvent) -> Result<(), String> {
     let dir = r.dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let line = serde_json::to_string(ev).map_err(|e| e.to_string())?;
+    let path = r.history_path();
+    fs::create_dir_all(&dir).map_err(|e| crate::storage::io_fail("create", &dir, e))?;
+    let line =
+        serde_json::to_string(ev).map_err(|e| crate::storage::io_fail("encode", &path, e))?;
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(r.history_path())
-        .map_err(|e| e.to_string())?;
-    writeln!(f, "{}", line).map_err(|e| e.to_string())
+        .open(&path)
+        .map_err(|e| crate::storage::io_fail("open", &path, e))?;
+    writeln!(f, "{}", line).map_err(|e| crate::storage::io_fail("write", &path, e))
 }
 
 /// The plan events one plan write earns — one per node or group whose CLAIMS

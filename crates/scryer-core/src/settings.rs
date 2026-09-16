@@ -97,7 +97,9 @@ pub fn read_subagent_settings() -> SubagentSettings {
 
 pub fn write_subagent_settings(settings: &SubagentSettings) -> Result<(), String> {
     let dir = global_dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(), json).map_err(|e| e.to_string())
+    let path = settings_path();
+    fs::create_dir_all(&dir).map_err(|e| crate::storage::io_fail("create", &dir, e))?;
+    let json = serde_json::to_string_pretty(settings)
+        .map_err(|e| crate::storage::io_fail("encode", &path, e))?;
+    fs::write(&path, json).map_err(|e| crate::storage::io_fail("write", &path, e))
 }

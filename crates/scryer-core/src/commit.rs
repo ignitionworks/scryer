@@ -35,7 +35,8 @@ pub fn fold_built_model(r: &ModelRef, built: &ScryModel) -> Result<ScryModel, St
     seeded.source_map.clear();
     seeded.test_map.clear();
     seeded.boundaries.clear();
-    let json = serde_json::to_string_pretty(&seeded).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&seeded)
+        .map_err(|e| crate::storage::io_fail("encode", r.planned_path(), e))?;
     write_planned_raw_at(r, &json)?;
     Ok(folded)
 }
@@ -714,7 +715,8 @@ pub fn commit_element_withholding(
         || !planned_boundary_strip.is_empty()
         || gc.pruned > 0
     {
-        let json = serde_json::to_string_pretty(&p).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&p)
+            .map_err(|e| crate::storage::io_fail("encode", r.planned_path(), e))?;
         write_planned_raw_at(r, &json)?;
     }
 
@@ -870,7 +872,8 @@ pub fn commit_plan_only_ancestors(
         || !planned_boundary_strip.is_empty()
         || gc.pruned > 0
     {
-        let json = serde_json::to_string_pretty(&p).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&p)
+            .map_err(|e| crate::storage::io_fail("encode", r.planned_path(), e))?;
         write_planned_raw_at(r, &json)?;
     }
 

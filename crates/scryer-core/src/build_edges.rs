@@ -45,9 +45,11 @@ impl BuildEdges {
 /// no automatic links, not that the build fails.
 pub fn write_build_edges(project: &Path, edges: &BuildEdges) -> Result<(), String> {
     let dir = project.join(".scryer");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string(edges).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(".build_edges.json"), json).map_err(|e| e.to_string())
+    let path = dir.join(".build_edges.json");
+    std::fs::create_dir_all(&dir).map_err(|e| crate::storage::io_fail("create", &dir, e))?;
+    let json =
+        serde_json::to_string(edges).map_err(|e| crate::storage::io_fail("encode", &path, e))?;
+    std::fs::write(&path, json).map_err(|e| crate::storage::io_fail("write", &path, e))
 }
 
 /// Read the cached build dependency graph, if one was written for this build.

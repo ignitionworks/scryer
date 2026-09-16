@@ -35,15 +35,26 @@ fn check_version(v: &serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
+/// Every IO and parse failure in the engine says which FILE it was about and
+/// what was being done to it. The bare `io::Error` sentence names neither — a
+/// caller handed "No such file or directory (os error 2)" cannot tell a missing
+/// model from a missing lock, and the layer above it was reduced to guessing
+/// from the error's wording (judgement 535). `op` is the act in a word: read,
+/// parse, encode, write, create, replace, open, remove.
+pub(crate) fn io_fail(op: &str, path: impl AsRef<Path>, e: impl std::fmt::Display) -> String {
+    format!("could not {op} {}: {e}", path.as_ref().display())
+}
+
 pub fn read_model_raw_at(r: &ModelRef) -> Result<String, String> {
-    fs::read_to_string(r.model_path()).map_err(|e| e.to_string())
+    fs::read_to_string(r.model_path()).map_err(|e| io_fail("read", r.model_path(), e))
 }
 
 pub fn read_model_at(r: &ModelRef) -> Result<ScryModel, String> {
     let raw = read_model_raw_at(r)?;
-    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| io_fail("parse", r.model_path(), e))?;
     check_version(&v)?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
+    serde_json::from_value(v).map_err(|e| io_fail("parse", r.model_path(), e))
 }
 
 /// RAII guard holding the exclusive write lock for a model. The lock is an
@@ -64,7 +75,7 @@ pub struct ModelLock {
 /// Creates the `.scryer` directory and lock file if absent.
 pub fn lock_model(r: &ModelRef) -> Result<ModelLock, String> {
     let dir = r.dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| io_fail("create", &dir, e))?;
     let file = fs::OpenOptions::new()
         .create(true)
         .read(true)
@@ -81,12 +92,12 @@ pub fn lock_model(r: &ModelRef) -> Result<ModelLock, String> {
 /// frontend file watcher sees a single inotify event.
 pub fn write_model_raw_at(r: &ModelRef, data: &str) -> Result<(), String> {
     let dir = r.dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| io_fail("create", &dir, e))?;
     ensure_project_gitignore(&dir)?;
     let model_path = r.model_path();
     let tmp = dir.join(".tmp.model.scry");
-    fs::write(&tmp, data).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &model_path).map_err(|e| e.to_string())
+    fs::write(&tmp, data).map_err(|e| io_fail("write", &tmp, e))?;
+    fs::rename(&tmp, &model_path).map_err(|e| io_fail("replace", &model_path, e))
 }
 
 pub fn write_model_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
@@ -119,7 +130,8 @@ pub fn write_model_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
             violations.join("\n  - ")
         ));
     }
-    let json = serde_json::to_string_pretty(&stamped).map_err(|e| e.to_string())?;
+    let json =
+        serde_json::to_string_pretty(&stamped).map_err(|e| io_fail("encode", r.model_path(), e))?;
     write_model_raw_at(r, &json)
 }
 
@@ -232,9 +244,10 @@ fn stamp_touches(model: &mut ScryModel, prior: Option<&ScryModel>, now: u64) {
 
 pub fn save_baseline_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
     let dir = r.dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(model).map_err(|e| e.to_string())?;
-    fs::write(r.baseline_path(), json).map_err(|e| e.to_string())
+    fs::create_dir_all(&dir).map_err(|e| io_fail("create", &dir, e))?;
+    let json =
+        serde_json::to_string_pretty(model).map_err(|e| io_fail("encode", r.baseline_path(), e))?;
+    fs::write(r.baseline_path(), json).map_err(|e| io_fail("write", r.baseline_path(), e))
 }
 
 // --- Reconcile (drift) sync anchor ---
@@ -258,13 +271,14 @@ pub fn read_sync_state(r: &ModelRef) -> drift::SyncState {
 /// deletions stay visible to the nodes that haven't reconciled them.
 pub fn write_sync_state(r: &ModelRef, state: &drift::SyncState) -> Result<(), String> {
     let dir = r.dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| io_fail("create", &dir, e))?;
     let mut state = state.clone();
     if state.files.is_empty() {
         state.files = drift::product_file_inventory(r.project_path());
     }
-    let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-    fs::write(r.sync_path(), json).map_err(|e| e.to_string())
+    let json =
+        serde_json::to_string_pretty(&state).map_err(|e| io_fail("encode", r.sync_path(), e))?;
+    fs::write(r.sync_path(), json).map_err(|e| io_fail("write", r.sync_path(), e))
 }
 
 /// Read the baseline snapshot. Returns None if absent or version-mismatched.
@@ -283,11 +297,11 @@ pub fn read_baseline_at(r: &ModelRef) -> Option<ScryModel> {
 /// write, so the frontend watcher sees a single event.
 pub fn write_planned_raw_at(r: &ModelRef, data: &str) -> Result<(), String> {
     let dir = r.dir();
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| io_fail("create", &dir, e))?;
     ensure_project_gitignore(&dir)?;
     let tmp = dir.join(".tmp.planned.scry");
-    fs::write(&tmp, data).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, r.planned_path()).map_err(|e| e.to_string())?;
+    fs::write(&tmp, data).map_err(|e| io_fail("write", &tmp, e))?;
+    fs::rename(&tmp, r.planned_path()).map_err(|e| io_fail("replace", r.planned_path(), e))?;
     // Concern-metadata write-through (plan → committed): a retag on an
     // already-built claim never folds (`diff` ignores `concern`), so it syncs
     // here — the choke point every plan write passes (canvas raw saves and
@@ -312,7 +326,7 @@ fn seeded_plan_json(r: &ModelRef) -> Result<String, String> {
     model.source_map.clear();
     model.test_map.clear();
     model.boundaries.clear();
-    serde_json::to_string_pretty(&model).map_err(|e| e.to_string())
+    serde_json::to_string_pretty(&model).map_err(|e| io_fail("encode", r.planned_path(), e))
 }
 
 /// Read the raw planned JSON, byte-for-byte. Falls back to the SEEDED form of
@@ -326,7 +340,7 @@ pub fn read_planned_raw_at(r: &ModelRef) -> Result<String, String> {
     if !path.exists() {
         return seeded_plan_json(r);
     }
-    fs::read_to_string(&path).map_err(|e| e.to_string())
+    fs::read_to_string(&path).map_err(|e| io_fail("read", &path, e))
 }
 
 /// Read the planned (draft) model. Falls back to the committed model when no
@@ -337,10 +351,11 @@ pub fn read_planned_at(r: &ModelRef) -> Result<ScryModel, String> {
     if !path.exists() {
         return read_model_at(r);
     }
-    let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let raw = fs::read_to_string(&path).map_err(|e| io_fail("read", &path, e))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| io_fail("parse", &path, e))?;
     check_version(&v)?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
+    serde_json::from_value(v).map_err(|e| io_fail("parse", &path, e))
 }
 
 /// Write the planned (draft) model with no actor named — the write reads as the
@@ -403,7 +418,8 @@ pub fn write_planned_for(
             changes::record_opened(r, &meta, actor, person);
         }
     }
-    let json = serde_json::to_string_pretty(&stamped).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&stamped)
+        .map_err(|e| io_fail("encode", r.planned_path(), e))?;
     write_planned_raw_at(r, &json)?;
     // The agent's seam: every authoring tool reaches the plan through here, so
     // the write leaves its trace in the history without one of them knowing —
@@ -475,7 +491,8 @@ pub fn heal_shadow_draft(r: &ModelRef) -> Result<bool, String> {
     if !strip_shadow_entries(&committed, &mut planned) {
         return Ok(false);
     }
-    let json = serde_json::to_string_pretty(&planned).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&planned)
+        .map_err(|e| io_fail("encode", r.planned_path(), e))?;
     write_planned_raw_at(r, &json)?;
     Ok(true)
 }
@@ -496,7 +513,8 @@ pub fn read_planned_seeded_at(r: &ModelRef) -> Result<ScryModel, String> {
     // dedicated migration step.
     let committed = read_model_at(r).unwrap_or_default();
     if strip_shadow_entries(&committed, &mut planned) {
-        let json = serde_json::to_string_pretty(&planned).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&planned)
+            .map_err(|e| io_fail("encode", r.planned_path(), e))?;
         write_planned_raw_at(r, &json)?;
     }
     Ok(planned)
@@ -611,7 +629,7 @@ pub fn working_view(committed: &ScryModel, planned: &ScryModel) -> ScryModel {
 pub fn delete_model_at(r: &ModelRef) -> Result<(), String> {
     let model_path = r.model_path();
     if model_path.exists() {
-        fs::remove_file(&model_path).map_err(|e| e.to_string())?;
+        fs::remove_file(&model_path).map_err(|e| io_fail("remove", &model_path, e))?;
     }
     // Best-effort: every other file is derived state a fresh model must not
     // inherit — the draft especially, which would otherwise resurrect on reopen.
@@ -704,6 +722,46 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let r = ModelRef::ProjectLocal(dir.path().to_path_buf());
         (dir, r)
+    }
+
+    /// A failed read says which file it was and what was being done to it. The
+    /// bare operating-system sentence names neither, and a caller handed it
+    /// cannot tell a missing model from a missing anything-else.
+    #[test]
+    fn a_failed_read_names_the_file_and_the_act() {
+        let (_dir, r) = temp_ref();
+        let e = read_model_at(&r).unwrap_err();
+        assert!(e.starts_with("could not read "), "{e}");
+        assert!(
+            e.contains(&r.model_path().display().to_string()),
+            "the file it was: {e}"
+        );
+        assert!(
+            e.contains("os error 2"),
+            "the cause is kept, not swallowed: {e}"
+        );
+    }
+
+    /// A failure over a file that is NOT the model names THAT file. This is the
+    /// one that matters: while the path was thrown away, the layer above read
+    /// any missing file as a missing model and told the caller to start one
+    /// that already existed.
+    #[test]
+    fn a_failure_over_a_non_model_file_names_that_file_not_the_model() {
+        let (_dir, r) = temp_ref();
+        write_model_at(&r, &one_resp_model("as committed")).unwrap();
+        fs::write(r.planned_path(), "{ not json").unwrap();
+
+        let e = read_planned_at(&r).unwrap_err();
+        assert!(e.starts_with("could not parse "), "{e}");
+        assert!(
+            e.contains(&r.planned_path().display().to_string()),
+            "the plan file names itself: {e}"
+        );
+        assert!(
+            !e.contains(&r.model_path().display().to_string()),
+            "and never the model, which is sitting there intact: {e}"
+        );
     }
 
     /// resp-ag8ngf — the plan event names the ACTOR OF THE WRITE, not just the

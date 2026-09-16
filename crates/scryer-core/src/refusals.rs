@@ -46,17 +46,19 @@ fn read(r: &ModelRef) -> Ledger {
 }
 
 fn write(r: &ModelRef, ledger: &Ledger) -> Result<(), String> {
-    std::fs::create_dir_all(r.dir()).map_err(|e| e.to_string())?;
+    let path = r.fold_refusals_path();
+    std::fs::create_dir_all(r.dir()).map_err(|e| crate::storage::io_fail("create", r.dir(), e))?;
     if ledger.refusals.is_empty() {
         // An empty ledger is no ledger — keep `.scryer/` free of husks.
-        match std::fs::remove_file(r.fold_refusals_path()) {
+        match std::fs::remove_file(&path) {
             Ok(()) => return Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(crate::storage::io_fail("remove", &path, e)),
         }
     }
-    let json = serde_json::to_string_pretty(ledger).map_err(|e| e.to_string())?;
-    std::fs::write(r.fold_refusals_path(), json).map_err(|e| e.to_string())
+    let json = serde_json::to_string_pretty(ledger)
+        .map_err(|e| crate::storage::io_fail("encode", &path, e))?;
+    std::fs::write(&path, json).map_err(|e| crate::storage::io_fail("write", &path, e))
 }
 
 /// Every standing refusal, oldest first.
