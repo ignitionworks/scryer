@@ -1153,6 +1153,44 @@ pub fn abandon_change(r: &ModelRef, change_id: &str) -> Result<Abandoned, String
     Ok(Abandoned { meta, dropped })
 }
 
+/// The history record of a change being OPENED — the first event of its life,
+/// in the same stream as its sign-off and its close, so a change's whole life is
+/// one record rather than a ledger entry that takes its beginning with it when
+/// it closes. Stamped at the change's OWN moment ([`ChangeMeta::created_at`]),
+/// not at the write, so the interval between this and the fold is the change's
+/// real age.
+///
+/// Deliberately a [`EventKind::Change`] event with `driver` "opened", beside
+/// "signed off", "folded" and "abandoned" — NOT a new event kind. `read_history`
+/// drops a line it cannot parse, so a reader built before this existed would
+/// silently lose an unknown kind; a new driver word is a string it already
+/// displays.
+///
+/// Best-effort like every history append: a log failure must never abort the
+/// open it describes.
+pub fn record_opened(r: &ModelRef, meta: &ChangeMeta, actor: Option<&str>, person: Option<&str>) {
+    let ev = HistoryEvent::new(meta.created_at, EventKind::Change, "", "opened")
+        .with_change(&meta.id)
+        .with_change_title(title_of(meta))
+        .with_rows(vec![EventRow::new("+", meta.rationale.clone())])
+        .by_actor(actor)
+        .for_person(person);
+    let _ = append_event(r, &ev);
+}
+
+/// The changes `after` holds that `before` did not — what a plan write OPENED.
+/// The mirror of [`gc`]'s closed set, and read the same way: on the authoring
+/// path, so no tool has to remember to announce its own open.
+pub fn opened_by(before: &ScryModel, after: &ScryModel) -> Vec<ChangeMeta> {
+    let known: HashSet<&str> = before.changes.iter().map(|c| c.id.as_str()).collect();
+    after
+        .changes
+        .iter()
+        .filter(|c| !known.contains(c.id.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// The history record of an abandonment: the change, its title and rationale,
 /// and a row per entry that went with it — so "what did this change hold when it
 /// was dropped?" has an answer after the registry entry is gone.
@@ -1813,7 +1851,9 @@ mod tests {
         let ev = read_history(&r)
             .into_iter()
             .find(|e| {
-                e.kind == EventKind::Change && e.change_id.as_deref() == Some(doomed.as_str())
+                e.kind == EventKind::Change
+                    && e.driver == "abandoned"
+                    && e.change_id.as_deref() == Some(doomed.as_str())
             })
             .expect("the abandonment is in the history");
         assert_eq!(ev.driver, "abandoned");
@@ -1902,6 +1942,120 @@ mod tests {
             .any(|c| c.id == cid));
     }
 
+    /// A change's whole life is one stream: the `opened` event lands the moment
+    /// it is opened, naming it, its rationale, its actor and the person acted
+    /// for, and the fold's close lands in the same stream — so the interval
+    /// between them is a fact the history holds.
+    #[test]
+    fn opening_a_change_is_recorded_beside_its_close() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        write_model_at(&r, &model_with_resps(&[("r1", "exists")])).unwrap();
+        write_planned_at(&r, &model_with_resps(&[("r1", "exists")])).unwrap();
+
+        let mut plan = read_planned_at(&r).unwrap();
+        let cid = open_change_titled(&mut plan, Some("The title"), "why it exists", 1_700_000_000)
+            .unwrap();
+        crate::write_planned_for(&r, &plan, Some("the-agent"), Some("the-developer")).unwrap();
+
+        let opened: Vec<_> = read_history(&r)
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Change && e.driver == "opened")
+            .collect();
+        assert_eq!(opened.len(), 1, "exactly one open, once");
+        let ev = &opened[0];
+        assert_eq!(ev.change_id.as_deref(), Some(cid.as_str()));
+        assert_eq!(ev.change_title.as_deref(), Some("The title"));
+        assert_eq!(ev.rows[0].text, "why it exists");
+        assert_eq!(ev.by, "the-agent");
+        assert_eq!(ev.on_behalf_of.as_deref(), Some("the-developer"));
+        assert_eq!(
+            ev.at, 1_700_000_000,
+            "stamped at the change's own moment, not at the write"
+        );
+
+        // A second write that opens nothing announces nothing.
+        let plan = read_planned_at(&r).unwrap();
+        crate::write_planned_for(&r, &plan, None, None).unwrap();
+        assert_eq!(
+            read_history(&r)
+                .iter()
+                .filter(|e| e.driver == "opened")
+                .count(),
+            1,
+            "an open is announced once, not on every later write"
+        );
+
+        // And the close lands in the same stream, so both ends are there.
+        close_change(&r, &cid).unwrap();
+        let life: Vec<String> = read_history(&r)
+            .into_iter()
+            .filter(|e| e.kind == EventKind::Change && e.change_id.as_deref() == Some(cid.as_str()))
+            .map(|e| e.driver)
+            .collect();
+        assert_eq!(life, vec!["opened".to_string(), "abandoned".to_string()]);
+    }
+
+    /// The event rides the AUTHORING path, so a caller that opens a change
+    /// without going through a tool still records one — and `opened_by` names
+    /// exactly what a write added, never what it merely carried.
+    #[test]
+    fn what_a_write_opened_is_read_from_the_write_itself() {
+        let mut before = model_with_resps(&[("r1", "exists")]);
+        let first = open_change(&mut before, "already open", 100);
+
+        let mut after = before.clone();
+        let second = open_change(&mut after, "newly open", 200);
+
+        let opened = opened_by(&before, &after);
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].id, second);
+        assert!(opened_by(&before, &before).is_empty());
+        assert_eq!(
+            opened_by(&ScryModel::new(), &after).len(),
+            2,
+            "against an empty plan, both changes read as opened"
+        );
+        let _ = first;
+    }
+
+    /// The event is a `Change` event with a new DRIVER, not a new event kind: a
+    /// reader built before it existed parses the line (`read_history` silently
+    /// DROPS what it cannot parse, so an unknown kind would go missing without
+    /// a word), and finds a driver string it already knows how to show.
+    #[test]
+    fn an_older_reader_can_still_parse_an_opened_event() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let meta = ChangeMeta {
+            id: "chg-1".into(),
+            rationale: "why".into(),
+            title: Some("A name".into()),
+            created_at: 1_700_000_000,
+            signed_off: None,
+        };
+        record_opened(&r, &meta, None, None);
+
+        let line = std::fs::read_to_string(r.history_path()).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(raw["kind"], "change", "an existing kind, not a new one");
+        assert_eq!(raw["driver"], "opened");
+
+        // What an older reader does: parse into the shape it knows. `changeTitle`
+        // is ignored by a reader that predates it; the event still lands.
+        #[derive(serde::Deserialize)]
+        struct OldEvent {
+            kind: EventKind,
+            driver: String,
+            #[serde(rename = "changeId")]
+            change_id: Option<String>,
+        }
+        let old: OldEvent = serde_json::from_str(line.trim()).expect("an older reader parses it");
+        assert_eq!(old.kind, EventKind::Change);
+        assert_eq!(old.driver, "opened");
+        assert_eq!(old.change_id.as_deref(), Some("chg-1"));
+    }
+
     /// The full lifecycle: two changes tag pending claims; folding one claim
     /// closes its change (recorded "folded", rationale intact) while the other
     /// stays open; the committed layer never carries change state.
@@ -1944,7 +2098,8 @@ mod tests {
 
         let closes: Vec<_> = read_history(&r)
             .into_iter()
-            .filter(|e| e.kind == EventKind::Change)
+            // A change now has TWO ends in this stream; this counts the closes.
+            .filter(|e| e.kind == EventKind::Change && e.driver != "opened")
             .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(a.as_str()));
@@ -1987,7 +2142,8 @@ mod tests {
         assert!(planned.change_map.is_empty());
         let closes: Vec<_> = read_history(&r)
             .into_iter()
-            .filter(|e| e.kind == EventKind::Change)
+            // A change now has TWO ends in this stream; this counts the closes.
+            .filter(|e| e.kind == EventKind::Change && e.driver != "opened")
             .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(tagged.as_str()));
@@ -2081,7 +2237,8 @@ mod tests {
         assert!(planned.changes.is_empty() && planned.change_map.is_empty());
         let closes: Vec<_> = read_history(&r)
             .into_iter()
-            .filter(|e| e.kind == EventKind::Change)
+            // A change now has TWO ends in this stream; this counts the closes.
+            .filter(|e| e.kind == EventKind::Change && e.driver != "opened")
             .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(id.as_str()));
@@ -2125,7 +2282,8 @@ mod tests {
 
         let closes: Vec<_> = read_history(&r)
             .into_iter()
-            .filter(|e| e.kind == EventKind::Change)
+            // A change now has TWO ends in this stream; this counts the closes.
+            .filter(|e| e.kind == EventKind::Change && e.driver != "opened")
             .collect();
         assert_eq!(closes.len(), 1);
         assert_eq!(closes[0].change_id.as_deref(), Some(stranded.as_str()));

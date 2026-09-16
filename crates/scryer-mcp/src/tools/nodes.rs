@@ -5672,9 +5672,10 @@ mod tests {
         );
 
         let history = scryer_core::history::read_history(&model_ref);
+        // A change has TWO ends in this stream now; this is the closing one.
         let ev = history
             .iter()
-            .find(|e| e.kind == scryer_core::history::EventKind::Change)
+            .find(|e| e.kind == scryer_core::history::EventKind::Change && e.driver != "opened")
             .expect("a change-closed event");
         assert_eq!(ev.change_id.as_deref(), Some(chg2.as_str()));
         assert_eq!(ev.driver, "abandoned");

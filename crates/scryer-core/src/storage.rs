@@ -392,6 +392,17 @@ pub fn write_planned_for(
             }
         }
     }
+    // The other end of the same seam: a change this write OPENED gets its
+    // `opened` event here, so no authoring tool has to remember to announce one
+    // and a change's beginning is recorded wherever it was begun. Only when a
+    // PRIOR plan could be read — an unreadable one cannot tell a new change from
+    // an old, and re-announcing every open change as freshly opened would
+    // corrupt the very interval the event exists to measure.
+    if let Some(prior) = prior.as_ref() {
+        for meta in changes::opened_by(prior, &stamped) {
+            changes::record_opened(r, &meta, actor, person);
+        }
+    }
     let json = serde_json::to_string_pretty(&stamped).map_err(|e| e.to_string())?;
     write_planned_raw_at(r, &json)?;
     // The agent's seam: every authoring tool reaches the plan through here, so
