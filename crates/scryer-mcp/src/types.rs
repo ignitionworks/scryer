@@ -138,6 +138,47 @@ pub struct AbandonChangeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RestoreChangeRequest {
+    pub project: Option<String>,
+    /// The binned change to restore.
+    #[schemars(
+        description = "The binned change to restore; it comes back open, exactly as it was."
+    )]
+    pub change_id: String,
+    /// Why it is coming back, for the history record. Optional: putting work
+    /// back is reversible, and the act explains itself.
+    #[serde(default)]
+    pub why: Option<String>,
+}
+
+/// A PERSON's confirmation of an irreversible act: who, and when. The same
+/// shape the host's own confirmed acts take, so a route can pass one through
+/// unchanged.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct Confirm {
+    /// Who confirmed. Required and non-empty: the confirmation is a person's,
+    /// and an unsigned one is no confirmation at all.
+    pub by: String,
+    /// Unix seconds of the confirmation. The engine stamps now when absent.
+    #[serde(default)]
+    pub at: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteChangePermanentlyRequest {
+    pub project: Option<String>,
+    /// The BINNED change to delete for good. Refused while it is open.
+    #[schemars(description = "The binned change to delete for good; refused while it is open.")]
+    pub change_id: String,
+    /// Why it is never coming back. Required: this is the last record there
+    /// will be of the work.
+    pub why: String,
+    /// The person's confirmation, `{by, at}`. Required — the act is
+    /// irreversible, so it is never taken on an agent's own account.
+    pub confirm: Confirm,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RefileRequest {
     pub project: Option<String>,
     /// The `basis` answered by the read this edit was made against. The engine

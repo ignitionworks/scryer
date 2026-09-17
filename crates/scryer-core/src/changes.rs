@@ -1244,6 +1244,7 @@ fn revert_one(plan: &mut ScryModel, committed: &ScryModel, ec: &ElementChange) {
 pub fn delete_change_permanently(
     r: &ModelRef,
     change_id: &str,
+    by: Option<&str>,
     why: Option<&str>,
 ) -> Result<Abandoned, String> {
     let committed = crate::read_model_at(r)?;
@@ -1310,7 +1311,7 @@ pub fn delete_change_permanently(
     plan.change_map.retain(|k, _| !keys.contains(k));
     let meta = plan.changes.remove(pos);
     crate::write_planned_at(r, &plan)?;
-    record_deleted_permanently(r, &meta, &dropped, why);
+    record_deleted_permanently(r, &meta, &dropped, by, why);
     Ok(Abandoned { meta, dropped })
 }
 
@@ -1372,6 +1373,74 @@ pub struct BinAct {
     pub meta: ChangeMeta,
     pub kept: usize,
     pub state: Binned,
+}
+
+/// RESTORE a binned change (L315 G3): it returns OPEN with its entries and
+/// their tags exactly as they were, because nothing ever left — clearing the
+/// `binned` state is the whole act. A plain reversible thing, deliberately
+/// unlike its neighbour in the bin: one of the two acts asks for a person's
+/// confirmation and the other does not, and which is which is the difference
+/// between putting work back and losing it.
+///
+/// The caller must hold the model lock.
+pub fn restore_change(
+    r: &ModelRef,
+    change_id: &str,
+    by: Option<&str>,
+    why: Option<&str>,
+) -> Result<BinAct, String> {
+    let mut plan = crate::read_planned_seeded_at(r)?;
+    let Some(meta) = plan.changes.iter_mut().find(|c| c.id == change_id) else {
+        return Err(format!("no change '{change_id}'"));
+    };
+    let Some(state) = meta.binned.take() else {
+        return Err(format!(
+            "'{change_id}' is not in the bin — it is open, and there is nothing to restore."
+        ));
+    };
+    let meta = meta.clone();
+    let kept = plan
+        .change_map
+        .values()
+        .filter(|v| v.as_str() == change_id)
+        .count();
+    crate::write_planned_at(r, &plan)?;
+    record_restored(r, &meta, &state, kept, by, why);
+    Ok(BinAct { meta, kept, state })
+}
+
+/// The history record of a RESTORE. Its own driver word beside "binned" and
+/// "deleted": the three acts on the bin are three different things to a reader,
+/// and one of them is the one that undoes the others.
+fn record_restored(
+    r: &ModelRef,
+    meta: &ChangeMeta,
+    was: &Binned,
+    kept: usize,
+    by: Option<&str>,
+    why: Option<&str>,
+) {
+    let mut rows = vec![EventRow::new("✓", meta.rationale.clone())];
+    if let Some(why) = why.map(str::trim).filter(|w| !w.is_empty()) {
+        rows.push(EventRow::new("✓", format!("why: {why}")));
+    }
+    rows.push(EventRow::new(
+        "✓",
+        format!(
+            "{kept} tagged entr{} back as they were; in the bin since {}",
+            if kept == 1 { "y" } else { "ies" },
+            was.at
+        ),
+    ));
+    if let Some(binner) = was.by.as_deref() {
+        rows.push(EventRow::new("✓", format!("binned by {binner}")));
+    }
+    let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", "restored")
+        .with_change(&meta.id)
+        .with_change_title(title_of(meta))
+        .with_rows(rows)
+        .by_actor(by);
+    let _ = append_event(r, &ev);
 }
 
 /// The history record of a change being OPENED — the first event of its life,
@@ -1450,6 +1519,7 @@ fn record_deleted_permanently(
     r: &ModelRef,
     meta: &ChangeMeta,
     dropped: &[DroppedEntry],
+    by: Option<&str>,
     why: Option<&str>,
 ) {
     let mut rows = vec![EventRow::new("✓", meta.rationale.clone())];
@@ -1465,7 +1535,8 @@ fn record_deleted_permanently(
     let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", "deleted")
         .with_change(&meta.id)
         .with_change_title(title_of(meta))
-        .with_rows(rows);
+        .with_rows(rows)
+        .by_actor(by);
     let _ = append_event(r, &ev);
 }
 
@@ -2078,7 +2149,7 @@ mod tests {
         // Abandoning BINS; the permanent delete is the act reached from there,
         // and it is the one that drops the entries (L315 G1).
         bin_change(&r, &doomed, None, Some("not happening"), None).unwrap();
-        let abandoned = delete_change_permanently(&r, &doomed, None).unwrap();
+        let abandoned = delete_change_permanently(&r, &doomed, None, None).unwrap();
 
         assert_eq!(abandoned.meta.id, doomed);
         let mut what: Vec<(String, String)> = abandoned
@@ -2184,7 +2255,7 @@ mod tests {
         write_planned_at(&r, &plan).unwrap();
 
         bin_change(&r, &doomed, None, Some("not happening"), None).unwrap();
-        let err = delete_change_permanently(&r, &doomed, None).unwrap_err();
+        let err = delete_change_permanently(&r, &doomed, None, None).unwrap_err();
         assert!(err.contains("Child"), "{err}");
         assert!(err.contains("Refile or fold"), "{err}");
 
@@ -3034,7 +3105,7 @@ mod tests {
         let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
         let (doomed, _other) = binnable(&r);
 
-        let err = delete_change_permanently(&r, &doomed, Some("go away")).unwrap_err();
+        let err = delete_change_permanently(&r, &doomed, None, Some("go away")).unwrap_err();
         assert!(err.contains("not in the bin"), "{err}");
         assert!(
             err.contains("Abandon it first"),
@@ -3049,7 +3120,7 @@ mod tests {
 
         // From the bin it goes, and takes its entries with it.
         bin_change(&r, &doomed, None, Some("wrong approach"), None).unwrap();
-        let gone = delete_change_permanently(&r, &doomed, Some("never coming back")).unwrap();
+        let gone = delete_change_permanently(&r, &doomed, None, Some("never coming back")).unwrap();
         assert_eq!(gone.dropped.len(), 2);
         let plan = read_planned_at(&r).unwrap();
         assert!(plan.changes.iter().all(|c| c.id != doomed));

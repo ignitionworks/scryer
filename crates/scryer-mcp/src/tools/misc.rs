@@ -915,6 +915,137 @@ impl ScryerServer {
     }
 
     #[tool(
+        description = "RESTORE a binned change: it comes back OPEN with its entries and their tags exactly \
+         as they were, because nothing ever left the plan. A plain reversible act — no \
+         confirmation, no reason required — and the counterpart to `delete_change_permanently`, \
+         which is the one act on the bin that cannot be undone. Recorded in history with who and \
+         why.\n\
+         Rules: change-ledger"
+    )]
+    pub fn restore_change(
+        &self,
+        Parameters(req): Parameters<RestoreChangeRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let model_ref = resolve_model_ref(req.project.as_deref())?;
+        let cid = req.change_id.trim();
+        if cid.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Pass change_id — the binned change to restore.".to_string(),
+            )]));
+        }
+        let _lock = match lock_or_err(&model_ref) {
+            Ok(l) => l,
+            Err(e) => return Ok(e),
+        };
+        let restored = match scryer_core::changes::restore_change(
+            &model_ref,
+            cid,
+            env_actor().as_deref(),
+            req.why.as_deref(),
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "{e}\n{}",
+                    bin_line(&plan)
+                ))]));
+            }
+        };
+        let n = restored.kept;
+        let mut msg = format!(
+            "Restored {cid} — \"{}\": open again, with {n} tagged entr{} exactly as they were. \
+             Its entries are pending work once more.",
+            scryer_core::changes::title_of(&restored.meta),
+            if n == 1 { "y" } else { "ies" }
+        );
+        drop(_lock);
+        if let Some(h) = status_header_named(&model_ref) {
+            msg.push_str(&format!("\n{h}"));
+        }
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
+    }
+
+    #[tool(
+        description = "DELETE a binned change FOR GOOD: its planned entries are taken back to what the \
+         committed model says, its tags go, and it is closed as deleted in history with a row \
+         per entry. IRREVERSIBLE, and reached only from the bin — an open change is refused and \
+         told to abandon it first. Requires `why` and a person's `confirm {by, at}`; never taken \
+         on an agent's own account.\n\
+         Rules: change-ledger"
+    )]
+    pub fn delete_change_permanently(
+        &self,
+        Parameters(req): Parameters<DeleteChangePermanentlyRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let model_ref = resolve_model_ref(req.project.as_deref())?;
+        let cid = req.change_id.trim();
+        if cid.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Pass change_id — the binned change to delete for good.".to_string(),
+            )]));
+        }
+        let why = req.why.trim();
+        if why.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Pass why — this is the last record there will be of the work, and a deletion \
+                 nobody can say the reason for is the one shape of this that costs a team \
+                 anything."
+                    .to_string(),
+            )]));
+        }
+        // The confirmation is A PERSON'S. An irreversible act taken on nobody's
+        // word is the shape this whole change exists to remove, so an unsigned
+        // confirm is refused rather than defaulted to the caller.
+        let by = req.confirm.by.trim();
+        if by.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Pass confirm {by, at} — the person confirming. A permanent delete cannot be \
+                 undone, so it is never taken on an agent's own account: name who confirmed it."
+                    .to_string(),
+            )]));
+        }
+        let _lock = match lock_or_err(&model_ref) {
+            Ok(l) => l,
+            Err(e) => return Ok(e),
+        };
+        let gone = match scryer_core::changes::delete_change_permanently(
+            &model_ref,
+            cid,
+            Some(by),
+            Some(why),
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "{e}\n{}",
+                    bin_line(&plan)
+                ))]));
+            }
+        };
+        if self.session_change(&model_ref).as_deref() == Some(cid) {
+            self.set_session_change(None);
+        }
+        let n = gone.dropped.len();
+        let mut msg = format!(
+            "Deleted {cid} — \"{}\" — permanently, confirmed by {by}: {n} planned entr{} dropped \
+             with it, the plan back to what the committed model says. This cannot be undone; the \
+             deletion, the reason and what it held are in the history log.",
+            scryer_core::changes::title_of(&gone.meta),
+            if n == 1 { "y" } else { "ies" }
+        );
+        for d in &gone.dropped {
+            msg.push_str(&format!("\n  − {} ({})", d.label, d.what));
+        }
+        drop(_lock);
+        if let Some(h) = status_header_named(&model_ref) {
+            msg.push_str(&format!("\n{h}"));
+        }
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
+    }
+
+    #[tool(
         description = "Move pending work between changes without re-writing the spec. `ids` names nodes/groups \
          (carrier plus everything pending under it), responsibilities/links, a change id \
          (everything under it), or \"unfiled\"; `to` is the destination change id or \"unfiled\", \
@@ -1906,5 +2037,246 @@ mod tests {
             plan.change_map.get("resp:resp-2").map(String::as_str),
             Some(cid.as_str())
         );
+    }
+    // ---- resp-q48seb: the bin's two acts
+
+    /// The doomed change, put in the bin. Returns the model ref, the change id
+    /// and the project path.
+    fn binned(dir: &std::path::Path) -> (ModelRef, String, String) {
+        let (model_ref, cid, project) = doomed(dir);
+        let server = ScryerServer::new();
+        let out = server
+            .abandon_change(Parameters(AbandonChangeRequest {
+                expires_at: Some(9_999),
+                project: Some(project.clone()),
+                change_id: cid.clone(),
+                why: "put aside".into(),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        (model_ref, cid, project)
+    }
+
+    /// resp-q48seb, the first act: RESTORE returns the change OPEN with its
+    /// entries and tags exactly as they were — the reword still reworded, the
+    /// added claim still added, the tag still naming it — and its entries are
+    /// pending work again. A plain reversible act: no confirmation, no reason
+    /// required.
+    #[test]
+    fn resp_q48seb_restore_returns_the_change_open_exactly_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = binned(dir.path());
+        let before = scryer_core::read_planned_at(&model_ref).unwrap();
+        let server = ScryerServer::new();
+
+        let out = server
+            .restore_change(Parameters(RestoreChangeRequest {
+                project: Some(project.clone()),
+                change_id: cid.clone(),
+                why: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("Restored"), "{}", said(&out));
+        assert!(
+            said(&out).contains("exactly as they were"),
+            "{}",
+            said(&out)
+        );
+
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(!scryer_core::changes::is_binned(&after, &cid));
+        assert_eq!(
+            scryer_core::changes::open_changes(&after)
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>(),
+            vec![cid.clone()],
+            "listed again"
+        );
+        // EXACTLY as it was: the claims and the tags are byte-for-byte what the
+        // bin held, and the only thing that moved is the state.
+        assert_eq!(
+            after.change_map, before.change_map,
+            "its tags are untouched"
+        );
+        assert_eq!(
+            serde_json::to_value(&after.nodes).unwrap(),
+            serde_json::to_value(&before.nodes).unwrap(),
+            "and so is every claim"
+        );
+        // And its entry is work again.
+        let committed = scryer_core::read_model_at(&model_ref).unwrap();
+        assert!(!scryer_core::diff::open_plan(&committed, &after).is_empty());
+        assert!(scryer_core::changes::bin_entries(&after).is_empty());
+
+        // Recorded with who and why.
+        let ev = scryer_core::history::read_history(&model_ref)
+            .into_iter()
+            .find(|e| e.driver == "restored" && e.change_id.as_deref() == Some(cid.as_str()))
+            .expect("the restore is in the history log");
+        let rows: Vec<&str> = ev.rows.iter().map(|r| r.text.as_str()).collect();
+        assert!(
+            rows.iter().any(|t| t.contains("back as they were")),
+            "{rows:?}"
+        );
+
+        // A second restore has nothing to do, and says so.
+        let out = server
+            .restore_change(Parameters(RestoreChangeRequest {
+                project: Some(project),
+                change_id: cid,
+                why: None,
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("not in the bin"), "{}", said(&out));
+        assert!(
+            said(&out).contains("The bin is empty."),
+            "and says what the bin does hold: {}",
+            said(&out)
+        );
+    }
+
+    /// resp-q48seb, the second act: DELETE PERMANENTLY drops the entries, closes
+    /// the change as deleted, and is IRREVERSIBLE — so it takes a person's
+    /// `confirm {by, at}` and a reason, and is refused without either. It is
+    /// reached only from the bin.
+    #[test]
+    fn resp_q48seb_delete_permanently_takes_a_persons_confirm_and_a_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = binned(dir.path());
+        let server = ScryerServer::new();
+
+        // No confirm: refused, and told why the act needs one.
+        let out = server
+            .delete_change_permanently(Parameters(DeleteChangePermanentlyRequest {
+                project: Some(project.clone()),
+                change_id: cid.clone(),
+                why: "never coming back".into(),
+                confirm: Confirm {
+                    by: "  ".into(),
+                    at: None,
+                },
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("confirm {by, at}"), "{}", said(&out));
+        assert!(
+            said(&out).contains("agent's own account"),
+            "and says whose word it is: {}",
+            said(&out)
+        );
+
+        // No reason: refused.
+        let out = server
+            .delete_change_permanently(Parameters(DeleteChangePermanentlyRequest {
+                project: Some(project.clone()),
+                change_id: cid.clone(),
+                why: "   ".into(),
+                confirm: Confirm {
+                    by: "dana".into(),
+                    at: Some(1_789_000_000),
+                },
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("why"), "{}", said(&out));
+
+        // Nothing happened on either refusal.
+        let plan = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(scryer_core::changes::is_binned(&plan, &cid));
+        assert!(plan.nodes[0]
+            .responsibilities
+            .iter()
+            .any(|r| r.id == "resp-2"));
+
+        // Both given: it goes, and takes its entries with it.
+        let out = server
+            .delete_change_permanently(Parameters(DeleteChangePermanentlyRequest {
+                project: Some(project),
+                change_id: cid.clone(),
+                why: "the approach was wrong and is not coming back".into(),
+                confirm: Confirm {
+                    by: "dana".into(),
+                    at: Some(1_789_000_000),
+                },
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("confirmed by dana"), "{}", said(&out));
+        assert!(said(&out).contains("cannot be undone"), "{}", said(&out));
+        assert!(
+            said(&out).contains("(added)"),
+            "a row per entry: {}",
+            said(&out)
+        );
+
+        let plan = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(
+            plan.changes.iter().all(|c| c.id != cid),
+            "closed as deleted"
+        );
+        assert!(plan.change_map.is_empty(), "its tags went with it");
+        assert!(
+            plan.nodes[0]
+                .responsibilities
+                .iter()
+                .all(|r| r.id != "resp-2"),
+            "and the added claim went back to what committed says"
+        );
+        assert!(scryer_core::changes::bin_entries(&plan).is_empty());
+
+        let ev = scryer_core::history::read_history(&model_ref)
+            .into_iter()
+            .find(|e| e.driver == "deleted" && e.change_id.as_deref() == Some(cid.as_str()))
+            .expect("the deletion is in the history log");
+        assert_eq!(ev.by, "dana", "recorded with who");
+        let rows: Vec<&str> = ev.rows.iter().map(|r| r.text.as_str()).collect();
+        assert!(
+            rows.iter()
+                .any(|t| t.contains("the approach was wrong and is not coming back")),
+            "and why: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|t| t.contains("was in the bin")),
+            "and that it had been put aside first: {rows:?}"
+        );
+    }
+
+    /// resp-q48seb: the permanent delete is REACHED ONLY FROM THE BIN. An open
+    /// change is refused and told which act it wanted, and the bin's contents
+    /// are printed so the caller can see what there is to delete.
+    #[test]
+    fn resp_q48seb_delete_permanently_is_reached_only_from_the_bin() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = doomed(dir.path());
+        let server = ScryerServer::new();
+
+        let out = server
+            .delete_change_permanently(Parameters(DeleteChangePermanentlyRequest {
+                project: Some(project),
+                change_id: cid.clone(),
+                why: "go away".into(),
+                confirm: Confirm {
+                    by: "dana".into(),
+                    at: None,
+                },
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("not in the bin"), "{}", said(&out));
+        assert!(
+            said(&out).contains("Abandon it first"),
+            "names the act it wanted: {}",
+            said(&out)
+        );
+        assert!(said(&out).contains("The bin is empty."), "{}", said(&out));
+
+        let plan = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(plan.changes.iter().any(|c| c.id == cid), "nothing happened");
+        assert!(plan.nodes[0]
+            .responsibilities
+            .iter()
+            .any(|r| r.id == "resp-2"));
     }
 }

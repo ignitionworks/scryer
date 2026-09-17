@@ -406,6 +406,30 @@ pub(crate) fn basis_at(model_ref: &ModelRef, scope: scryer_core::basis::Scope) -
     basis_of(&committed, &planned, scope)
 }
 
+/// THE BIN, as a line a refusal can end with — the counterpart to
+/// [`open_changes_line`]. An act on the bin that names the wrong id is told
+/// what the bin actually holds, because "no change 'chg-x'" alone leaves a
+/// caller guessing whether it was already deleted or never binned.
+pub(crate) fn bin_line(m: &ScryModel) -> String {
+    let bin = scryer_core::changes::bin_entries(m);
+    if bin.is_empty() {
+        return "The bin is empty.".to_string();
+    }
+    let mut s = String::from("In the bin:");
+    for e in bin {
+        s.push_str(&format!(
+            "\n  {} — \"{}\"{}",
+            e.id,
+            e.label.unwrap_or_default(),
+            match e.why {
+                Some(w) => format!(" ({w})"),
+                None => String::new(),
+            }
+        ));
+    }
+    s
+}
+
 /// What an answer says when a change went to the bin — one wording, whichever
 /// door it came through, because the fact a reader needs is the same one and it
 /// is the OPPOSITE of what abandoning used to mean: the work is still there.

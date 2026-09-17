@@ -313,6 +313,8 @@ dispatch_table! {
     close_change => CloseChangeRequest,
     abandon_change => AbandonChangeRequest,
     refile => RefileRequest,
+    restore_change => RestoreChangeRequest,
+    delete_change_permanently => DeleteChangePermanentlyRequest,
     // generation.rs
     fill_container => CommitContainerModelRequest,
     // testing.rs
@@ -340,7 +342,9 @@ fn effect_of(name: &str) -> ToolEffect {
         "read_model" | "search_model" | "locate" | "orient" | "query_model" | "get_drift"
         | "get_pending" | "get_rules" | "read_codebase" | "validate_model" | "get_health"
         | "get_test_radius" => ToolEffect::Read,
-        "sign_off" | "ingest_test_report" | "mark_implemented" => ToolEffect::UserWord,
+        "sign_off" | "ingest_test_report" | "mark_implemented" | "delete_change_permanently" => {
+            ToolEffect::UserWord
+        }
         _ => ToolEffect::PlanWrite,
     }
 }
@@ -392,6 +396,8 @@ const CLASSIFIED: &[(&str, ToolEffect)] = &[
     ("close_change", ToolEffect::PlanWrite),
     ("abandon_change", ToolEffect::PlanWrite),
     ("refile", ToolEffect::PlanWrite),
+    ("restore_change", ToolEffect::PlanWrite),
+    ("delete_change_permanently", ToolEffect::UserWord),
     ("fill_container", ToolEffect::PlanWrite),
     ("open_probe", ToolEffect::PlanWrite),
     ("close_probe", ToolEffect::PlanWrite),
