@@ -87,6 +87,38 @@ pub(crate) fn pending_claims_on(
         .collect()
 }
 
+/// The other half of [`pending_claims_on`]: the node's PENDING claims that
+/// ARE filed under a change the node itself does not carry, each with the
+/// change holding it. They never fold under a node-only call — the partition
+/// keeps them for their own change's fold — and because the gate above filters
+/// them out, nothing else in the fold knows they exist. A whole-node fold that
+/// would commit nothing but these says so with this list rather than answering
+/// as though it had committed the node's work.
+pub(crate) fn claims_filed_elsewhere_on(
+    committed: &ScryModel,
+    planned: &ScryModel,
+    node_id: &str,
+) -> Vec<(String, String)> {
+    let host_key = changes::element_key(EK::Node, None, node_id);
+    let mut out: Vec<(String, String)> = Vec::new();
+    for ch in &diff::diff(committed, planned).changes {
+        if ch.kind != EK::Responsibility
+            || ch.owner_id.as_deref() != Some(node_id)
+            || ch.changes.contains(&diff::Change::Deleted)
+        {
+            continue;
+        }
+        let elem_key = changes::element_key(EK::Responsibility, None, &ch.id);
+        if !changes::foreign_to_host(&planned.change_map, &host_key, &elem_key) {
+            continue;
+        }
+        if let Some(cid) = planned.change_map.get(&elem_key) {
+            out.push((ch.id.clone(), cid.clone()));
+        }
+    }
+    out
+}
+
 fn find_resp_mut<'a>(
     model: &'a mut ScryModel,
     id: &str,

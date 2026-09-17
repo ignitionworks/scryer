@@ -217,6 +217,32 @@ fn fold_summary(noun: &str, total: usize, removals: usize) -> String {
     }
 }
 
+/// Whether the node ITSELF has anything pending for a whole-node fold — its
+/// own fields, one of its properties, or a plan-added link or group that would
+/// ride along with it — setting the claims aside, which the gate counts on its
+/// own. Asked only to tell a fold that commits the node's own work from one
+/// that commits nothing at all because every claim on it belongs to a change
+/// the node does not carry (judgement 576).
+fn node_itself_pending(committed: &ScryModel, planned: &ScryModel, node_id: &str) -> bool {
+    use scryer_core::diff::{self, ElementKind as EK};
+    diff::diff(committed, planned)
+        .changes
+        .iter()
+        .any(|ch| match ch.kind {
+            EK::Node => ch.id == node_id,
+            EK::Property => ch.owner_id.as_deref() == Some(node_id),
+            EK::Link => planned
+                .links
+                .iter()
+                .any(|l| l.id == ch.id && (l.src == node_id || l.dst == node_id)),
+            EK::Group => planned
+                .groups
+                .iter()
+                .any(|g| g.id == ch.id && g.member_ids.iter().any(|m| m == node_id)),
+            _ => false,
+        })
+}
+
 /// Surface the parent-residence guard's real recovery at the tool layer: core's
 /// "commit the parent first" is correct advice for one missing parent, but in a
 /// never-committed (design-first) model it is a ladder to force-committing the
@@ -952,8 +978,9 @@ impl ScryerServer {
 
     #[tool(
         description = "Fold planned work into the committed model after you've written the code — THE build \
-         checkpoint. Pass `anchors` and `tests` in the SAME call. Scope: `node_id` (all its \
-         planned claims, or only `responsibilityIds` / `propertyLabels`), `link_ids` / \
+         checkpoint. Pass `anchors` and `tests` in the SAME call. Scope: `node_id` (its planned \
+         claims, bar another change's — a fold of none is refused; or only \
+         `responsibilityIds` / `propertyLabels`), `link_ids` / \
          `group_ids` (standalone link/group changes and every deletion), `commit_ancestors` \
          (design-first model), or `change` (a whole change). Testable claims fold only with a \
          passing verdict; `force: true` overrides and is recorded. Vagrant claims never fold. \
@@ -1319,6 +1346,40 @@ impl ScryerServer {
                     // Whole node: commit the node, folding its whole planned state
                     // (responsibilities, properties) into the model.
                     false => {
+                        // A claim filed under a change the node does not carry
+                        // is another task's work: it stays in the plan for that
+                        // change's own fold, and the gate above never even sees
+                        // it. That partition is right — but it used to be
+                        // SILENT, and a call with nothing else to commit still
+                        // answered "Committed '<node>' into the model", which a
+                        // caller reads as its claims landing (judgement 576:
+                        // measured on c0db881, every claim of the node still
+                        // planned, no verdict run, no refusal written). So the
+                        // claims that stay are named, and a call that would
+                        // commit NOTHING is refused rather than answered.
+                        let elsewhere =
+                            fold_gate::claims_filed_elsewhere_on(&committed_now, &planned, node_id);
+                        let staying = || {
+                            elsewhere
+                                .iter()
+                                .map(|(id, cid)| format!("{id} ({cid})"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        };
+                        if folded_ids.is_empty()
+                            && !elsewhere.is_empty()
+                            && !node_itself_pending(&committed_now, &planned, node_id)
+                        {
+                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                                "Refused: nothing on '{}' folds under a node-only call. Its \
+                                 {} pending claim(s) are filed under another change and fold \
+                                 with it: {}. Fold that change (`change: \"<id>\"`), or name \
+                                 the claims in `responsibilityIds`.",
+                                node_id,
+                                elsewhere.len(),
+                                staying()
+                            ))]));
+                        }
                         if let Err(e) = scryer_core::commit_element_withholding(
                             &model_ref,
                             ElementKind::Node,
@@ -1336,7 +1397,22 @@ impl ScryerServer {
                         if let Err(e) = scryer_core::commit_ready_dependents(&model_ref, node_id) {
                             return Ok(CallToolResult::error(vec![Content::text(e)]));
                         }
-                        summaries.push(format!("Committed '{}' into the model.", node_id));
+                        summaries.push(match folded_ids.is_empty() {
+                            true => format!("Committed '{}' into the model.", node_id),
+                            false => format!(
+                                "Committed '{}' into the model — {} claim(s): {}.",
+                                node_id,
+                                folded_ids.len(),
+                                folded_ids.join(", ")
+                            ),
+                        });
+                        if !elsewhere.is_empty() {
+                            summaries.push(format!(
+                                "{} claim(s) stay in the plan, filed under another change: {}.",
+                                elsewhere.len(),
+                                staying()
+                            ));
+                        }
                     }
                 }
                 history_node = Some(node_id.to_string());
@@ -3028,6 +3104,91 @@ mod tests {
             log.iter()
                 .any(|e| e.kind == scryer_core::history::EventKind::Plan),
             "and the plan write that proposed them, kept apart from the fold"
+        );
+    }
+
+    /// What a whole-node fold ANSWERS. It used to say only "Committed
+    /// 'node-1' into the model", which reads the same whether two claims
+    /// landed or none did, so the answer names the claims it committed.
+    #[test]
+    fn a_node_only_fold_names_the_claims_it_committed() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        let mut m = ScryModel::new();
+        m.nodes
+            .push(node("node-1", Kind::Component, "ModelTree", None));
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+
+        let mut planned = m.clone();
+        planned.nodes[0].responsibilities = vec![resp("r-a"), resp("r-b")];
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+
+        let text = fold_node(&ScryerServer::new(), dir.path(), "node-1", false);
+        let line = text.lines().next().unwrap_or_default();
+        assert!(
+            line.contains("r-a") && line.contains("r-b"),
+            "the fold's own line says what it committed: {text}"
+        );
+    }
+
+    /// Judgement 576: every planned claim of the node is filed under a
+    /// change the node itself does not carry, so the partition leaves all of
+    /// them in the plan for that change's own fold — and the call committed
+    /// NOTHING while answering "Committed 'node-1' into the model". A caller
+    /// read that as its claims landing. The call is refused instead, naming
+    /// the claims, the change holding them and the two roads that do fold.
+    #[test]
+    fn a_node_only_fold_that_would_commit_nothing_is_refused_naming_the_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+
+        let mut m = ScryModel::new();
+        m.nodes
+            .push(node("node-1", Kind::Component, "ModelTree", None));
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+
+        let mut planned = m.clone();
+        planned.nodes[0].responsibilities = vec![resp("r-a"), resp("r-b")];
+        let cid = scryer_core::changes::open_change(&mut planned, "two claims", 1);
+        scryer_core::changes::tag(
+            &mut planned,
+            &["resp:r-a".to_string(), "resp:r-b".to_string()],
+            &cid,
+        );
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+
+        let r = ScryerServer::new()
+            .mark_implemented(Parameters(MarkImplementedRequest {
+                project: Some(dir.path().to_string_lossy().to_string()),
+                node_id: Some("node-1".into()),
+                link_ids: None,
+                group_ids: None,
+                responsibility_ids: None,
+                property_labels: None,
+                commit_ancestors: None,
+                force: None,
+                anchors: None,
+                tests: None,
+                change: None,
+            }))
+            .unwrap();
+        let text = tool_text(&r);
+        assert!(r.is_error.unwrap_or(false), "refused, not answered: {text}");
+        assert!(
+            text.contains("r-a") && text.contains("r-b"),
+            "names the claims that stay: {text}"
+        );
+        assert!(text.contains(&cid), "names the change holding them: {text}");
+
+        let committed = scryer_core::read_model_at(&model_ref).unwrap();
+        assert!(
+            committed.nodes[0].responsibilities.is_empty(),
+            "and commits nothing"
+        );
+        assert!(
+            planned_resp(&model_ref, "r-a").is_some(),
+            "the claims stay in the plan"
         );
     }
 
