@@ -358,6 +358,14 @@ pub(crate) fn gate(
         let Some(origin) = class.origin() else {
             continue;
         };
+        // An amendment that amends nothing is not an amendment: when the claim's
+        // words and host are the committed model's, byte for byte, an adopt
+        // would commit nothing and there is no difference for a developer to
+        // judge — so no flag is set and the claim rides the ordinary gates
+        // below (judgement 702).
+        if changes::matches_committed(committed, planned, &key) {
+            continue;
+        }
         let Some((host, r)) = find_resp_mut(planned, id) else {
             continue;
         };

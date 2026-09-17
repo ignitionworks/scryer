@@ -872,6 +872,73 @@ pub fn would_abandon(committed: &ScryModel, planned: &ScryModel, change_id: &str
     tagged > 0 && dead_tags(committed, planned, change_id).len() == tagged
 }
 
+/// Whether a claim's plan entry is the committed model's byte for byte — the
+/// same host and the same statement, which is exactly the content
+/// [`entry_hash`] signs. False when either layer does not carry the claim.
+pub fn matches_committed(committed: &ScryModel, planned: &ScryModel, key: &str) -> bool {
+    match (entry_hash(committed, key), entry_hash(planned, key)) {
+        (Some(c), Some(p)) => c.hash == p.hash,
+        _ => false,
+    }
+}
+
+/// Clear the `vagrant` flag on every claim whose plan entry is the committed
+/// model's byte for byte — an amendment that amends nothing has nothing to
+/// judge, so it is not vagrant.
+///
+/// A vagrant claim awaits a person's verdict: adopt the words, reject them, or
+/// reword them. When the words (and the host) ARE committed's, that queue holds
+/// no question — an adopt would commit nothing — and the flag is a dead end: no
+/// change can own it, since the tag names no diff entry and [`gc`] prunes it on
+/// every write; no Judgement item arises to carry a verdict; and no act in the
+/// product reaches it. Judgement 702 (2026-09-17): writ's resp-9makhp sat that
+/// way, flagged `vagrant/addition` with a statement identical to the committed
+/// model's, with nothing able to clear it. So the flag goes here, on the plan
+/// write, together with the `vagrant_origin` and the `approved_statement` kept
+/// beside it; the fold, the readiness reading and the drift check then see a
+/// plain committed claim.
+///
+/// Returns the ids cleared, in the order met. A claim committed does not carry
+/// (the code-discovered kind) keeps its flag, and so do a reworded and a moved
+/// one: each names a difference somebody still has to judge.
+pub fn clear_noop_vagrants(committed: &ScryModel, planned: &mut ScryModel) -> Vec<String> {
+    let noop: HashSet<String> = {
+        let view: &ScryModel = planned;
+        view.nodes
+            .iter()
+            .flat_map(|n| n.responsibilities.iter())
+            .chain(view.groups.iter().flat_map(|g| g.responsibilities.iter()))
+            .filter(|r| r.vagrant == Some(true))
+            .filter(|r| {
+                matches_committed(
+                    committed,
+                    view,
+                    &element_key(ElementKind::Responsibility, None, &r.id),
+                )
+            })
+            .map(|r| r.id.clone())
+            .collect()
+    };
+    if noop.is_empty() {
+        return Vec::new();
+    }
+    let mut cleared = Vec::new();
+    for resps in planned
+        .nodes
+        .iter_mut()
+        .map(|n| &mut n.responsibilities)
+        .chain(planned.groups.iter_mut().map(|g| &mut g.responsibilities))
+    {
+        for r in resps.iter_mut().filter(|r| noop.contains(&r.id)) {
+            r.vagrant = None;
+            r.vagrant_origin = None;
+            r.approved_statement = None;
+            cleared.push(r.id.clone());
+        }
+    }
+    cleared
+}
+
 /// Enforce the ledger invariant: every `change_map` key corresponds to a
 /// current plan-diff entry. A key goes stale two ways — its element folded
 /// into committed (implemented) or was edited back to its committed form
