@@ -406,6 +406,52 @@ pub(crate) fn basis_at(model_ref: &ModelRef, scope: scryer_core::basis::Scope) -
     basis_of(&committed, &planned, scope)
 }
 
+/// What an answer says when a change went to the bin — one wording, whichever
+/// door it came through, because the fact a reader needs is the same one and it
+/// is the OPPOSITE of what abandoning used to mean: the work is still there.
+pub(crate) fn bin_message(cid: &str, act: &scryer_core::changes::BinAct) -> String {
+    let n = act.kept;
+    let mut msg = format!(
+        "Binned {cid} — \"{}\": {n} planned entr{} moved to the bin WITH it, kept exactly as \
+         they were — nothing reverted, nothing dropped. It is gone from every listing and from \
+         the plan's diff, so its entries are no longer pending work and cannot block a fold. \
+         Restore it and it comes back as it was; deleting it for good is a separate act, \
+         reached only from the bin.",
+        scryer_core::changes::title_of(&act.meta),
+        if n == 1 { "y" } else { "ies" }
+    );
+    match act.state.expires_at {
+        Some(at) => msg.push_str(&format!(
+            "\nExpires at {at} — emptying the bin may delete it."
+        )),
+        None => msg.push_str("\nNo expiry was set, so emptying the bin will not sweep it."),
+    }
+    msg
+}
+
+/// The OPEN changes, as a line a refusal can end with. Reads
+/// `changes::open_changes`, so a change the bin holds is absent from it — this
+/// was five identical closures in misc.rs, and five places to forget the bin.
+pub(crate) fn open_changes_line(m: &ScryModel) -> String {
+    let open: Vec<&scryer_core::changes::ChangeMeta> =
+        scryer_core::changes::open_changes(m).collect();
+    if open.is_empty() {
+        return "No open changes.".to_string();
+    }
+    let mut s = String::from("Open changes:");
+    for c in open {
+        let entries = m.change_map.values().filter(|v| *v == &c.id).count();
+        s.push_str(&format!(
+            "\n  {} — \"{}\" ({} tagged entr{})",
+            c.id,
+            c.rationale,
+            entries,
+            if entries == 1 { "y" } else { "ies" }
+        ));
+    }
+    s
+}
+
 /// Whether this engine REQUIRES a `basis` on a model write.
 ///
 /// THE SWITCH, and why there is one. A stale basis is refused unconditionally —
@@ -778,15 +824,18 @@ pub(crate) fn write_planned_tagged(
     // The guard: every plan write belongs to a change. A session that has
     // not opened one — or points at a change that has since closed — is told
     // exactly which call fixes that, and nothing is written.
-    let Some(cid) = change_id.filter(|c| model.changes.iter().any(|m| m.id == *c)) else {
-        let hint = if model.changes.is_empty() {
+    // A change the BIN holds is not a ledger a write can land in, so the guard
+    // reads the OPEN changes: a session whose change was binned under it is
+    // told to open or resume one, exactly as a session that opened none is.
+    let open: Vec<&scryer_core::changes::ChangeMeta> =
+        scryer_core::changes::open_changes(model).collect();
+    let Some(cid) = change_id.filter(|c| open.iter().any(|m| m.id == *c)) else {
+        let hint = if open.is_empty() {
             "open_change {rationale: \"<the task in one sentence>\"}".to_string()
         } else {
             format!(
                 "open_change {{rationale: \"<the task in one sentence>\"}}, or resume one of: {}",
-                model
-                    .changes
-                    .iter()
+                open.iter()
                     .map(|c| format!("{} (\"{}\")", c.id, c.rationale))
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -929,7 +978,7 @@ pub(crate) fn status_counts(model_ref: &ModelRef) -> Option<StatusCounts> {
     let planned = scryer_core::read_planned_at(model_ref).ok()?;
     let pending = pending_change_count(&committed, &planned);
     let carriers = scryer_core::diff::plan_carrier_count(&committed, &planned);
-    let open_changes = planned.changes.len();
+    let open_changes = scryer_core::changes::open_changes(&planned).count();
     let untested = scryer_core::health::compute_health(&committed, Some(&planned), None)
         .totals
         .untested;

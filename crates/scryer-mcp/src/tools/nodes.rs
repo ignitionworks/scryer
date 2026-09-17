@@ -225,7 +225,7 @@ fn fold_summary(noun: &str, total: usize, removals: usize) -> String {
 /// the node does not carry (judgement 576).
 fn node_itself_pending(committed: &ScryModel, planned: &ScryModel, node_id: &str) -> bool {
     use scryer_core::diff::{self, ElementKind as EK};
-    diff::diff(committed, planned)
+    diff::open_plan(committed, planned)
         .changes
         .iter()
         .any(|ch| match ch.kind {
@@ -280,8 +280,10 @@ fn fold_change_by_id(
     use scryer_core::diff::ElementKind as EK;
     let fail = |e: String| CallToolResult::error(vec![Content::text(e)]);
 
-    let Some(meta) = planned.changes.iter().find(|c| c.id == cid) else {
-        let open: Vec<&str> = planned.changes.iter().map(|c| c.id.as_str()).collect();
+    let Some(meta) = ledger::open_changes(planned).find(|c| c.id == cid) else {
+        let open: Vec<&str> = ledger::open_changes(planned)
+            .map(|c| c.id.as_str())
+            .collect();
         return Err(fail(format!(
             "No open change '{cid}'. Open changes: {}",
             if open.is_empty() {
@@ -1910,7 +1912,7 @@ impl ScryerServer {
             // Still pending on this node (vagrants excluded — they are drift
             // review, not the implement queue; matches get_pending).
             use scryer_core::diff::{Change, ElementKind as EK};
-            let plan = scryer_core::diff::diff(&committed, &planned_after);
+            let plan = scryer_core::diff::open_plan(&committed, &planned_after);
             let is_vagrant = |ch: &scryer_core::diff::ElementChange| match ch.kind {
                 EK::Node => planned_after
                     .nodes

@@ -473,10 +473,11 @@ mod rule_wiring {
         // schema (chg-krevwf, resp-azc2d9): a write that names no basis cannot
         // be checked, so the parameter is on twenty-two tools and there is no
         // cheaper place to put it. One short description, repeated. A further
-        // ~0.4 KB is `update_claim`'s own schema (resp-d1qv3n).
+        // ~0.4 KB is `update_claim`'s own schema (resp-d1qv3n), and ~0.1 KB
+        // `abandon_change`'s `expiresAt` (chg-qc2tqb, resp-2z80nv).
         assert!(
-            total <= 32_900,
-            "schemas total {total} chars (budget 32900)"
+            total <= 33_100,
+            "schemas total {total} chars (budget 33100)"
         );
     }
 }

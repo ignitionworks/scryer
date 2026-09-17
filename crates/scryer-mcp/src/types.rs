@@ -113,8 +113,8 @@ pub struct CloseChangeRequest {
     pub project: Option<String>,
     /// The open change to close; refused while it has entries unless `drop_entries`.
     pub change_id: String,
-    /// Abandon a change that still HAS entries: each is taken back to what the
-    /// committed model says. Discards authored intent — ask for it by name.
+    /// Close a change that still HAS entries by moving it to the BIN with them:
+    /// nothing reverted, nothing dropped, restorable from there.
     #[serde(default)]
     pub drop_entries: bool,
 }
@@ -122,11 +122,19 @@ pub struct CloseChangeRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AbandonChangeRequest {
     pub project: Option<String>,
-    /// The open change to abandon: its planned entries go with it.
+    /// The open change to abandon: it moves to the bin with its entries.
     pub change_id: String,
-    /// Why the work is not going to happen. Required: the rationale leaves the
-    /// ledger with the change, so one with no reason cannot be read after.
+    /// Why the work is not going to happen. Required: it rides the bin entry,
+    /// and one put aside for no stated reason is the shape nobody can read.
     pub why: String,
+    /// Unix seconds after which emptying the bin may delete this permanently.
+    /// The host sets it from `[bin] empty_after_days`; the engine only records
+    /// it, and an entry with none is never swept.
+    #[serde(default)]
+    #[schemars(
+        description = "Unix seconds after which the bin may delete it; none = never swept."
+    )]
+    pub expires_at: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

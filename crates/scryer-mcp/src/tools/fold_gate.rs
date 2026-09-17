@@ -69,7 +69,7 @@ pub(crate) fn pending_claims_on(
         .filter(|r| r.vagrant == Some(true))
         .map(|r| r.id.as_str())
         .collect();
-    diff::diff(committed, planned)
+    diff::open_plan(committed, planned)
         .changes
         .iter()
         .filter(|ch| {
@@ -101,7 +101,7 @@ pub(crate) fn claims_filed_elsewhere_on(
 ) -> Vec<(String, String)> {
     let host_key = changes::element_key(EK::Node, None, node_id);
     let mut out: Vec<(String, String)> = Vec::new();
-    for ch in &diff::diff(committed, planned).changes {
+    for ch in &diff::open_plan(committed, planned).changes {
         if ch.kind != EK::Responsibility
             || ch.owner_id.as_deref() != Some(node_id)
             || ch.changes.contains(&diff::Change::Deleted)
@@ -177,7 +177,7 @@ fn folded_not_dropped(
     }) {
         return true;
     }
-    planned.changes.iter().any(|other| {
+    changes::open_changes(planned).any(|other| {
         other.id != meta.id
             && other
                 .signed_off
@@ -256,7 +256,7 @@ fn countersign_gate(
     }
     let history = scryer_core::history::read_history(model_ref);
     for cid in in_fold {
-        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid) else {
+        let Some(meta) = changes::open_changes(planned).find(|c| &c.id == cid) else {
             continue;
         };
         let author = change_author(&history, cid);
@@ -390,7 +390,10 @@ pub(crate) fn gate(
 
     // Dropped signed-off claims come back as the original intent.
     for cid in &involved {
-        let Some(meta) = planned.changes.iter().find(|c| &c.id == cid).cloned() else {
+        let Some(meta) = changes::open_changes(planned)
+            .find(|c| &c.id == cid)
+            .cloned()
+        else {
             continue;
         };
         for (key, class, snap) in changes::classify_against_signoff(planned, &meta) {

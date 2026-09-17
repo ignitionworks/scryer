@@ -557,7 +557,7 @@ pub fn carry_change_state_at(r: &ModelRef, model: &mut ScryModel) -> bool {
 pub fn plan_diff_at(r: &ModelRef) -> Result<diff::ModelDiff, String> {
     let model = read_model_at(r)?;
     let planned = read_planned_at(r)?;
-    Ok(diff::diff(&model, &planned))
+    Ok(diff::open_plan(&model, &planned))
 }
 
 /// The working view the agent operates on: the authored PLAN structure (nodes,

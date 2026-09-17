@@ -909,7 +909,7 @@ pub fn commit_ready_dependents(r: &ModelRef, node_id: &str) -> Result<(), String
         return Ok(());
     }
     let planned = read_planned_seeded_at(r)?;
-    let plan = diff::diff(&committed, &planned);
+    let plan = diff::open_plan(&committed, &planned);
 
     let is_deletion = |c: &diff::ElementChange| {
         c.changes

@@ -158,7 +158,7 @@ pub(crate) fn write_planned(ref_str: String, data: String) -> Result<(), String>
     // as the agent's amendments at the next fold. Only a plan that carries a
     // sign-off is re-serialized; otherwise the echo lands verbatim as before.
     if let Ok(mut plan) = serde_json::from_str::<scryer_core::ScryModel>(&data) {
-        if plan.changes.iter().any(|c| c.signed_off.is_some()) {
+        if scryer_core::changes::open_changes(&plan).any(|c| c.signed_off.is_some()) {
             scryer_core::changes::restamp_signoffs(&mut plan, scryer_core::drift::now_secs());
             let json = serde_json::to_string_pretty(&plan).map_err(|e| e.to_string())?;
             return scryer_core::write_planned_raw_at(&model_ref, &json);
@@ -185,7 +185,7 @@ pub(crate) fn sign_off_change(ref_str: String, change_id: String) -> Result<usiz
     // and the snapshot holding it goes with the change when the change
     // closes. The canvas names no actor, so the event is unattributed; what
     // it records is that the approval happened, and when.
-    if let Some(meta) = plan.changes.iter().find(|c| c.id == change_id) {
+    if let Some(meta) = scryer_core::changes::open_changes(&plan).find(|c| c.id == change_id) {
         scryer_core::changes::record_signed_off(&model_ref, meta);
     }
     Ok(n)

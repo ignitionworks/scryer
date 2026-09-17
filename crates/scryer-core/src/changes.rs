@@ -164,6 +164,137 @@ pub struct ChangeMeta {
     /// serial behaviour: every plan write folds as intent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signed_off: Option<SignOff>,
+    /// IN THE BIN. Abandoning a change no longer drops it: it moves here
+    /// ([`bin_change`]), KEEPING its entries and their tags exactly as they
+    /// were, and the four facts of the act ride in this state. Absent is the
+    /// only state a reader has ever seen and the only one upstream writes.
+    ///
+    /// A binned change is absent from every listing and from the plan's diff —
+    /// [`open_changes`] is the one accessor every listing reads, and
+    /// [`crate::diff::open_plan`] the one the work queue reads — so its entries
+    /// are not pending work, cannot block a fold and cannot feed a drift join.
+    /// It leaves the bin two ways and only two: RESTORE puts it back exactly as
+    /// it was, and DELETE PERMANENTLY
+    /// ([`delete_change_permanently`]) does what abandoning used to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binned: Option<Binned>,
+}
+
+/// The `binned` state: who put the change in the bin, when, why, and when it
+/// expires. The same four facts a [`BinEntry`] carries, because the state IS
+/// the bin entry — the bin is not a second place a change can be, it is a
+/// reading of the changes that carry this (L315 G1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Binned {
+    /// WHO binned it, when the caller named an actor. Opaque to the ledger,
+    /// like [`SignOff::by`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// Unix seconds of the act.
+    pub at: u64,
+    /// The caller's reason. Required by the tool that bins, because "it was
+    /// abandoned" with no reason is the one shape of this a reader cannot make
+    /// sense of afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// Unix seconds after which emptying the bin may delete this permanently.
+    /// The engine never computes it and never acts on it: the host reads
+    /// `[bin] empty_after_days` per project and sets it, and the host's
+    /// cleanup empties the bin. ABSENT means no expiry was set, and an entry
+    /// with no expiry is never swept — a change nobody dated is not one the
+    /// clock may delete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
+/// One thing in the bin, in the shape every kind of binned thing will take.
+/// GENERAL by design — `kind` is `"change"` today and a node, a claim or a
+/// whole subtree tomorrow — and CHANGES ONLY in this change (L315 G5): the
+/// shape is general so the bin does not have to be rebuilt to hold the next
+/// kind, and nothing but a change is put in it yet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BinEntry {
+    /// What kind of thing this is — `"change"` today, and the only kind now.
+    pub kind: String,
+    /// The thing's own id.
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+    /// What a reader calls it — the change's title. Beside the general shape
+    /// rather than in it: the bin is read by people, and a list of ids is not
+    /// something anybody can restore from with confidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// THE OPEN CHANGES — the registry minus what the bin holds. Every listing,
+/// every resume, every guard and every fold scope reads this rather than
+/// `model.changes` directly, so "a binned change is absent from every listing"
+/// is one accessor's business and not twenty callers' memory.
+pub fn open_changes(model: &ScryModel) -> impl Iterator<Item = &ChangeMeta> {
+    model.changes.iter().filter(|c| c.binned.is_none())
+}
+
+/// Whether the bin holds this change.
+pub fn is_binned(model: &ScryModel, change_id: &str) -> bool {
+    model
+        .changes
+        .iter()
+        .any(|c| c.id == change_id && c.binned.is_some())
+}
+
+/// A change by id whether the bin holds it or not — for the bin's OWN acts and
+/// for a reader that has to explain where a change went. Every other lookup
+/// wants [`open_changes`].
+pub fn find_change<'a>(model: &'a ScryModel, change_id: &str) -> Option<&'a ChangeMeta> {
+    model.changes.iter().find(|c| c.id == change_id)
+}
+
+/// THE BIN, as its general entries — soonest to expire first, which is the
+/// order emptying it will take them in.
+pub fn bin_entries(model: &ScryModel) -> Vec<BinEntry> {
+    let mut out: Vec<BinEntry> = model
+        .changes
+        .iter()
+        .filter_map(|c| {
+            let b = c.binned.as_ref()?;
+            Some(BinEntry {
+                kind: "change".to_string(),
+                id: c.id.clone(),
+                by: b.by.clone(),
+                at: b.at,
+                why: b.why.clone(),
+                expires_at: b.expires_at,
+                label: Some(title_of(c).to_string()),
+            })
+        })
+        .collect();
+    out.sort_by_key(|e| (e.expires_at.unwrap_or(u64::MAX), e.at));
+    out
+}
+
+/// The `change_map` keys of every binned change — the entries the plan's diff
+/// leaves out ([`crate::diff::open_plan`]).
+pub fn binned_keys(model: &ScryModel) -> HashSet<String> {
+    let binned: HashSet<&str> = model
+        .changes
+        .iter()
+        .filter(|c| c.binned.is_some())
+        .map(|c| c.id.as_str())
+        .collect();
+    model
+        .change_map
+        .iter()
+        .filter(|(_, v)| binned.contains(v.as_str()))
+        .map(|(k, _)| k.clone())
+        .collect()
 }
 
 /// One sign-off snapshot: when it was stamped, and the content of each tagged
@@ -427,6 +558,15 @@ pub fn sign_off_for(
         .iter_mut()
         .find(|c| c.id == change_id)
         .ok_or_else(|| format!("no open change '{change_id}'"))?;
+    // A change the BIN holds is not one anybody approves: an approval is for
+    // work somebody means to do, and this work has been put aside. Restore it
+    // first. (The unattributed re-stamp never reaches here — the two restamp
+    // passes read `open_changes` — so the canvas's save is unaffected.)
+    if meta.binned.is_some() {
+        return Err(format!(
+            "'{change_id}' is in the bin, so there is nothing to sign off. Restore it first."
+        ));
+    }
     let named = |s: Option<&str>| {
         s.map(str::trim)
             .filter(|a| !a.is_empty())
@@ -466,9 +606,7 @@ pub fn sign_off_for(
 /// must never read as amendments. A no-op for unsigned changes. Returns how
 /// many changes were re-stamped.
 pub fn restamp_signoffs(model: &mut ScryModel, now: u64) -> usize {
-    let signed: Vec<String> = model
-        .changes
-        .iter()
+    let signed: Vec<String> = open_changes(model)
         .filter(|c| c.signed_off.is_some())
         .map(|c| c.id.clone())
         .collect();
@@ -507,9 +645,7 @@ pub fn restamp_signoffs_as(model: &mut ScryModel, now: u64, actor: Option<&str>)
         s.map(str::trim).filter(|a| !a.is_empty())
     }
     let writer = named(actor).map(str::to_string);
-    let signed: Vec<(String, Option<String>)> = model
-        .changes
-        .iter()
+    let signed: Vec<(String, Option<String>)> = open_changes(model)
         .filter_map(|c| c.signed_off.as_ref().map(|s| (c.id.clone(), s.by.clone())))
         .collect();
     let mut out = Restamp::default();
@@ -678,6 +814,7 @@ pub fn open_change_titled(
         title,
         created_at: now,
         signed_off: None,
+        binned: None,
     });
     Ok(id)
 }
@@ -767,7 +904,7 @@ pub fn retag(
     to: Option<&str>,
 ) -> Result<Retag, String> {
     if let Some(dst) = to {
-        if !planned.changes.iter().any(|c| c.id == dst) {
+        if !open_changes(planned).any(|c| c.id == dst) {
             return Err(format!("no open change '{dst}'"));
         }
     }
@@ -884,6 +1021,12 @@ pub fn gc(committed: &ScryModel, planned: &mut ScryModel) -> Gc {
     if planned.change_map.is_empty() && planned.changes.is_empty() {
         return Gc::default();
     }
+    // THE RAW COMPARISON, deliberately, not [`crate::diff::open_plan`]: a
+    // binned change's entries are still in the plan and their tags still name
+    // them, and a tag that names no diff entry is pruned here (judgement 668).
+    // Filtering the bin out at this one call would prune every binned change's
+    // tags on the next plan write and empty the bin by accident — which is the
+    // opposite of keeping the work restorable.
     let valid: HashSet<String> = diff(committed, planned)
         .changes
         .iter()
@@ -1098,7 +1241,7 @@ fn revert_one(plan: &mut ScryModel, committed: &ScryModel, ec: &ElementChange) {
 /// change's own rationale: the rationale leaves the ledger with the change, and
 /// "it was abandoned" with no reason is the one shape of this a reader cannot
 /// make sense of afterwards.
-pub fn abandon_change(
+pub fn delete_change_permanently(
     r: &ModelRef,
     change_id: &str,
     why: Option<&str>,
@@ -1106,8 +1249,17 @@ pub fn abandon_change(
     let committed = crate::read_model_at(r)?;
     let mut plan = crate::read_planned_seeded_at(r)?;
     let Some(pos) = plan.changes.iter().position(|c| c.id == change_id) else {
-        return Err(format!("no open change '{change_id}'"));
+        return Err(format!("no change '{change_id}'"));
     };
+    // REACHED ONLY FROM THE BIN (L315 G1). This act is irreversible, so it is
+    // never the first thing that happens to a change: abandoning bins it, and
+    // deleting is a second, separate decision taken on something already put
+    // aside. A caller who meant to abandon is told which act it wanted.
+    if plan.changes[pos].binned.is_none() {
+        return Err(format!(
+            "'{change_id}' is not in the bin, and a permanent delete is reached only from              there — it drops authored intent for good. Abandon it first (which bins it,              keeping its entries), then delete it from the bin if that is what you mean."
+        ));
+    }
 
     let keys: HashSet<String> = plan
         .change_map
@@ -1158,8 +1310,68 @@ pub fn abandon_change(
     plan.change_map.retain(|k, _| !keys.contains(k));
     let meta = plan.changes.remove(pos);
     crate::write_planned_at(r, &plan)?;
-    record_abandoned(r, &meta, &dropped, why);
+    record_deleted_permanently(r, &meta, &dropped, why);
     Ok(Abandoned { meta, dropped })
+}
+
+/// MOVE A CHANGE TO THE BIN — what abandoning one does now (L315 G1). The
+/// change keeps its entries and their tags untouched: nothing is reverted,
+/// nothing is retagged, nothing is dropped. All that happens is the `binned`
+/// state, and with it the change leaves every listing and its entries leave the
+/// plan's diff — so they are not pending work, cannot block a fold and cannot
+/// feed a drift join, while remaining exactly what a RESTORE has to put back.
+///
+/// `expires_at` is the caller's (the host reads `[bin] empty_after_days`); the
+/// engine only records it. The caller must hold the model lock.
+pub fn bin_change(
+    r: &ModelRef,
+    change_id: &str,
+    by: Option<&str>,
+    why: Option<&str>,
+    expires_at: Option<u64>,
+) -> Result<BinAct, String> {
+    let mut plan = crate::read_planned_seeded_at(r)?;
+    let Some(meta) = plan.changes.iter_mut().find(|c| c.id == change_id) else {
+        return Err(format!("no open change '{change_id}'"));
+    };
+    if let Some(b) = &meta.binned {
+        return Err(format!(
+            "'{change_id}' is already in the bin (since {}). Restore it, or delete it \
+             permanently.",
+            b.at
+        ));
+    }
+    let state = Binned {
+        by: by
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        at: now_secs(),
+        why: why
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        expires_at,
+    };
+    meta.binned = Some(state.clone());
+    let meta = meta.clone();
+    let kept = plan
+        .change_map
+        .values()
+        .filter(|v| v.as_str() == change_id)
+        .count();
+    crate::write_planned_at(r, &plan)?;
+    record_binned(r, &meta, kept);
+    Ok(BinAct { meta, kept, state })
+}
+
+/// What an act on the bin did: the change as it now reads, how many tagged
+/// entries went WITH it (an act on the bin never drops one), and the state.
+#[derive(Debug, Clone)]
+pub struct BinAct {
+    pub meta: ChangeMeta,
+    pub kept: usize,
+    pub state: Binned,
 }
 
 /// The history record of a change being OPENED — the first event of its life,
@@ -1204,18 +1416,53 @@ pub fn opened_by(before: &ScryModel, after: &ScryModel) -> Vec<ChangeMeta> {
 /// a row per entry that went with it, and the caller's reason when one was
 /// given — so "what did this change hold when it was dropped, and why?" has an
 /// answer after the registry entry is gone.
-fn record_abandoned(r: &ModelRef, meta: &ChangeMeta, dropped: &[DroppedEntry], why: Option<&str>) {
+/// The history record of a change going INTO THE BIN. Its own driver word,
+/// "binned", beside "opened", "signed off", "folded" and "deleted": a reader
+/// has to be able to tell "put aside, restorable" from "gone for good", and
+/// the record of the first must say plainly that nothing was dropped.
+fn record_binned(r: &ModelRef, meta: &ChangeMeta, kept: usize) {
+    let b = meta.binned.as_ref();
     let mut rows = vec![EventRow::new("✓", meta.rationale.clone())];
-    // The reason rides as a said-thing beside the rationale, labelled in its
-    // own text: two different facts, and a reader has to be able to tell the
-    // change's purpose from the reason it was dropped.
+    if let Some(why) = b.and_then(|b| b.why.as_deref()) {
+        rows.push(EventRow::new("✓", format!("why: {why}")));
+    }
+    rows.push(EventRow::new(
+        "✓",
+        format!(
+            "{kept} tagged entr{} kept, nothing dropped — restorable from the bin",
+            if kept == 1 { "y" } else { "ies" }
+        ),
+    ));
+    if let Some(at) = b.and_then(|b| b.expires_at) {
+        rows.push(EventRow::new("✓", format!("expires at {at}")));
+    }
+    let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", "binned")
+        .with_change(&meta.id)
+        .with_change_title(title_of(meta))
+        .with_rows(rows)
+        .by_actor(b.and_then(|b| b.by.as_deref()));
+    let _ = append_event(r, &ev);
+}
+
+/// The history record of a PERMANENT DELETE — the act that used to be called
+/// abandoning, with the same rows and a different driver word.
+fn record_deleted_permanently(
+    r: &ModelRef,
+    meta: &ChangeMeta,
+    dropped: &[DroppedEntry],
+    why: Option<&str>,
+) {
+    let mut rows = vec![EventRow::new("✓", meta.rationale.clone())];
     if let Some(why) = why.map(str::trim).filter(|w| !w.is_empty()) {
         rows.push(EventRow::new("✓", format!("why: {why}")));
+    }
+    if let Some(b) = &meta.binned {
+        rows.push(EventRow::new("✓", format!("was in the bin since {}", b.at)));
     }
     for d in dropped {
         rows.push(EventRow::new("−", format!("{} ({})", d.label, d.what)));
     }
-    let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", "abandoned")
+    let ev = HistoryEvent::new(now_secs(), EventKind::Change, "", "deleted")
         .with_change(&meta.id)
         .with_change_title(title_of(meta))
         .with_rows(rows);
@@ -1794,12 +2041,13 @@ mod tests {
         assert!(open_change_titled(&mut plan, Some("a name"), "why", 100).is_ok());
     }
 
-    /// A change closed with its planned work still in it: every entry goes back
-    /// to what committed says — an ADD removed, a REWORD restored — the tags and
-    /// the registry entry go, and the history says what was dropped. The other
-    /// change's entry is untouched.
+    /// A BINNED change deleted for good: every entry goes back to what
+    /// committed says — an ADD removed, a REWORD restored — the tags and the
+    /// registry entry go, and the history says what was dropped and that it had
+    /// been in the bin. The other change's entry is untouched. This is what
+    /// abandoning used to do, and is now the second, deliberate act (L315 G1).
     #[test]
-    fn abandoning_a_change_drops_its_entries_and_records_what_went() {
+    fn deleting_a_binned_change_drops_its_entries_and_records_what_went() {
         let tmp = tempdir().unwrap();
         let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
         write_model_at(&r, &model_with_resps(&[("r1", "as committed")])).unwrap();
@@ -1827,7 +2075,10 @@ mod tests {
         );
         write_planned_at(&r, &plan).unwrap();
 
-        let abandoned = abandon_change(&r, &doomed, None).unwrap();
+        // Abandoning BINS; the permanent delete is the act reached from there,
+        // and it is the one that drops the entries (L315 G1).
+        bin_change(&r, &doomed, None, Some("not happening"), None).unwrap();
+        let abandoned = delete_change_permanently(&r, &doomed, None).unwrap();
 
         assert_eq!(abandoned.meta.id, doomed);
         let mut what: Vec<(String, String)> = abandoned
@@ -1868,14 +2119,25 @@ mod tests {
             .into_iter()
             .find(|e| {
                 e.kind == EventKind::Change
-                    && e.driver == "abandoned"
+                    && e.driver == "deleted"
                     && e.change_id.as_deref() == Some(doomed.as_str())
             })
-            .expect("the abandonment is in the history");
-        assert_eq!(ev.driver, "abandoned");
+            .expect("the permanent delete is in the history");
         assert_eq!(ev.change_title.as_deref(), Some("Doomed"));
         assert_eq!(ev.rows[0].text, "why it existed");
-        let dropped_rows: Vec<&str> = ev.rows[1..].iter().map(|x| x.text.as_str()).collect();
+        // Between the rationale and what went: that it had been put aside
+        // first, which is the whole difference from the old abandonment.
+        let dropped_rows: Vec<&str> = ev
+            .rows
+            .iter()
+            .map(|x| x.text.as_str())
+            .filter(|t| t.contains('('))
+            .collect();
+        assert!(
+            ev.rows.iter().any(|x| x.text.contains("was in the bin")),
+            "{:?}",
+            ev.rows.iter().map(|x| &x.text).collect::<Vec<_>>()
+        );
         assert_eq!(dropped_rows.len(), 2, "{dropped_rows:?}");
         assert!(
             dropped_rows.iter().any(|t| t.contains("(added)"))
@@ -1884,11 +2146,11 @@ mod tests {
         );
     }
 
-    /// Abandonment refuses rather than orphans: a node this change ADDED, with a
-    /// child under it that belongs to somebody else, would leave that child
-    /// hanging off a dead parent.
+    /// The permanent delete refuses rather than orphans: a node this change
+    /// ADDED, with a child under it that belongs to somebody else, would leave
+    /// that child hanging off a dead parent.
     #[test]
-    fn abandoning_refuses_to_strand_another_changes_node() {
+    fn deleting_permanently_refuses_to_strand_another_changes_node() {
         let tmp = tempdir().unwrap();
         let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
         write_model_at(&r, &model_with_resps(&[("r1", "exists")])).unwrap();
@@ -1921,7 +2183,8 @@ mod tests {
         );
         write_planned_at(&r, &plan).unwrap();
 
-        let err = abandon_change(&r, &doomed, None).unwrap_err();
+        bin_change(&r, &doomed, None, Some("not happening"), None).unwrap();
+        let err = delete_change_permanently(&r, &doomed, None).unwrap_err();
         assert!(err.contains("Child"), "{err}");
         assert!(err.contains("Refile or fold"), "{err}");
 
@@ -2049,6 +2312,7 @@ mod tests {
             title: Some("A name".into()),
             created_at: 1_700_000_000,
             signed_off: None,
+            binned: None,
         };
         record_opened(&r, &meta, None, None);
 
@@ -2600,5 +2864,281 @@ mod tests {
             .unwrap()
             .signed_off
             .is_none());
+    }
+    // ---- resp-2z80nv: the bin (L315 G1, G5)
+
+    /// A doomed change on disk: one claim reworded, one added, both tagged to
+    /// it, and a neighbour's entry tagged to another change.
+    fn binnable(r: &ModelRef) -> (String, String) {
+        write_model_at(r, &model_with_resps(&[("r1", "as committed")])).unwrap();
+        let mut plan = model_with_resps(&[("r1", "as planned")]);
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(serde_json::json!({"id": "r2", "statement": "added"})).unwrap(),
+        );
+        plan.nodes[0].responsibilities.push(
+            serde_json::from_value(serde_json::json!({"id": "r3", "statement": "neighbour"}))
+                .unwrap(),
+        );
+        let doomed = open_change_titled(&mut plan, Some("Doomed"), "why it existed", 100).unwrap();
+        let other = open_change_titled(&mut plan, Some("Other"), "the neighbour", 100).unwrap();
+        tag(
+            &mut plan,
+            &[
+                element_key(ElementKind::Responsibility, None, "r1"),
+                element_key(ElementKind::Responsibility, None, "r2"),
+            ],
+            &doomed,
+        );
+        tag(
+            &mut plan,
+            &[element_key(ElementKind::Responsibility, None, "r3")],
+            &other,
+        );
+        write_planned_at(r, &plan).unwrap();
+        (doomed, other)
+    }
+
+    /// resp-2z80nv: binning KEEPS the entries and their tags — nothing is
+    /// reverted and nothing is retagged — while taking the change out of every
+    /// listing and its entries out of the PLAN'S DIFF. The two facts have to
+    /// hold at once: the first is what makes a restore possible, the second is
+    /// what stops the work counting as pending, blocking a fold or feeding a
+    /// drift join while it sits there.
+    #[test]
+    fn resp_2z80nv_binning_keeps_the_entries_and_takes_them_out_of_the_plans_diff() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let (doomed, other) = binnable(&r);
+
+        let act = bin_change(
+            &r,
+            &doomed,
+            Some("dana"),
+            Some("the approach was wrong"),
+            Some(999),
+        )
+        .unwrap();
+        assert_eq!(act.kept, 2, "both its entries went WITH it");
+        assert_eq!(act.state.by.as_deref(), Some("dana"));
+        assert_eq!(act.state.why.as_deref(), Some("the approach was wrong"));
+        assert_eq!(act.state.expires_at, Some(999));
+
+        let committed = read_model_at(&r).unwrap();
+        let plan = read_planned_at(&r).unwrap();
+
+        // KEPT: the claims read exactly as they did, and the tags still name them.
+        assert_eq!(
+            plan.nodes[0]
+                .responsibilities
+                .iter()
+                .find(|x| x.id == "r1")
+                .map(|x| x.statement.as_str()),
+            Some("as planned"),
+            "the reword was not taken back to committed"
+        );
+        assert!(
+            plan.nodes[0].responsibilities.iter().any(|x| x.id == "r2"),
+            "the added claim is still in the plan"
+        );
+        assert_eq!(
+            plan.change_map.get("resp:r1").map(String::as_str),
+            Some(doomed.as_str())
+        );
+        assert_eq!(
+            plan.change_map.get("resp:r2").map(String::as_str),
+            Some(doomed.as_str())
+        );
+
+        // ABSENT: from every listing, and from the plan's diff.
+        assert!(is_binned(&plan, &doomed));
+        let open: Vec<&str> = open_changes(&plan).map(|c| c.id.as_str()).collect();
+        assert_eq!(open, vec![other.as_str()], "the bin's change is not listed");
+        let keys: Vec<String> = crate::diff::open_plan(&committed, &plan)
+            .changes
+            .iter()
+            .map(key_for)
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["resp:r3".to_string()],
+            "only the neighbour's entry is work"
+        );
+        assert_eq!(
+            crate::diff::diff(&committed, &plan).changes.len(),
+            3,
+            "though the raw comparison still sees all three: nothing left the plan"
+        );
+        assert_eq!(
+            crate::diff::pending_elements(&committed, &plan).len(),
+            1,
+            "the queue every surface reads agrees"
+        );
+
+        // The history says what happened AND what did not.
+        let ev = read_history(&r)
+            .into_iter()
+            .find(|e| e.driver == "binned" && e.change_id.as_deref() == Some(doomed.as_str()))
+            .expect("the binning is in the history");
+        assert_eq!(ev.change_title.as_deref(), Some("Doomed"));
+        let rows: Vec<&str> = ev.rows.iter().map(|x| x.text.as_str()).collect();
+        assert!(rows.contains(&"why it existed"), "{rows:?}");
+        assert!(rows.contains(&"why: the approach was wrong"), "{rows:?}");
+        assert!(
+            rows.iter().any(|t| t.contains("nothing dropped")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|t| t.contains("expires at 999")),
+            "{rows:?}"
+        );
+    }
+
+    /// resp-2z80nv: THE TRAP the bin could have fallen into (judgement 668). A
+    /// tag that names no plan-diff entry is pruned by `gc` on the next plan
+    /// write, and `gc` closes the change its last tag belonged to. The bin
+    /// survives both because its entries never left the plan — so `gc` reads
+    /// the RAW comparison, not the bin-filtered one, and finds every tag live.
+    #[test]
+    fn resp_2z80nv_the_bin_survives_the_next_plan_write() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let (doomed, _other) = binnable(&r);
+        bin_change(&r, &doomed, None, Some("later"), None).unwrap();
+
+        // Somebody else edits an unrelated claim and the plan is written.
+        let mut plan = read_planned_at(&r).unwrap();
+        plan.nodes[0]
+            .responsibilities
+            .iter_mut()
+            .find(|x| x.id == "r3")
+            .unwrap()
+            .statement = "the neighbour moved on".into();
+        write_planned_at(&r, &plan).unwrap();
+
+        let plan = read_planned_at(&r).unwrap();
+        assert!(is_binned(&plan, &doomed), "the bin still holds it");
+        assert_eq!(
+            plan.change_map.get("resp:r2").map(String::as_str),
+            Some(doomed.as_str()),
+            "and its tags were not pruned"
+        );
+        assert_eq!(bin_entries(&plan).len(), 1);
+    }
+
+    /// resp-2z80nv: a PERMANENT DELETE is reached only from the bin, and it is
+    /// the act that does what abandoning used to do. An open change is refused
+    /// and told which act it wanted, and the refusal writes nothing.
+    #[test]
+    fn resp_2z80nv_a_permanent_delete_is_reached_only_from_the_bin() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let (doomed, _other) = binnable(&r);
+
+        let err = delete_change_permanently(&r, &doomed, Some("go away")).unwrap_err();
+        assert!(err.contains("not in the bin"), "{err}");
+        assert!(
+            err.contains("Abandon it first"),
+            "names the act it wanted: {err}"
+        );
+        let plan = read_planned_at(&r).unwrap();
+        assert!(
+            plan.changes.iter().any(|c| c.id == doomed),
+            "nothing happened"
+        );
+        assert!(plan.nodes[0].responsibilities.iter().any(|x| x.id == "r2"));
+
+        // From the bin it goes, and takes its entries with it.
+        bin_change(&r, &doomed, None, Some("wrong approach"), None).unwrap();
+        let gone = delete_change_permanently(&r, &doomed, Some("never coming back")).unwrap();
+        assert_eq!(gone.dropped.len(), 2);
+        let plan = read_planned_at(&r).unwrap();
+        assert!(plan.changes.iter().all(|c| c.id != doomed));
+        assert!(!plan.change_map.contains_key("resp:r2"));
+        assert!(plan.nodes[0].responsibilities.iter().all(|x| x.id != "r2"));
+        assert_eq!(
+            plan.nodes[0]
+                .responsibilities
+                .iter()
+                .find(|x| x.id == "r1")
+                .map(|x| x.statement.as_str()),
+            Some("as committed"),
+            "the reword went back to what committed says"
+        );
+        assert!(bin_entries(&plan).is_empty());
+    }
+
+    /// resp-2z80nv: the bin entry is the GENERAL shape — {kind, id, by, at, why,
+    /// expiresAt} — so the bin does not have to be rebuilt to hold a node or a
+    /// claim later, and `kind` is `"change"` because changes are the only thing
+    /// put in it now (L315 G5). Soonest to expire first: the order emptying it
+    /// will take them in.
+    #[test]
+    fn resp_2z80nv_the_bin_entry_is_general_and_changes_only() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let (doomed, other) = binnable(&r);
+        bin_change(&r, &other, Some("ada"), Some("second"), Some(5_000)).unwrap();
+        bin_change(&r, &doomed, Some("dana"), Some("first"), Some(1_000)).unwrap();
+
+        let plan = read_planned_at(&r).unwrap();
+        let bin = bin_entries(&plan);
+        assert_eq!(bin.len(), 2);
+        assert!(
+            bin.iter().all(|e| e.kind == "change"),
+            "changes only, for now"
+        );
+        assert_eq!(
+            bin.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec![doomed.as_str(), other.as_str()],
+            "soonest to expire first"
+        );
+        assert_eq!(bin[0].by.as_deref(), Some("dana"));
+        assert_eq!(bin[0].why.as_deref(), Some("first"));
+        assert_eq!(bin[0].expires_at, Some(1_000));
+        assert_eq!(
+            bin[0].label.as_deref(),
+            Some("Doomed"),
+            "and something to read"
+        );
+        assert_eq!(
+            open_changes(&plan).count(),
+            0,
+            "both are out of the listings"
+        );
+
+        // An entry with NO expiry sorts LAST: a change nobody dated is not one
+        // the clock may take, so it is never at the head of the sweep.
+        let mut plan = plan.clone();
+        let third = open_change_titled(&mut plan, Some("Undated"), "no date", 100).unwrap();
+        plan.changes
+            .iter_mut()
+            .find(|c| c.id == third)
+            .unwrap()
+            .binned = Some(Binned {
+            by: None,
+            at: 1,
+            why: None,
+            expires_at: None,
+        });
+        let bin = bin_entries(&plan);
+        assert_eq!(
+            bin.last().map(|e| e.id.as_str()),
+            Some(third.as_str()),
+            "the undated one is last"
+        );
+    }
+
+    /// resp-2z80nv: the bin is not a place a change can be twice, and it is not
+    /// somewhere an open change is.
+    #[test]
+    fn resp_2z80nv_the_bin_refuses_a_second_binning_and_an_unknown_id() {
+        let tmp = tempdir().unwrap();
+        let r = ModelRef::ProjectLocal(tmp.path().to_path_buf());
+        let (doomed, _other) = binnable(&r);
+        bin_change(&r, &doomed, None, Some("once"), None).unwrap();
+        let err = bin_change(&r, &doomed, None, Some("twice"), None).unwrap_err();
+        assert!(err.contains("already in the bin"), "{err}");
+        let err = bin_change(&r, "chg-nope", None, Some("x"), None).unwrap_err();
+        assert!(err.contains("no open change 'chg-nope'"), "{err}");
     }
 }

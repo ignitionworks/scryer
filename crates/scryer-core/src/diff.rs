@@ -155,6 +155,35 @@ pub fn diff(from: &ScryModel, to: &ScryModel) -> ModelDiff {
     out
 }
 
+/// THE PLAN'S DIFF — the committed model against the draft, MINUS what the bin
+/// holds (L315 G1, resp-2z80nv).
+///
+/// A binned change keeps its entries and their tags exactly as they were, so
+/// [`diff`] still sees them and must: `changes::gc` reads the raw comparison to
+/// decide whether a tag still names a live entry, and a tag that names nothing
+/// is pruned on the next plan write (judgement 668) — which would empty the bin
+/// by accident. So the bin is filtered HERE, one layer up, where "the plan"
+/// means "the work": the queue, the fold's scope, the drift join and the status
+/// counts all read this, and a binned change's entries are therefore not
+/// pending work, cannot block a fold and cannot feed a drift join, while
+/// remaining exactly what a restore puts back.
+///
+/// [`diff`] itself stays the raw comparison, because two of its callers ask a
+/// different question — what did THIS WRITE change (`write_planned_tagged`, so
+/// an edit to a binned change's element is still retagged and warned about) and
+/// what did this EVENT change (`history`) — and filtering those by the bin
+/// would lose a tag nobody could then find.
+pub fn open_plan(committed: &ScryModel, planned: &ScryModel) -> ModelDiff {
+    let binned = crate::changes::binned_keys(planned);
+    if binned.is_empty() {
+        return diff(committed, planned);
+    }
+    let mut plan = diff(committed, planned);
+    plan.changes
+        .retain(|ch| !binned.contains(&crate::changes::key_for(ch)));
+    plan
+}
+
 /// The plan-diff ELEMENTS outstanding — one per diverging element (a reworded
 /// claim, an added property, a repointed link), which is the queue `get_pending`
 /// hands the agent and the finer of the two altitudes every status surface
@@ -165,7 +194,7 @@ pub fn diff(from: &ScryModel, to: &ScryModel) -> ModelDiff {
 /// their owning node/group. Report BOTH or the app and the agent end up quoting
 /// different numbers for the same plan.
 pub fn pending_elements(committed: &ScryModel, planned: &ScryModel) -> Vec<ElementChange> {
-    let plan = diff(committed, planned);
+    let plan = open_plan(committed, planned);
     plan.changes
         .into_iter()
         .filter(|ch| {
@@ -220,7 +249,7 @@ pub fn pending_element_count(committed: &ScryModel, planned: &ScryModel) -> usiz
 /// so the ambient status line agrees with what the canvas shows.
 pub fn plan_carrier_count(committed: &ScryModel, planned: &ScryModel) -> usize {
     use std::collections::{HashMap, HashSet};
-    let plan = diff(committed, planned);
+    let plan = open_plan(committed, planned);
 
     // Group ids across both layers — a deleted group lives only in committed.
     let is_group: HashSet<&str> = planned

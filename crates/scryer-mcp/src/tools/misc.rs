@@ -559,23 +559,6 @@ impl ScryerServer {
         Parameters(req): Parameters<OpenChangeRequest>,
     ) -> Result<CallToolResult, McpError> {
         let model_ref = resolve_model_ref(req.project.as_deref())?;
-        let open_changes_line = |m: &scryer_core::ScryModel| -> String {
-            if m.changes.is_empty() {
-                return "No open changes.".to_string();
-            }
-            let mut s = String::from("Open changes:");
-            for c in &m.changes {
-                let entries = m.change_map.values().filter(|v| *v == &c.id).count();
-                s.push_str(&format!(
-                    "\n  {} — \"{}\" ({} tagged entr{})",
-                    c.id,
-                    c.rationale,
-                    entries,
-                    if entries == 1 { "y" } else { "ies" }
-                ));
-            }
-            s
-        };
 
         match (
             req.rationale
@@ -673,7 +656,7 @@ impl ScryerServer {
                         ))]));
                     }
                 };
-                if plan.changes.iter().all(|c| c.id != cid) {
+                if !scryer_core::changes::open_changes(&plan).any(|c| c.id == cid) {
                     return Ok(CallToolResult::error(vec![Content::text(format!(
                         "No open change '{cid}'.\n{}",
                         open_changes_line(&plan)
@@ -725,23 +708,6 @@ impl ScryerServer {
         Parameters(req): Parameters<SignOffRequest>,
     ) -> Result<CallToolResult, McpError> {
         let model_ref = resolve_model_ref(req.project.as_deref())?;
-        let open_changes_line = |m: &scryer_core::ScryModel| -> String {
-            if m.changes.is_empty() {
-                return "No open changes.".to_string();
-            }
-            let mut s = String::from("Open changes:");
-            for c in &m.changes {
-                let entries = m.change_map.values().filter(|v| *v == &c.id).count();
-                s.push_str(&format!(
-                    "\n  {} — \"{}\" ({} tagged entr{})",
-                    c.id,
-                    c.rationale,
-                    entries,
-                    if entries == 1 { "y" } else { "ies" }
-                ));
-            }
-            s
-        };
 
         let target = match req
             .change_id
@@ -797,7 +763,7 @@ impl ScryerServer {
         // what the plan CLAIMS, and a sign-off changes no claim — so without
         // this the one thing that happened here leaves no history at all, and
         // "who approved this, and was it a proxy?" dies with the change.
-        if let Some(meta) = plan.changes.iter().find(|c| c.id == target) {
+        if let Some(meta) = scryer_core::changes::open_changes(&plan).find(|c| c.id == target) {
             scryer_core::changes::record_signed_off(&model_ref, meta);
         }
         drop(_lock);
@@ -822,10 +788,10 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "Close an open change by id, recorded as abandoned with its rationale in history. \
-         An EMPTY one closes outright; one with tagged entries is refused — those close it by \
-         folding or reverting — unless `drop_entries` abandons it WITH its planned work, each \
-         entry taken back to committed and named in history.\n\
+        description = "Close an open change by id, recorded with its rationale in history. An EMPTY one \
+         closes outright; one with tagged entries is refused — those close it by folding or \
+         reverting — unless `drop_entries`, which moves it to the BIN with its work (nothing \
+         reverted, restorable from there), the same act as `abandon_change`.\n\
          Rules: change-ledger"
     )]
     pub fn close_change(
@@ -833,23 +799,6 @@ impl ScryerServer {
         Parameters(req): Parameters<CloseChangeRequest>,
     ) -> Result<CallToolResult, McpError> {
         let model_ref = resolve_model_ref(req.project.as_deref())?;
-        let open_changes_line = |m: &scryer_core::ScryModel| -> String {
-            if m.changes.is_empty() {
-                return "No open changes.".to_string();
-            }
-            let mut s = String::from("Open changes:");
-            for c in &m.changes {
-                let entries = m.change_map.values().filter(|v| *v == &c.id).count();
-                s.push_str(&format!(
-                    "\n  {} — \"{}\" ({} tagged entr{})",
-                    c.id,
-                    c.rationale,
-                    entries,
-                    if entries == 1 { "y" } else { "ies" }
-                ));
-            }
-            s
-        };
 
         let cid = req.change_id.trim();
         if cid.is_empty() {
@@ -862,8 +811,17 @@ impl ScryerServer {
             Err(e) => return Ok(e),
         };
         if req.drop_entries {
-            let abandoned = match scryer_core::changes::abandon_change(&model_ref, cid, None) {
-                Ok(a) => a,
+            // The same act as `abandon_change` by another door, so the same
+            // answer: the change moves to the BIN with its entries rather than
+            // taking them back to committed (L315 G1).
+            let binned = match scryer_core::changes::bin_change(
+                &model_ref,
+                cid,
+                env_actor().as_deref(),
+                None,
+                None,
+            ) {
+                Ok(b) => b,
                 Err(e) => {
                     let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
                     return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -875,18 +833,9 @@ impl ScryerServer {
             if self.session_change(&model_ref).as_deref() == Some(cid) {
                 self.set_session_change(None);
             }
-            let n = abandoned.dropped.len();
-            let mut msg = format!(
-                "Abandoned {cid} — \"{}\": {n} planned entr{} dropped with it, the plan \
-                 back to what the committed model says. The abandonment and what it held \
-                 are in the history log.",
-                scryer_core::changes::title_of(&abandoned.meta),
-                if n == 1 { "y" } else { "ies" }
-            );
-            for d in &abandoned.dropped {
-                msg.push_str(&format!("\n  − {} ({})", d.label, d.what));
-            }
-            return Ok(CallToolResult::success(vec![Content::text(msg)]));
+            return Ok(CallToolResult::success(vec![Content::text(bin_message(
+                cid, &binned,
+            ))]));
         }
 
         let meta = match scryer_core::changes::close_change(&model_ref, cid) {
@@ -910,10 +859,11 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "ABANDON an open change in ONE call: its planned entries dropped, the \
-         abandonment recorded in history with its rationale, your reason and a row per entry, \
-         and the change closed. Not a close — `close_change` refuses a change that still carries \
-         entries. `why` is required. Discards authored intent; ask for it by name.\n\
+        description = "ABANDON an open change: it moves to the BIN with its planned entries and their \
+         tags kept exactly as they are — nothing reverted, nothing dropped — and leaves every \
+         listing and the plan's diff, so its entries stop being pending work. Restorable from \
+         the bin; a permanent delete is a second, separate act reached only from there. `why` is \
+         required and rides the bin entry.\n\
          Rules: change-ledger"
     )]
     pub fn abandon_change(
@@ -921,23 +871,6 @@ impl ScryerServer {
         Parameters(req): Parameters<AbandonChangeRequest>,
     ) -> Result<CallToolResult, McpError> {
         let model_ref = resolve_model_ref(req.project.as_deref())?;
-        let open_changes_line = |m: &scryer_core::ScryModel| -> String {
-            if m.changes.is_empty() {
-                return "No open changes.".to_string();
-            }
-            let mut s = String::from("Open changes:");
-            for c in &m.changes {
-                let entries = m.change_map.values().filter(|v| *v == &c.id).count();
-                s.push_str(&format!(
-                    "\n  {} — \"{}\" ({} tagged entr{})",
-                    c.id,
-                    c.rationale,
-                    entries,
-                    if entries == 1 { "y" } else { "ies" }
-                ));
-            }
-            s
-        };
         let cid = req.change_id.trim();
         if cid.is_empty() {
             return Ok(CallToolResult::error(vec![Content::text(
@@ -957,8 +890,14 @@ impl ScryerServer {
             Ok(l) => l,
             Err(e) => return Ok(e),
         };
-        let abandoned = match scryer_core::changes::abandon_change(&model_ref, cid, Some(why)) {
-            Ok(a) => a,
+        let binned = match scryer_core::changes::bin_change(
+            &model_ref,
+            cid,
+            env_actor().as_deref(),
+            Some(why),
+            req.expires_at,
+        ) {
+            Ok(b) => b,
             Err(e) => {
                 let plan = scryer_core::read_planned_at(&model_ref).unwrap_or_default();
                 return Ok(CallToolResult::error(vec![Content::text(format!(
@@ -970,18 +909,9 @@ impl ScryerServer {
         if self.session_change(&model_ref).as_deref() == Some(cid) {
             self.set_session_change(None);
         }
-        let n = abandoned.dropped.len();
-        let mut msg = format!(
-            "Abandoned {cid} — \"{}\": {n} planned entr{} dropped with it, the plan back to \
-             what the committed model says. The abandonment, your reason and what it held are \
-             in the history log.",
-            scryer_core::changes::title_of(&abandoned.meta),
-            if n == 1 { "y" } else { "ies" }
-        );
-        for d in &abandoned.dropped {
-            msg.push_str(&format!("\n  − {} ({})", d.label, d.what));
-        }
-        Ok(CallToolResult::success(vec![Content::text(msg)]))
+        Ok(CallToolResult::success(vec![Content::text(bin_message(
+            cid, &binned,
+        ))]))
     }
 
     #[tool(
@@ -996,23 +926,6 @@ impl ScryerServer {
         Parameters(req): Parameters<RefileRequest>,
     ) -> Result<CallToolResult, McpError> {
         let model_ref = resolve_model_ref(req.project.as_deref())?;
-        let open_changes_line = |m: &scryer_core::ScryModel| -> String {
-            if m.changes.is_empty() {
-                return "No open changes.".to_string();
-            }
-            let mut s = String::from("Open changes:");
-            for c in &m.changes {
-                let entries = m.change_map.values().filter(|v| *v == &c.id).count();
-                s.push_str(&format!(
-                    "\n  {} — \"{}\" ({} tagged entr{})",
-                    c.id,
-                    c.rationale,
-                    entries,
-                    if entries == 1 { "y" } else { "ies" }
-                ));
-            }
-            s
-        };
 
         let targets: Vec<String> = req
             .ids
@@ -1646,7 +1559,7 @@ mod tests {
     /// the other door; `drop_entries` takes it, its entries going back to what
     /// committed says and the drop named in the answer.
     #[test]
-    fn close_change_drops_the_planned_entries_only_when_asked() {
+    fn close_change_bins_the_planned_entries_only_when_asked() {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let mut committed = ScryModel::new();
@@ -1693,7 +1606,7 @@ mod tests {
             .iter()
             .any(|c| c.id == cid));
 
-        // Asked for by name: the change and its entry go.
+        // Asked for by name: the change and its entry go TO THE BIN together.
         let out = server
             .close_change(Parameters(CloseChangeRequest {
                 project: Some(project),
@@ -1702,17 +1615,23 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("Binned"), "{}", said(&out));
         assert!(said(&out).contains("Doomed"), "{}", said(&out));
-        assert!(said(&out).contains("(added)"), "{}", said(&out));
         let after = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(after.changes.is_empty());
-        assert!(after.change_map.is_empty());
+        assert!(
+            scryer_core::changes::is_binned(&after, &cid),
+            "the same act as abandon_change, by the other door"
+        );
+        assert!(
+            after.change_map.contains_key("resp:resp-2"),
+            "its tag went with it, not away"
+        );
         assert!(
             after.nodes[0]
                 .responsibilities
                 .iter()
-                .all(|r| r.id != "resp-2"),
-            "the added claim went with the change"
+                .any(|r| r.id == "resp-2"),
+            "and the added claim is still there, restorable"
         );
     }
 
@@ -1747,42 +1666,81 @@ mod tests {
         (model_ref, cid, dir.to_string_lossy().to_string())
     }
 
-    /// Abandoning by NAME is the whole act in one call: the entries go, the
-    /// change leaves the ledger, and the history carries the rationale, the
-    /// caller's reason and a row per entry that went.
+    /// Abandoning by NAME moves the change to the BIN in one call (L315 G1):
+    /// its entries and their tags are kept exactly as they were, nothing is
+    /// reverted, it is absent from every listing and from the plan's queue, and
+    /// the history carries the rationale, the caller's reason and the fact that
+    /// nothing was dropped.
     #[test]
-    fn abandon_change_drops_the_entries_closes_the_change_and_records_why() {
+    fn abandon_change_bins_the_change_with_its_entries_and_records_why() {
         let dir = tempfile::tempdir().unwrap();
         let (model_ref, cid, project) = doomed(dir.path());
         let server = ScryerServer::new();
 
         let out = server
             .abandon_change(Parameters(AbandonChangeRequest {
+                expires_at: None,
                 project: Some(project),
                 change_id: cid.clone(),
                 why: "the approach was wrong".into(),
             }))
             .unwrap();
         assert_eq!(out.is_error, Some(false), "{}", said(&out));
+        assert!(said(&out).contains("Binned"), "{}", said(&out));
         assert!(said(&out).contains("Doomed"), "{}", said(&out));
-        assert!(said(&out).contains("(added)"), "{}", said(&out));
+        assert!(
+            said(&out).contains("nothing reverted, nothing dropped"),
+            "the answer says what did NOT happen: {}",
+            said(&out)
+        );
 
         let after = scryer_core::read_planned_at(&model_ref).unwrap();
-        assert!(after.changes.is_empty(), "the change left the ledger");
-        assert!(after.change_map.is_empty(), "its tags went with it");
+        assert!(
+            scryer_core::changes::is_binned(&after, &cid),
+            "the change is in the bin, not gone"
+        );
+        assert_eq!(
+            scryer_core::changes::open_changes(&after).count(),
+            0,
+            "and absent from every listing"
+        );
+        assert_eq!(
+            after.change_map.get("resp:resp-2").map(String::as_str),
+            Some(cid.as_str()),
+            "its entry's tag is kept exactly as it was"
+        );
         assert!(
             after.nodes[0]
                 .responsibilities
                 .iter()
-                .all(|r| r.id != "resp-2"),
-            "the added claim went with the change"
+                .any(|r| r.id == "resp-2"),
+            "and its entry is still in the plan, restorable"
         );
+        // But it is no longer WORK: the plan's diff leaves it out, so it is not
+        // pending, cannot block a fold and cannot feed a drift join.
+        let committed = scryer_core::read_model_at(&model_ref).unwrap();
+        assert!(
+            scryer_core::diff::open_plan(&committed, &after).is_empty(),
+            "the plan's diff is empty while the bin holds it"
+        );
+        assert!(
+            !scryer_core::diff::diff(&committed, &after).is_empty(),
+            "though the entry itself never left the plan"
+        );
+        let bin = scryer_core::changes::bin_entries(&after);
+        assert_eq!(bin.len(), 1);
+        assert_eq!(
+            bin[0].kind, "change",
+            "the general entry shape, changes only"
+        );
+        assert_eq!(bin[0].id, cid);
+        assert_eq!(bin[0].why.as_deref(), Some("the approach was wrong"));
 
         let log = scryer_core::history::read_history(&model_ref);
         let ev = log
             .iter()
-            .find(|e| e.driver == "abandoned" && e.change_id.as_deref() == Some(cid.as_str()))
-            .expect("the abandonment is in the history log");
+            .find(|e| e.driver == "binned" && e.change_id.as_deref() == Some(cid.as_str()))
+            .expect("the binning is in the history log");
         let rows: Vec<&str> = ev.rows.iter().map(|r| r.text.as_str()).collect();
         assert!(
             rows.contains(&"why it existed"),
@@ -1793,8 +1751,8 @@ mod tests {
             "the caller's reason, labelled and beside it: {rows:?}"
         );
         assert!(
-            rows.iter().any(|t| t.contains("(added)")),
-            "a row per entry that went: {rows:?}"
+            rows.iter().any(|t| t.contains("nothing dropped")),
+            "and that nothing was dropped, which is the whole difference: {rows:?}"
         );
     }
 
@@ -1809,6 +1767,7 @@ mod tests {
 
         let out = server
             .abandon_change(Parameters(AbandonChangeRequest {
+                expires_at: None,
                 project: Some(project),
                 change_id: cid.clone(),
                 why: "   ".into(),
@@ -1837,6 +1796,7 @@ mod tests {
 
         let out = server
             .abandon_change(Parameters(AbandonChangeRequest {
+                expires_at: None,
                 project: Some(project),
                 change_id: "chg-nope0".into(),
                 why: "a typo".into(),
@@ -1854,5 +1814,97 @@ mod tests {
             .changes
             .iter()
             .any(|c| c.id == cid));
+    }
+    /// resp-2z80nv: a binned change is absent from EVERY listing and from the
+    /// queue, at the surfaces a caller actually reads — `get_pending`'s open
+    /// changes and its plan queue, the resume list a write's refusal prints,
+    /// `open_change`'s resume, `sign_off`'s target and `refile`'s destination.
+    /// One accessor (`changes::open_changes`) is why this holds in all of them
+    /// rather than in the four somebody remembered.
+    #[test]
+    fn resp_2z80nv_a_binned_change_is_absent_from_every_listing_and_the_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, cid, project) = doomed(dir.path());
+        let server = ScryerServer::new();
+        let out = server
+            .abandon_change(Parameters(AbandonChangeRequest {
+                expires_at: Some(9_999),
+                project: Some(project.clone()),
+                change_id: cid.clone(),
+                why: "put aside".into(),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(false), "{}", said(&out));
+
+        // get_pending: not among the open changes, and its entry is not queued
+        // — but the BIN itself is answered, in the general entry shape, so
+        // Operation has something to show and the two acts something to name.
+        let v: serde_json::Value = serde_json::from_str(&said(
+            &server
+                .get_pending(Parameters(GetPendingRequest {
+                    project: Some(project.clone()),
+                    change: None,
+                }))
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(
+            v.get("openChanges").is_none(),
+            "no open changes left to list: {v}"
+        );
+        assert_eq!(v["clean"], true, "and nothing pending: {v}");
+        assert_eq!(v["bin"][0]["kind"], "change");
+        assert_eq!(v["bin"][0]["id"], cid.as_str());
+        assert_eq!(v["bin"][0]["why"], "put aside");
+        assert_eq!(v["bin"][0]["expiresAt"], 9_999);
+
+        // open_change {change_id}: there is nothing to resume.
+        let out = server
+            .open_change(Parameters(OpenChangeRequest {
+                title: None,
+                project: Some(project.clone()),
+                rationale: None,
+                change_id: Some(cid.clone()),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+        assert!(said(&out).contains("No open change"), "{}", said(&out));
+        assert!(
+            said(&out).contains("No open changes."),
+            "and the listing it prints is empty: {}",
+            said(&out)
+        );
+
+        // sign_off: a change in the bin is not one anybody approves.
+        let out = server
+            .sign_off(Parameters(SignOffRequest {
+                project: Some(project.clone()),
+                change_id: Some(cid.clone()),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+
+        // refile: nor a destination work can be moved into.
+        let out = server
+            .refile(Parameters(RefileRequest {
+                basis: None,
+                project: Some(project),
+                ids: vec!["resp-1".into()],
+                to: Some(cid.clone()),
+            }))
+            .unwrap();
+        assert_eq!(out.is_error, Some(true), "{}", said(&out));
+
+        // And through all of that the work itself is untouched.
+        let plan = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(scryer_core::changes::is_binned(&plan, &cid));
+        assert!(plan.nodes[0]
+            .responsibilities
+            .iter()
+            .any(|r| r.id == "resp-2"));
+        assert_eq!(
+            plan.change_map.get("resp:resp-2").map(String::as_str),
+            Some(cid.as_str())
+        );
     }
 }

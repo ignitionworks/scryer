@@ -981,7 +981,7 @@ impl ScryerServer {
         // Pending plan entries inside the scope, vagrants excluded (they are
         // drift review, not the implement queue).
         use scryer_core::diff::ElementKind as EK;
-        let plan = scryer_core::diff::diff(&committed, &planned);
+        let plan = scryer_core::diff::open_plan(&committed, &planned);
         let link_touches = |id: &str| {
             planned
                 .links
@@ -1360,7 +1360,10 @@ impl ScryerServer {
         // The work queue IS the plan diff: how the draft diverges from the
         // committed model. Each change is a thing the code must catch up to.
         use scryer_core::diff::{Change, ElementKind};
-        let plan = scryer_core::diff::diff(&model, &planned);
+        // THE PLAN as work: `open_plan` leaves out the entries of every change
+        // the bin holds — they are kept exactly as they were and are not
+        // pending work while they sit there (L315 G1).
+        let plan = scryer_core::diff::open_plan(&model, &planned);
 
         // Vagrant elements are code-discovered drift ("adopt?"), not planned
         // intent ahead of code ("implement!") — they belong in the drift review
@@ -1525,9 +1528,7 @@ impl ScryerServer {
         // The open-change registry rides every pending read: a fresh session
         // resumes a change from here (open_change {change_id}) instead of doing
         // archaeology on the flat queue.
-        let open_changes: Vec<serde_json::Value> = planned
-            .changes
-            .iter()
+        let open_changes: Vec<serde_json::Value> = scryer_core::changes::open_changes(&planned)
             .map(|c| {
                 serde_json::json!({
                     "id": c.id,
@@ -1553,6 +1554,14 @@ impl ScryerServer {
         });
         if !open_changes.is_empty() {
             payload["openChanges"] = serde_json::Value::Array(open_changes);
+        }
+        // THE BIN, beside the open changes and never mixed into them: the
+        // general entry shape ({kind, id, by, at, why, expiresAt}), soonest to
+        // expire first, so Operation can show it and the two acts have
+        // something to name. Absent when the bin is empty.
+        let bin = scryer_core::changes::bin_entries(&planned);
+        if !bin.is_empty() {
+            payload["bin"] = serde_json::to_value(&bin).unwrap_or(serde_json::Value::Null);
         }
         if let Some(current) = self.session_change(&model_ref) {
             payload["currentChange"] = serde_json::Value::String(current);
