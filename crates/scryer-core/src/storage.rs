@@ -299,26 +299,6 @@ pub fn write_planned_raw_at(r: &ModelRef, data: &str) -> Result<(), String> {
     let dir = r.dir();
     fs::create_dir_all(&dir).map_err(|e| io_fail("create", &dir, e))?;
     ensure_project_gitignore(&dir)?;
-    // Both layers, parsed once for the two write-through rules this choke point
-    // owns. Best-effort, as they are: a payload this layer cannot parse is
-    // written exactly as given, and a fresh project has no committed model yet.
-    let mut planned = serde_json::from_str::<ScryModel>(data).ok();
-    let committed = planned.as_ref().and_then(|_| read_model_at(r).ok());
-    // A vagrant flag with nothing to judge is cleared HERE — the point every
-    // plan write passes, whoever made it (an authoring tool, a fold's rewrite
-    // of the draft, a canvas save) — so a claim whose words are already the
-    // committed model's never sits in the adopt/reject queue with no question
-    // in it. See `changes::clear_noop_vagrants` (judgement 702).
-    let mut healed = None;
-    if let (Some(p), Some(c)) = (planned.as_mut(), committed.as_ref()) {
-        if !changes::clear_noop_vagrants(c, p).is_empty() {
-            healed = Some(
-                serde_json::to_string_pretty(p)
-                    .map_err(|e| io_fail("encode", r.planned_path(), e))?,
-            );
-        }
-    }
-    let data = healed.as_deref().unwrap_or(data);
     let tmp = dir.join(".tmp.planned.scry");
     fs::write(&tmp, data).map_err(|e| io_fail("write", &tmp, e))?;
     fs::rename(&tmp, r.planned_path()).map_err(|e| io_fail("replace", r.planned_path(), e))?;
@@ -327,9 +307,11 @@ pub fn write_planned_raw_at(r: &ModelRef, data: &str) -> Result<(), String> {
     // here — the choke point every plan write passes (canvas raw saves and
     // `write_planned_at` alike). Callers hold the model lock. Best-effort: a
     // fresh project has no committed model to sync into.
-    if let (Some(planned), Some(mut committed)) = (planned, committed) {
-        if crate::concerns::sync_concern_metadata(&mut committed, &planned) {
-            write_model_at(r, &committed)?;
+    if let Ok(planned) = serde_json::from_str::<ScryModel>(data) {
+        if let Ok(mut committed) = read_model_at(r) {
+            if crate::concerns::sync_concern_metadata(&mut committed, &planned) {
+                write_model_at(r, &committed)?;
+            }
         }
     }
     Ok(())
@@ -1331,99 +1313,6 @@ mod tests {
             vagrant_origin: None,
             approved_statement: None,
         }
-    }
-
-    /// Judgement 702: a claim flagged vagrant whose statement is the committed
-    /// model's, byte for byte, has nothing for a developer to judge — an adopt
-    /// would commit nothing — so the next plan write clears the flag and the
-    /// state kept beside it.
-    #[test]
-    fn a_vagrant_flag_with_nothing_to_judge_clears_on_the_next_plan_write() {
-        let (_dir, r) = temp_ref();
-        let mut committed = ScryModel::new();
-        let mut n = mk_node("n1", "N", None);
-        n.responsibilities.push(mk_resp("resp-1", "does the thing"));
-        committed.nodes.push(n);
-        write_model_at(&r, &committed).unwrap();
-        ensure_planned_at(&r).unwrap();
-
-        let mut planned = read_planned_at(&r).unwrap();
-        {
-            let r1 = &mut planned.nodes[0].responsibilities[0];
-            r1.vagrant = Some(true);
-            r1.vagrant_origin = Some("addition".into());
-            r1.approved_statement = Some("does the approved thing".into());
-        }
-        write_planned_at(&r, &planned).unwrap();
-
-        let written = read_planned_at(&r).unwrap();
-        let r1 = &written.nodes[0].responsibilities[0];
-        assert_eq!(r1.vagrant, None, "the flag is cleared");
-        assert_eq!(r1.vagrant_origin, None, "and its origin with it");
-        assert_eq!(r1.approved_statement, None, "and the text kept beside it");
-        assert_eq!(r1.statement, "does the thing", "the words are untouched");
-    }
-
-    /// The same write leaves standing every vagrant flag that DOES name a
-    /// difference: a claim whose words diverge from committed, one committed
-    /// does not carry at all (the code-discovered kind), and one the plan moved
-    /// to another host — a move is a difference to judge even when the words
-    /// match, and it is what the signed entry hashes beside the statement.
-    #[test]
-    fn a_vagrant_flag_naming_a_difference_survives_the_plan_write() {
-        let (_dir, r) = temp_ref();
-        let mut committed = ScryModel::new();
-        let mut n1 = mk_node("n1", "N1", None);
-        n1.responsibilities
-            .push(mk_resp("resp-1", "does the thing"));
-        n1.responsibilities
-            .push(mk_resp("resp-3", "does the moved thing"));
-        committed.nodes.push(n1);
-        committed.nodes.push(mk_node("n2", "N2", None));
-        write_model_at(&r, &committed).unwrap();
-        ensure_planned_at(&r).unwrap();
-
-        let mut planned = read_planned_at(&r).unwrap();
-        {
-            let host = &mut planned.nodes[0];
-            let reworded = host
-                .responsibilities
-                .iter_mut()
-                .find(|x| x.id == "resp-1")
-                .unwrap();
-            reworded.statement = "does something else".into();
-            reworded.vagrant = Some(true);
-            host.responsibilities.retain(|x| x.id != "resp-3");
-            let mut minted = mk_resp("resp-2", "does the undescribed thing");
-            minted.vagrant = Some(true);
-            host.responsibilities.push(minted);
-        }
-        let mut moved = mk_resp("resp-3", "does the moved thing");
-        moved.vagrant = Some(true);
-        planned.nodes[1].responsibilities.push(moved);
-        write_planned_at(&r, &planned).unwrap();
-
-        let written = read_planned_at(&r).unwrap();
-        let flag = |id: &str| {
-            written
-                .nodes
-                .iter()
-                .flat_map(|n| n.responsibilities.iter())
-                .find(|x| x.id == id)
-                .unwrap()
-                .vagrant
-        };
-        assert_eq!(
-            flag("resp-1"),
-            Some(true),
-            "a reworded claim still awaits a verdict"
-        );
-        assert_eq!(
-            flag("resp-2"),
-            Some(true),
-            "a claim committed does not carry still awaits one"
-        );
-        assert_eq!(flag("resp-3"), Some(true), "a moved claim still awaits one");
     }
 
     /// A model file whose schema version does not match the current one is

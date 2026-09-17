@@ -4484,42 +4484,6 @@ mod tests {
         );
     }
 
-    /// An amendment that amends nothing: the plan's words and host ARE the
-    /// committed model's, byte for byte, so there is no difference for a
-    /// developer to judge — an adopt would commit nothing, and the flag would
-    /// be the dead end judgement 702 found on writ's resp-9makhp. The fold sets
-    /// no flag; the claim rides the ordinary gates.
-    #[test]
-    fn fold_sets_no_vagrant_flag_for_an_amendment_that_amends_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
-        let cid = signed_off_plan(&model_ref, Some("Verifies the old thing"));
-        // Back to the committed words, written RAW so the ledger GC does not
-        // prune the tag: the fold still classifies the entry as amended against
-        // the sign-off snapshot, which is the case this guards.
-        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
-        planned.nodes[0].responsibilities[0].statement = "Verifies the old thing".into();
-        scryer_core::write_planned_raw_at(
-            &model_ref,
-            &serde_json::to_string_pretty(&planned).unwrap(),
-        )
-        .unwrap();
-
-        let text = fold_change(&ScryerServer::new(), dir.path(), &cid);
-        assert!(!text.contains("AWAITING VERDICT"), "{text}");
-        if let Some(r) = planned_resp(&model_ref, "resp-1") {
-            assert!(
-                r.vagrant.is_none() && r.vagrant_origin.is_none(),
-                "no flag is set for an amendment that amends nothing"
-            );
-        }
-        assert!(committed_has(&model_ref, "resp-1"));
-        assert!(
-            scryer_core::refusals::read_refusals(&model_ref).is_empty(),
-            "and nothing is filed for a verdict"
-        );
-    }
-
     /// A claim the agent adds after sign-off is scope it invented: withheld as
     /// vagrant/addition, while the signed-off claim beside it folds.
     #[test]
