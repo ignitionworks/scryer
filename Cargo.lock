@@ -3731,7 +3731,9 @@ dependencies = [
 name = "scryer-core"
 version = "0.4.12"
 dependencies = [
+ "base64 0.22.1",
  "dirs 5.0.1",
+ "flate2",
  "glob",
  "ignore",
  "roxmltree",

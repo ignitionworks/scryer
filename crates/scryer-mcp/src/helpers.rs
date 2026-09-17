@@ -381,6 +381,38 @@ impl ResolvedProject {
     }
 }
 
+/// The `basis` a read answers: one opaque fingerprint over the RELEVANT SET the
+/// read showed, which a model write names so the engine can refuse it when that
+/// set has moved (`scryer_core::basis`). Derived from BOTH layers whatever
+/// layer the read itself returned — a writer's edit stands on the committed
+/// claims and the planned ones together.
+///
+/// `None` where the read showed nothing a writer could base an edit on, so an
+/// empty basis that would validate against anything is never minted.
+pub(crate) fn basis_of(
+    committed: &ScryModel,
+    planned: &ScryModel,
+    scope: scryer_core::basis::Scope,
+) -> Option<String> {
+    scryer_core::basis::derive(committed, planned, scope)
+}
+
+/// [`basis_of`] for a read that does not already hold both layers. A model that
+/// cannot be read answers no basis rather than failing the read: the basis is
+/// an addition to the answer, never a new way for a read to die.
+pub(crate) fn basis_at(model_ref: &ModelRef, scope: scryer_core::basis::Scope) -> Option<String> {
+    let committed = scryer_core::read_model_at(model_ref).ok()?;
+    let planned = scryer_core::read_planned_at(model_ref).unwrap_or_else(|_| committed.clone());
+    basis_of(&committed, &planned, scope)
+}
+
+/// Put the basis on a JSON answer, beside `project`.
+pub(crate) fn stamp_basis(payload: &mut serde_json::Value, basis: Option<String>) {
+    if let (serde_json::Value::Object(o), Some(b)) = (payload, basis) {
+        o.insert("basis".into(), serde_json::Value::String(b));
+    }
+}
+
 /// Error text for a failed model/plan read. When there really is NO MODEL yet,
 /// steer at the bootstrap path rather than strand the agent with an IO error.
 ///

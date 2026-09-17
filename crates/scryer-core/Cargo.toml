@@ -13,6 +13,10 @@ schemars = "1"
 ignore = "0.4"
 glob = "0.3"
 roxmltree = "0.21.1"
+# The basis token: deflate + base64url over the read set, so one opaque string
+# carries its own scope and fingerprints across processes (see `basis`).
+base64 = "0.22.1"
+flate2 = "1.1"
 
 [dev-dependencies]
 tempfile = "3"

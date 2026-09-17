@@ -100,6 +100,41 @@ fn overview_payload(model: &ScryModel) -> serde_json::Value {
     })
 }
 
+/// The ids of a node's subtree, and of the groups hanging off any of them —
+/// exactly the elements `subtree_payload` shows claims for, which is what the
+/// read's basis covers.
+fn subtree_scope(model: &ScryModel, node_id: &str) -> scryer_core::basis::Scope {
+    let mut nodes: Vec<String> = vec![node_id.to_string()];
+    let mut frontier = vec![node_id.to_string()];
+    while let Some(id) = frontier.pop() {
+        for child in model
+            .nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&id))
+        {
+            if !nodes.iter().any(|x| x == &child.id) {
+                nodes.push(child.id.clone());
+                frontier.push(child.id.clone());
+            }
+        }
+    }
+    let groups: Vec<String> = model
+        .groups
+        .iter()
+        .filter(|g| {
+            g.parent_node_id
+                .as_deref()
+                .is_some_and(|p| nodes.iter().any(|x| x == p))
+        })
+        .map(|g| g.id.clone())
+        .collect();
+    scryer_core::basis::Scope {
+        nodes,
+        groups,
+        ..Default::default()
+    }
+}
+
 /// Full detail of one node's subtree: the node, its descendants (including
 /// symbols), the links among them, external links + the partner nodes for
 /// context, the references its children may link to, and the subtree's slice of
@@ -444,6 +479,26 @@ impl ScryerServer {
         // No node: the architecture overview (always small — symbols excluded).
         let Some(node_id) = req.node.as_deref() else {
             let mut payload = overview_payload(&model);
+            // The overview names nodes and counts their claims; it shows no
+            // claim, so its basis covers the outline and nothing more. A writer
+            // that means to edit a claim reads the node first — and gets the
+            // basis that covers it.
+            let outline: Vec<String> = model
+                .nodes
+                .iter()
+                .filter(|n| n.kind != scryer_core::Kind::Symbol)
+                .map(|n| n.id.clone())
+                .collect();
+            stamp_basis(
+                &mut payload,
+                basis_at(
+                    &model_ref,
+                    scryer_core::basis::Scope {
+                        outline,
+                        ..Default::default()
+                    },
+                ),
+            );
             model_ref.stamp(&mut payload);
             return Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
@@ -455,6 +510,10 @@ impl ScryerServer {
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         strip_fields_compact(&mut payload);
+        stamp_basis(
+            &mut payload,
+            basis_at(&model_ref, subtree_scope(&model, node_id)),
+        );
         model_ref.stamp(&mut payload);
         let detail = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
         if detail.len() <= DETAIL_LIMIT {
@@ -491,6 +550,26 @@ impl ScryerServer {
             "note": note,
             "children": children,
         });
+        // A skeleton showed no claim either: the basis covers the outline of
+        // the node and the children it listed.
+        let mut outline: Vec<String> = vec![node_id.to_string()];
+        outline.extend(
+            model
+                .nodes
+                .iter()
+                .filter(|n| n.parent_id.as_deref() == Some(node_id))
+                .map(|n| n.id.clone()),
+        );
+        stamp_basis(
+            &mut payload,
+            basis_at(
+                &model_ref,
+                scryer_core::basis::Scope {
+                    outline,
+                    ..Default::default()
+                },
+            ),
+        );
         model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
@@ -694,6 +773,17 @@ impl ScryerServer {
             "note": note,
         });
         strip_fields_compact(&mut payload);
+        // The governing set of a locate is the owner chain it answered, plus the
+        // boundary owner when the file is dark — the nodes whose claims and
+        // binding directives it showed.
+        let mut nodes: Vec<String> = res.owner_chain.iter().map(|o| o.id.clone()).collect();
+        if let Some(b) = &res.boundary_owner {
+            nodes.push(b.id.clone());
+        }
+        stamp_basis(
+            &mut payload,
+            basis_at(&model_ref, scryer_core::basis::Scope::nodes(nodes)),
+        );
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
         )]))
@@ -1011,6 +1101,18 @@ impl ScryerServer {
             "state": status_header(&model_ref),
         });
         strip_fields_compact(&mut payload);
+        // `scope` IS the governing set this answer was built from — the same set
+        // the pending entries above were filtered by. The phase line, the drift
+        // scopes, the rankings and the rule slugs are deliberately outside the
+        // basis: each moves without anybody editing the model.
+        stamp_basis(
+            &mut payload,
+            basis_of(
+                &committed,
+                &planned,
+                scryer_core::basis::Scope::nodes(scope.iter().cloned()),
+            ),
+        );
         model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
@@ -1310,6 +1412,9 @@ impl ScryerServer {
         let (mut to_implement, mut to_reimplement, mut to_move, mut to_delete, mut to_repoint) =
             (0u32, 0u32, 0u32, 0u32, 0u32);
         let mut changes_out: Vec<serde_json::Value> = Vec::new();
+        // The nodes the listed entries sit on — the governing set of this read
+        // (see the basis stamped at the end).
+        let mut basis_hosts: Vec<String> = Vec::new();
 
         for ch in &plan.changes {
             let vagrant = match ch.kind {
@@ -1401,6 +1506,19 @@ impl ScryerServer {
             if let Some(cid) = tagged {
                 v["change"] = serde_json::Value::String(cid.clone());
             }
+            match ch.kind {
+                ElementKind::Node => basis_hosts.push(ch.id.clone()),
+                ElementKind::Responsibility | ElementKind::Property => {
+                    if let Some(owner) = &ch.owner_id {
+                        basis_hosts.push(owner.clone());
+                    }
+                }
+                ElementKind::Link => {
+                    basis_hosts.extend(ch.from.iter().cloned());
+                    basis_hosts.extend(ch.to.iter().cloned());
+                }
+                ElementKind::Group => {}
+            }
             changes_out.push(v);
         }
 
@@ -1439,6 +1557,26 @@ impl ScryerServer {
         if let Some(current) = self.session_change(&model_ref) {
             payload["currentChange"] = serde_json::Value::String(current);
         }
+        // The basis of a pending read covers the entries it listed AND the
+        // claims of the nodes those entries sit on: a writer reading the queue
+        // for a change goes on to write those nodes, and the neighbouring claim
+        // somebody else reworded is the write skew this exists to catch.
+        stamp_basis(
+            &mut payload,
+            basis_of(&model, &planned, {
+                // A claim may sit on a GROUP as readily as on a node, and
+                // the two are looked up in different places.
+                let (groups, nodes): (Vec<String>, Vec<String>) = basis_hosts
+                    .into_iter()
+                    .partition(|id| planned.groups.iter().any(|g| &g.id == id));
+                scryer_core::basis::Scope {
+                    nodes,
+                    groups,
+                    pending: Some(req.change.clone().unwrap_or_else(|| "*".to_string())),
+                    ..Default::default()
+                }
+            }),
+        );
         model_ref.stamp(&mut payload);
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
@@ -3245,6 +3383,218 @@ mod tests {
             entry["path"].as_str(),
             Some("Acme / Hub"),
             "filed under its source, as a node's own entry is"
+        );
+    }
+
+    // --- resp-vsrd1n: the basis every writer-basing read answers ---
+
+    /// A locate_project with a plan that diverges: one claim added under `vt`.
+    /// Returns the four reads' answers, each with the basis it minted.
+    fn basis_project() -> (ScryerServer, tempfile::TempDir, String, ModelRef) {
+        let (server, dir, project, model_ref) = locate_project();
+        let committed = scryer_core::read_model_at(&model_ref).unwrap();
+        let mut planned = committed.clone();
+        planned
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "vt")
+            .unwrap()
+            .responsibilities
+            .push(resp("r-new", "refuses expired tokens"));
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        (server, dir, project, model_ref)
+    }
+
+    fn read_basis(server: &ScryerServer, project: &str, which: &str) -> String {
+        let v = match which {
+            "orient" => result_json(
+                &server
+                    .orient(Parameters(OrientRequest {
+                        project: Some(project.to_string()),
+                        task: Some("token symbol".into()),
+                        files: Some(vec!["src/auth.rs".into()]),
+                    }))
+                    .unwrap(),
+            ),
+            "read_model" => result_json(
+                &server
+                    .read_model(Parameters(ReadModelRequest {
+                        project: Some(project.to_string()),
+                        node: Some("vt".into()),
+                        layer: Default::default(),
+                    }))
+                    .unwrap(),
+            ),
+            "locate" => result_json(
+                &server
+                    .locate(Parameters(LocateRequest {
+                        project: Some(project.to_string()),
+                        file: "src/auth.rs".into(),
+                        symbol: None,
+                    }))
+                    .unwrap(),
+            ),
+            "get_pending" => result_json(
+                &server
+                    .get_pending(Parameters(GetPendingRequest {
+                        project: Some(project.to_string()),
+                        change: None,
+                    }))
+                    .unwrap(),
+            ),
+            other => panic!("no such read: {other}"),
+        };
+        v["basis"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{which} answered no basis: {v}"))
+            .to_string()
+    }
+
+    /// resp-vsrd1n: every model read a writer can base an edit on — orient,
+    /// read_model, locate, get_pending — answers a `basis`, and the basis is
+    /// one opaque token over the relevant set THAT read showed.
+    #[test]
+    fn resp_vsrd1n_the_four_writer_basing_reads_each_answer_a_basis() {
+        let (server, _dir, project, _mr) = basis_project();
+        for which in ["orient", "read_model", "locate", "get_pending"] {
+            let token = read_basis(&server, &project, which);
+            let set = scryer_core::basis::decode(&token)
+                .unwrap_or_else(|e| panic!("{which}'s basis does not read back: {e}"));
+            assert!(
+                !set.entries.is_empty(),
+                "{which}'s basis covers something: {set:?}"
+            );
+        }
+
+        // The governing node's claims are in the set of the three reads that
+        // showed them, in BOTH layers: the committed claim and the planned one.
+        for which in ["orient", "read_model", "locate"] {
+            let set = scryer_core::basis::decode(&read_basis(&server, &project, which)).unwrap();
+            assert!(
+                set.entries.contains_key("c:r-vt"),
+                "{which} covers the committed claim: {:?}",
+                set.entries.keys().collect::<Vec<_>>()
+            );
+            assert!(
+                set.entries.contains_key("p:r-new"),
+                "{which} covers the planned claim: {:?}",
+                set.entries.keys().collect::<Vec<_>>()
+            );
+            assert!(
+                set.entries.contains_key("d:vt"),
+                "{which} covers the node's binding directives: {:?}",
+                set.entries.keys().collect::<Vec<_>>()
+            );
+        }
+
+        // get_pending showed the queue: the pending entry is in its set.
+        let set =
+            scryer_core::basis::decode(&read_basis(&server, &project, "get_pending")).unwrap();
+        assert!(
+            set.entries.contains_key("e:resp:r-new"),
+            "the pending entry is in the queue read's basis: {:?}",
+            set.entries.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// resp-vsrd1n: what the basis covers, and what it deliberately does not.
+    /// A claim reworded, a claim added or a binding directive changed moves it;
+    /// a test attachment (and with it the `untested` flag), a source anchor and
+    /// a file appearing on disk (a drift scope) do not — each of those moves
+    /// without anybody editing the model, and a basis that refused on them
+    /// would be a check nobody could keep.
+    #[test]
+    fn resp_vsrd1n_the_basis_covers_the_claims_and_directives_and_not_what_moves_by_itself() {
+        let (server, dir, project, model_ref) = basis_project();
+        let before = read_basis(&server, &project, "orient");
+
+        // A test attachment, an anchor, and a new file under the boundary.
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        planned.test_map.insert(
+            "r-vt".into(),
+            vec![serde_json::from_value(
+                serde_json::json!({ "pattern": "tests/auth.rs", "symbol": "resp_r_vt" }),
+            )
+            .unwrap()],
+        );
+        planned.source_map.insert(
+            "r-new".into(),
+            vec![serde_json::from_value(
+                serde_json::json!({ "pattern": "src/auth.rs", "symbol": "expired" }),
+            )
+            .unwrap()],
+        );
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/extra.rs"), "fn extra() {}\n").unwrap();
+        assert_eq!(
+            read_basis(&server, &project, "orient"),
+            before,
+            "tests, anchors and files on disk are not the relevant set"
+        );
+
+        // A claim reworded in the plan DOES move it.
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        planned
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "vt")
+            .unwrap()
+            .responsibilities
+            .iter_mut()
+            .find(|r| r.id == "r-new")
+            .unwrap()
+            .statement = "refuses expired and forged tokens".into();
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        let reworded = read_basis(&server, &project, "orient");
+        assert_ne!(reworded, before, "a reworded claim moves the basis");
+
+        // So does a binding directive above the governing node.
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        planned
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == "api")
+            .unwrap()
+            .directives
+            .push("must answer within 50ms".into());
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        assert_ne!(
+            read_basis(&server, &project, "orient"),
+            reworded,
+            "an inherited directive is a binding directive"
+        );
+    }
+
+    /// resp-vsrd1n: the OVERVIEW read shows no claim, so its basis covers the
+    /// outline it did show and no claim. Read-set validation validates what was
+    /// read — a writer cannot have based a claim's wording on a read that never
+    /// carried it, and a basis that pretended otherwise would refuse writes for
+    /// claims nobody saw.
+    #[test]
+    fn resp_vsrd1n_the_overview_reads_basis_covers_the_outline_it_showed() {
+        let (server, _dir, project, _mr) = basis_project();
+        let v = result_json(
+            &server
+                .read_model(Parameters(ReadModelRequest {
+                    project: Some(project.clone()),
+                    node: None,
+                    layer: Default::default(),
+                }))
+                .unwrap(),
+        );
+        let set = scryer_core::basis::decode(v["basis"].as_str().expect("a basis")).unwrap();
+        assert!(
+            set.entries.contains_key("o:auth"),
+            "the outline the overview drew: {:?}",
+            set.entries.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            !set.entries
+                .keys()
+                .any(|k| k.starts_with("c:") || k.starts_with("p:")),
+            "and no claim, because it showed none: {:?}",
+            set.entries.keys().collect::<Vec<_>>()
         );
     }
 
