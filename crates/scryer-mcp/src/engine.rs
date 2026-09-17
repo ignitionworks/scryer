@@ -282,6 +282,7 @@ dispatch_table! {
     // nodes.rs
     replace_model => SetModelRequest,
     update_nodes => UpdateNodeRequest,
+    update_claim => UpdateClaimRequest,
     set_directives => SetDirectivesRequest,
     mark_implemented => MarkImplementedRequest,
     move_nodes => MoveNodesRequest,
@@ -365,6 +366,7 @@ const CLASSIFIED: &[(&str, ToolEffect)] = &[
     ("mark_implemented", ToolEffect::UserWord),
     ("replace_model", ToolEffect::PlanWrite),
     ("update_nodes", ToolEffect::PlanWrite),
+    ("update_claim", ToolEffect::PlanWrite),
     ("set_directives", ToolEffect::PlanWrite),
     ("move_nodes", ToolEffect::PlanWrite),
     ("replace_subtree", ToolEffect::PlanWrite),

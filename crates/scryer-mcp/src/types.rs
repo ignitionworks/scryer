@@ -355,6 +355,32 @@ pub struct UpdateNodeRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateClaimRequest {
+    pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
+    /// The node (or group) that holds the claim. Named, not guessed: it is half
+    /// the claim's identity, and a mismatch is refused.
+    #[schemars(description = "The node (or group) that holds the claim.")]
+    pub node_id: String,
+    /// The claim's id.
+    #[schemars(description = "The responsibility id to reword.")]
+    pub claim_id: String,
+    /// The claim's new statement; omit to leave it alone.
+    #[schemars(description = "New EARS statement; omit to leave the wording alone.")]
+    pub statement: Option<String>,
+    /// The claim's new concern slug; empty string clears it; omit to leave it.
+    #[schemars(description = "New concern slug; \"\" clears it; omit to leave it.")]
+    pub concern: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetDirectivesItem {
     /// Node id whose node-level directives (binding its subtree) are replaced; exactly one of node_id / responsibility_id.
     pub node_id: Option<String>,

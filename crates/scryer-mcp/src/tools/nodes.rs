@@ -896,6 +896,176 @@ impl ScryerServer {
     }
 
     #[tool(
+        description = "Reword ONE claim in place: `claim_id` and its new `statement` and/or `concern`, on the \
+         `node_id` that holds it. The smaller road beside update_nodes' whole-array write — use \
+         that one to ADD, remove or reorder claims. Everything not named is left alone: the \
+         directives, the vagrant flag and the statement a sign-off approved all survive a reword, \
+         which a whole-array resend drops. Carries `basis` like every write.\n\
+         Rules: statement-ears, scanning, naming, concerns, altitude"
+    )]
+    pub fn update_claim(
+        &self,
+        Parameters(req): Parameters<UpdateClaimRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let model_ref = resolve_model_ref(req.project.as_deref())?;
+        let _lock = match lock_or_err(&model_ref) {
+            Ok(l) => l,
+            Err(e) => return Ok(e),
+        };
+        let mut model = match scryer_core::read_planned_seeded_at(&model_ref) {
+            Ok(m) => m,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", &model_ref, &e,
+                ))]));
+            }
+        };
+
+        if req.statement.is_none() && req.concern.is_none() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Give `statement` and/or `concern` — update_claim rewords a claim, and a call \
+                 that names neither has nothing to write."
+                    .to_string(),
+            )]));
+        }
+
+        // THE COMPARE-AND-SWAP'S IDENTITY CHECK. A claim is (host, id), and the
+        // caller names both: a claim that has MOVED to another node since the
+        // read, or an id that was never on this node, is refused here and
+        // named, rather than written onto whatever node happens to hold it now.
+        // The basis check below is the other half — read-set validation on this
+        // claim's neighbours, which is what catches the write skew a per-claim
+        // from→to check cannot see.
+        let host_kind = if model.nodes.iter().any(|n| n.id == req.node_id) {
+            "node"
+        } else if model.groups.iter().any(|g| g.id == req.node_id) {
+            "group"
+        } else {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "No node or group '{}' holds anything — name the host the claim sits on.",
+                req.node_id
+            ))]));
+        };
+        // Read off BEFORE the mutable borrow below: where the claim actually
+        // sits, when it is not on the host the caller named.
+        let elsewhere: Option<String> = model
+            .nodes
+            .iter()
+            .map(|n| (&n.id, &n.responsibilities))
+            .chain(model.groups.iter().map(|g| (&g.id, &g.responsibilities)))
+            .find(|(id, rs)| **id != req.node_id && rs.iter().any(|r| r.id == req.claim_id))
+            .map(|(id, _)| id.clone());
+        let found = {
+            let on_node = model
+                .nodes
+                .iter_mut()
+                .find(|n| n.id == req.node_id)
+                .map(|n| &mut n.responsibilities);
+            let on_group = model
+                .groups
+                .iter_mut()
+                .find(|g| g.id == req.node_id)
+                .map(|g| &mut g.responsibilities);
+            on_node
+                .or(on_group)
+                .and_then(|rs| rs.iter_mut().find(|r| r.id == req.claim_id))
+        };
+        let Some(claim) = found else {
+            let msg = match elsewhere {
+                Some(host) => format!(
+                    "Claim '{}' is not on {host_kind} '{}' — it sits on '{host}'. Name the host \
+                     it is on, or move it with move_responsibilities.",
+                    req.claim_id, req.node_id
+                ),
+                None => format!(
+                    "No claim '{}' anywhere in the plan. Read the node first: a claim id is \
+                     minted by the engine, never composed.",
+                    req.claim_id
+                ),
+            };
+            return Ok(CallToolResult::error(vec![Content::text(msg)]));
+        };
+
+        let mut said: Vec<String> = Vec::new();
+        if let Some(statement) = &req.statement {
+            let statement = statement.trim();
+            if statement.is_empty() {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "A claim's statement cannot be emptied — drop the claim with update_nodes \
+                     (omit it from the array) if it no longer holds."
+                        .to_string(),
+                )]));
+            }
+            if statement != claim.statement {
+                said.push("statement".to_string());
+                claim.statement = statement.to_string();
+                // A reword IS the verdict on a drift observation: the claim now
+                // says what the code does, so the stale flag and drift's
+                // proposed wording have nothing left to prescribe. The vagrant
+                // flag is NOT touched — that verdict is the developer's, and a
+                // reword must not resolve it (nor drop the statement a sign-off
+                // approved, which is kept beside it for the review).
+                claim.stale = None;
+                claim.stale_proposal = None;
+            }
+        }
+        if let Some(concern) = &req.concern {
+            let concern = concern.trim();
+            let next = if concern.is_empty() {
+                None
+            } else {
+                Some(concern.to_string())
+            };
+            if next != claim.concern {
+                said.push("concern".to_string());
+                claim.concern = next;
+            }
+        }
+        let claim_id = req.claim_id.clone();
+
+        let written = match write_planned_tagged(
+            &model_ref,
+            &mut model,
+            self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
+        ) {
+            Ok(w) => w,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
+
+        let mut msg = if said.is_empty() {
+            format!("Claim {claim_id} already read that way — nothing changed")
+        } else {
+            format!(
+                "Reworded {claim_id} on {} ({})",
+                req.node_id,
+                said.join(" + ")
+            )
+        };
+        for w in &tag_warnings {
+            msg.push_str(&format!("\n{w}"));
+        }
+        // Accept + warn, as the array write does: a field-shape problem on the
+        // claim just reworded rides back rather than rejecting the write.
+        let warnings: Vec<String> = model
+            .nodes
+            .iter()
+            .filter(|n| n.id == req.node_id)
+            .flat_map(scryer_core::validate::node_field_warnings)
+            .collect();
+        for w in &warnings {
+            msg.push_str(&format!("\nwarning: {}", w));
+        }
+        say_basis(&mut msg, new_basis);
+        drop(_lock);
+        if let Some(h) = status_header_named(&model_ref) {
+            msg.push_str(&format!("\n{h}"));
+        }
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
+    }
+
+    #[tool(
         description = "Replace the directives on nodes or responsibilities — the ONE write path to directives. \
          Call it ONLY when the user explicitly asked, in this conversation, for directives to be \
          written, edited, or deleted. Each item names `node_id` OR `responsibility_id` plus \
@@ -6706,5 +6876,311 @@ mod tests {
             .unwrap();
         assert_eq!(f.is_error, Some(true), "{}", tool_text(&f));
         assert!(tool_text(&f).contains("stale"), "{}", tool_text(&f));
+    }
+
+    // ---- resp-d1qv3n: the per-claim write
+
+    fn update_claim_call(
+        server: &ScryerServer,
+        project: &str,
+        node_id: &str,
+        claim_id: &str,
+        statement: Option<&str>,
+        concern: Option<&str>,
+        basis: Option<&str>,
+    ) -> CallToolResult {
+        server
+            .update_claim(Parameters(UpdateClaimRequest {
+                project: Some(project.to_string()),
+                basis: basis.map(str::to_string),
+                node_id: node_id.to_string(),
+                claim_id: claim_id.to_string(),
+                statement: statement.map(str::to_string),
+                concern: concern.map(str::to_string),
+            }))
+            .unwrap()
+    }
+
+    fn claim_on<'a>(
+        planned: &'a ScryModel,
+        node_id: &str,
+        claim_id: &str,
+    ) -> &'a scryer_core::Responsibility {
+        planned
+            .nodes
+            .iter()
+            .find(|n| n.id == node_id)
+            .and_then(|n| n.responsibilities.iter().find(|r| r.id == claim_id))
+            .unwrap_or_else(|| panic!("no claim {claim_id} on {node_id}"))
+    }
+
+    /// resp-d1qv3n: a reword is ONE claim id and its new words, on the node
+    /// that holds it — a smaller resend than the whole-node array, and it keeps
+    /// what it was not told to change. A whole-array write cannot carry the
+    /// flags (they are hidden from its schema), so a resend that means to
+    /// reword one claim silently drops the directives and the vagrant verdict
+    /// on every claim in the array; this road touches only what it names.
+    #[test]
+    fn resp_d1qv3n_a_per_claim_write_rewords_one_claim_and_keeps_the_rest() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+
+        // The claim carries a directive, a vagrant verdict awaiting a person,
+        // the statement that verdict was measured against, and a drift flag.
+        let mut planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        {
+            let r = planned.nodes[1]
+                .responsibilities
+                .iter_mut()
+                .find(|r| r.id == "resp-1")
+                .unwrap();
+            r.directives = vec!["must never log tokens".into()];
+            r.vagrant = Some(true);
+            r.vagrant_origin = Some("amendment".into());
+            r.approved_statement = Some("does resp-1".into());
+            r.stale = Some(true);
+            r.stale_proposal = Some("does something else now".into());
+        }
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+
+        let basis = basis_for_node(&server, &project, "node-2");
+        let r = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-1",
+            Some("**Answers** within the budget"),
+            Some("latency"),
+            Some(&basis),
+        );
+        let text = tool_text(&r);
+        assert_ne!(r.is_error, Some(true), "{text}");
+        assert!(
+            text.contains("Reworded resp-1 on node-2") && text.contains("statement + concern"),
+            "{text}"
+        );
+
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let c = claim_on(&planned, "node-2", "resp-1");
+        assert_eq!(c.statement, "**Answers** within the budget");
+        assert_eq!(c.concern.as_deref(), Some("latency"));
+        assert_eq!(
+            c.directives,
+            vec!["must never log tokens".to_string()],
+            "the user's binding directive survives a reword"
+        );
+        assert_eq!(
+            c.vagrant,
+            Some(true),
+            "a reword is not the vagrancy verdict"
+        );
+        assert_eq!(c.vagrant_origin.as_deref(), Some("amendment"));
+        assert_eq!(
+            c.approved_statement.as_deref(),
+            Some("does resp-1"),
+            "and the review keeps what was approved"
+        );
+        assert_eq!(c.stale, None, "but a reword IS the verdict on a drift flag");
+        assert_eq!(c.stale_proposal, None);
+        // Its neighbour was never in the payload and never moved.
+        assert_eq!(
+            claim_on(&planned, "node-2", "resp-2").statement,
+            "does resp-2"
+        );
+        // The concern slug was minted into the registry, as any write does.
+        assert!(planned.concerns.iter().any(|c| c.slug == "latency"));
+    }
+
+    /// resp-d1qv3n: THE COMPARE-AND-SWAP on the claim. A claim is (host, id),
+    /// and naming both is what makes a refusal sharp: a claim that has moved
+    /// since the read is refused saying where it went, and an id the plan does
+    /// not hold is refused saying so, rather than the write landing on whatever
+    /// node happens to hold it now.
+    #[test]
+    fn resp_d1qv3n_the_claim_is_named_by_its_host_and_a_mismatch_is_refused() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+
+        let wrong_host = update_claim_call(
+            &server,
+            &project,
+            "node-1",
+            "resp-1",
+            Some("moved"),
+            None,
+            None,
+        );
+        let text = tool_text(&wrong_host);
+        assert_eq!(wrong_host.is_error, Some(true), "{text}");
+        assert!(text.contains("it sits on 'node-2'"), "{text}");
+        assert!(text.contains("move_responsibilities"), "{text}");
+
+        let no_claim = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-99",
+            Some("moved"),
+            None,
+            None,
+        );
+        let text = tool_text(&no_claim);
+        assert_eq!(no_claim.is_error, Some(true), "{text}");
+        assert!(text.contains("No claim 'resp-99'"), "{text}");
+
+        let no_host = update_claim_call(
+            &server,
+            &project,
+            "node-9",
+            "resp-1",
+            Some("moved"),
+            None,
+            None,
+        );
+        assert_eq!(no_host.is_error, Some(true));
+        assert!(tool_text(&no_host).contains("No node or group 'node-9'"));
+
+        // A call that names neither new word has nothing to write.
+        let nothing = update_claim_call(&server, &project, "node-2", "resp-1", None, None, None);
+        assert_eq!(nothing.is_error, Some(true));
+        assert!(tool_text(&nothing).contains("`statement` and/or `concern`"));
+
+        // A statement cannot be emptied through this road — that is a deletion.
+        let emptied = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-1",
+            Some("   "),
+            None,
+            None,
+        );
+        assert_eq!(emptied.is_error, Some(true));
+        assert!(tool_text(&emptied).contains("cannot be emptied"));
+
+        // None of the refusals wrote anything.
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            claim_on(&planned, "node-2", "resp-1").statement,
+            "does resp-1"
+        );
+    }
+
+    /// resp-d1qv3n: the per-claim write carries THE SAME basis check — a
+    /// compare-and-swap on the claim, WITHIN read-set validation on its
+    /// neighbours. A neighbour reworded since the read refuses this write too,
+    /// which is the whole reason a per-claim from→to check would not have been
+    /// enough; and the answer carries the new basis so the same writer can
+    /// reword the next claim straight away.
+    #[test]
+    fn resp_d1qv3n_the_per_claim_write_carries_the_same_basis_check() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+        let stale = basis_for_node(&server, &project, "node-2");
+
+        // Somebody else rewords the NEIGHBOUR.
+        let fresh = basis_for_node(&server, &project, "node-2");
+        let a = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-2",
+            Some("A's wording"),
+            None,
+            Some(&fresh),
+        );
+        assert_ne!(a.is_error, Some(true), "{}", tool_text(&a));
+
+        let b = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-1",
+            Some("B's wording"),
+            None,
+            Some(&stale),
+        );
+        let text = tool_text(&b);
+        assert_eq!(b.is_error, Some(true), "{text}");
+        assert!(text.contains("stale") && text.contains("resp-2"), "{text}");
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            claim_on(&planned, "node-2", "resp-1").statement,
+            "does resp-1"
+        );
+
+        // The answer's basis lets the same writer go straight on to the next.
+        let fresh = basis_for_node(&server, &project, "node-2");
+        let one = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-1",
+            Some("step one"),
+            None,
+            Some(&fresh),
+        );
+        let next = tool_text(&one)
+            .lines()
+            .find_map(|l| l.strip_prefix("basis: "))
+            .expect("the answer carries the new basis")
+            .to_string();
+        let two = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-2",
+            Some("step two"),
+            None,
+            Some(&next),
+        );
+        assert_ne!(two.is_error, Some(true), "{}", tool_text(&two));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(claim_on(&planned, "node-2", "resp-1").statement, "step one");
+        assert_eq!(claim_on(&planned, "node-2", "resp-2").statement, "step two");
+
+        // And the switch covers this road like every other.
+        let refused = with_basis_required(true, || {
+            update_claim_call(
+                &server,
+                &project,
+                "node-2",
+                "resp-1",
+                Some("no basis"),
+                None,
+                None,
+            )
+        });
+        assert_eq!(refused.is_error, Some(true), "{}", tool_text(&refused));
+        assert!(tool_text(&refused).contains("names no `basis`"));
+    }
+
+    /// resp-d1qv3n: the array write STAYS, for adding and reordering claims,
+    /// and carries the same check. The per-claim road is beside it, not instead
+    /// of it — a claim it cannot add is one update_nodes still adds.
+    #[test]
+    fn resp_d1qv3n_the_array_write_stays_for_adding_and_reordering() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+        let basis = basis_for_node(&server, &project, "node-2");
+        let added = reword(
+            &server,
+            &project,
+            vec![
+                resp("resp-2"),
+                resp("resp-1"),
+                worded("new", "**Answers** the probe"),
+            ],
+            Some(&basis),
+        );
+        assert_ne!(added.is_error, Some(true), "{}", tool_text(&added));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let ids: Vec<&str> = planned.nodes[1]
+            .responsibilities
+            .iter()
+            .map(|r| r.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), 3, "the third claim was added: {ids:?}");
+        assert_eq!(
+            &ids[..2],
+            &["resp-2", "resp-1"],
+            "and the order is the array's"
+        );
     }
 }
