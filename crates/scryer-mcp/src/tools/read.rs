@@ -524,7 +524,8 @@ impl ScryerServer {
             "layers": want,
             "total": hits.len(),
             "places": places.len(),
-            "occurrences": hits,
+            "countsOnly": occ.counts_only,
+            "occurrences": if occ.counts_only { Vec::new() } else { hits },
             "note": note,
         });
         strip_fields_compact(&mut payload);
@@ -677,8 +678,8 @@ impl ScryerServer {
          `occurrences {term, substring, layers}`: EVERY use of one exact term in the model's \
          prose — claims, descriptions and directives — case-insensitive, whole-word by default, \
          NO cap and no ranking, each hit naming the element by id with the sentence around the \
-         term, on the plan, committed, or both. The second is the full-text read a sweep or a \
-         reader after a word wants; the first is for orienting.\n\
+         term, on the plan, committed, or both — or `counts_only` for `total` and `places` \
+         without the hits. The first orients; the second is the full-text read.\n\
          Rules: loop-orient"
     )]
     pub fn search_model(
@@ -4010,6 +4011,17 @@ mod tests {
         substring: bool,
         layers: Option<&str>,
     ) -> CallToolResult {
+        occurrences_counted(server, project, term, substring, layers, false)
+    }
+
+    fn occurrences_counted(
+        server: &ScryerServer,
+        project: &str,
+        term: &str,
+        substring: bool,
+        layers: Option<&str>,
+        counts_only: bool,
+    ) -> CallToolResult {
         server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project.to_string()),
@@ -4017,6 +4029,7 @@ mod tests {
                     term: term.to_string(),
                     substring,
                     layers: layers.map(str::to_string),
+                    counts_only,
                 }),
                 query: None,
                 kind: None,
@@ -4155,6 +4168,25 @@ mod tests {
             .unwrap()
             .iter()
             .all(|h| h["layer"] == "committed"));
+
+        // COUNTS ONLY: the same two numbers, and none of the weight. A summary
+        // that says "all 5 uses, in 1 place" should not have to carry the list.
+        let full = result_json(&occurrences_call(&server, &project, "proxy", false, None));
+        let counted = result_json(&occurrences_counted(
+            &server, &project, "proxy", false, None, true,
+        ));
+        assert_eq!(counted["total"], full["total"]);
+        assert_eq!(counted["places"], full["places"]);
+        assert_eq!(counted["countsOnly"], true);
+        assert!(
+            counted["occurrences"].is_null(),
+            "and not one hit with it: {counted}"
+        );
+        assert!(
+            serde_json::to_string(&counted).unwrap().len()
+                < serde_json::to_string(&full).unwrap().len() / 2,
+            "which is the point — the answer is a fraction of the size"
+        );
 
         // The two questions share one door, and neither given is refused.
         let neither = server

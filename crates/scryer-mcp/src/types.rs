@@ -79,6 +79,13 @@ pub struct Occurrences {
     #[serde(default)]
     #[schemars(description = "Which layers to read: plan (default), committed, or both.")]
     pub layers: Option<String>,
+    /// Answer `total` and `places` and NOT the hits. For a summary that counts
+    /// uses without paying for them — 216 uses of a common word is a 98 KB
+    /// answer, and a read-across reporting "all 216, in 34 places" needs two
+    /// numbers, not the list.
+    #[serde(default)]
+    #[schemars(description = "Answer total and places only, without the hits.")]
+    pub counts_only: bool,
 }
 
 /// One predicate: a `field`, an `op`, and (except for exists/absent) a `value`.
