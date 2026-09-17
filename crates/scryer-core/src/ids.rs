@@ -102,7 +102,11 @@ pub fn next_responsibility_id(existing: &[Responsibility]) -> String {
 pub fn next_node_id_union(planned: &ScryModel, committed: &ScryModel) -> String {
     mint_id_from(
         "node",
-        planned.nodes.iter().chain(committed.nodes.iter()).map(|n| n.id.as_str()),
+        planned
+            .nodes
+            .iter()
+            .chain(committed.nodes.iter())
+            .map(|n| n.id.as_str()),
     )
 }
 
@@ -110,7 +114,11 @@ pub fn next_node_id_union(planned: &ScryModel, committed: &ScryModel) -> String 
 pub fn next_group_id_union(planned: &ScryModel, committed: &ScryModel) -> String {
     mint_id_from(
         "group",
-        planned.groups.iter().chain(committed.groups.iter()).map(|g| g.id.as_str()),
+        planned
+            .groups
+            .iter()
+            .chain(committed.groups.iter())
+            .map(|g| g.id.as_str()),
     )
 }
 
@@ -126,7 +134,10 @@ mod tests {
         let a = next_node_id(&m);
         let b = next_node_id(&m);
         assert_ne!(a, b);
-        assert!(a.starts_with("node-") && a.len() == "node-".len() + SUFFIX_LEN, "{a}");
+        assert!(
+            a.starts_with("node-") && a.len() == "node-".len() + SUFFIX_LEN,
+            "{a}"
+        );
     }
 
     /// resp-780: a draw already held by either layer is rejected and redrawn.

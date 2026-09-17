@@ -42,14 +42,46 @@ pub struct ConcernDef {
 /// registry entry is minted; the set also anchors the agent's tagging rule
 /// (rules.rs rule 20) so every model answers the same questions the same way.
 pub const STANDARD_CONCERNS: &[(&str, &str, &str)] = &[
-    ("auth", "Identity, authentication, and access control", "Shield"),
-    ("persistence", "Durable storage and retrieval of data", "Database"),
-    ("failure-handling", "Detecting, capturing, and recovering from failures", "AlertTriangle"),
-    ("idempotency", "Making retries and duplicate deliveries safe", "Repeat"),
-    ("validation", "Checking inputs against expected shape and rules", "CheckCircle"),
-    ("observability", "Logging, metrics, and tracing for runtime insight", "Activity"),
-    ("performance", "Speed, capacity, and resource efficiency", "Gauge"),
-    ("compliance", "Satisfying external policy, legal, or platform rules", "Scale"),
+    (
+        "auth",
+        "Identity, authentication, and access control",
+        "Shield",
+    ),
+    (
+        "persistence",
+        "Durable storage and retrieval of data",
+        "Database",
+    ),
+    (
+        "failure-handling",
+        "Detecting, capturing, and recovering from failures",
+        "AlertTriangle",
+    ),
+    (
+        "idempotency",
+        "Making retries and duplicate deliveries safe",
+        "Repeat",
+    ),
+    (
+        "validation",
+        "Checking inputs against expected shape and rules",
+        "CheckCircle",
+    ),
+    (
+        "observability",
+        "Logging, metrics, and tracing for runtime insight",
+        "Activity",
+    ),
+    (
+        "performance",
+        "Speed, capacity, and resource efficiency",
+        "Gauge",
+    ),
+    (
+        "compliance",
+        "Satisfying external policy, legal, or platform rules",
+        "Scale",
+    ),
 ];
 
 /// Normalize a raw concern value to a kebab-case slug: lowercase, every run of
@@ -138,14 +170,24 @@ pub fn sync_concern_metadata(committed: &mut ScryModel, planned: &ScryModel) -> 
         .nodes
         .iter()
         .flat_map(|n| n.responsibilities.iter())
-        .chain(planned.groups.iter().flat_map(|g| g.responsibilities.iter()))
+        .chain(
+            planned
+                .groups
+                .iter()
+                .flat_map(|g| g.responsibilities.iter()),
+        )
         .map(|r| (r.id.as_str(), r.concern.as_deref()))
         .collect();
     let committed_resps = committed
         .nodes
         .iter_mut()
         .flat_map(|n| n.responsibilities.iter_mut())
-        .chain(committed.groups.iter_mut().flat_map(|g| g.responsibilities.iter_mut()));
+        .chain(
+            committed
+                .groups
+                .iter_mut()
+                .flat_map(|g| g.responsibilities.iter_mut()),
+        );
     for r in committed_resps {
         if let Some(&tag) = planned_by_id.get(r.id.as_str()) {
             if r.concern.as_deref() != tag {
@@ -229,11 +271,18 @@ mod tests {
         let auth = m.concerns.iter().find(|c| c.slug == "auth").unwrap();
         assert_eq!(auth.icon.as_deref(), Some("Shield"));
         assert!(auth.description.is_some());
-        let custom = m.concerns.iter().find(|c| c.slug == "session-windows").unwrap();
+        let custom = m
+            .concerns
+            .iter()
+            .find(|c| c.slug == "session-windows")
+            .unwrap();
         assert_eq!(custom.icon, None);
         // Sorted by slug.
         assert_eq!(
-            m.concerns.iter().map(|c| c.slug.as_str()).collect::<Vec<_>>(),
+            m.concerns
+                .iter()
+                .map(|c| c.slug.as_str())
+                .collect::<Vec<_>>(),
             vec!["auth", "session-windows"]
         );
     }
@@ -245,7 +294,9 @@ mod tests {
         // plan-only claim (unknown to committed) alone.
         let mut committed = model_with(vec![resp("r1", None), resp("r2", Some("auth"))]);
         let mut planned = model_with(vec![resp("r1", Some("auth")), resp("r2", None)]);
-        planned.nodes[0].responsibilities.push(resp("r3", Some("persistence")));
+        planned.nodes[0]
+            .responsibilities
+            .push(resp("r3", Some("persistence")));
         register_concerns(&mut planned);
 
         assert!(sync_concern_metadata(&mut committed, &planned));
@@ -266,7 +317,11 @@ mod tests {
             description: Some("user-curated wording".into()),
             icon: Some("Lock".into()),
         });
-        m.concerns.push(ConcernDef { slug: "unused".into(), description: None, icon: None });
+        m.concerns.push(ConcernDef {
+            slug: "unused".into(),
+            description: None,
+            icon: None,
+        });
         register_concerns(&mut m);
 
         let auth = m.concerns.iter().find(|c| c.slug == "auth").unwrap();

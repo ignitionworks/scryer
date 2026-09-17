@@ -430,15 +430,25 @@ mod tests {
         model.nodes.push(node("node-2", "Web", Kind::Container));
         model.boundaries.insert(
             "node-1".into(),
-            vec![Source { pattern: "api/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
         model.boundaries.insert(
             "node-2".into(),
-            vec![Source { pattern: "web/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "web/**/*".into(),
+                comment: None,
+            }],
         );
 
         // Reconcile anchor in the past; only the API file is touched afterwards.
-        let sync = SyncState { reconciled_at: now_secs(), commit: None, ..Default::default() };
+        let sync = SyncState {
+            reconciled_at: now_secs(),
+            commit: None,
+            ..Default::default()
+        };
         std::thread::sleep(std::time::Duration::from_millis(1100));
         std::fs::write(root.join("api/src/server.rs"), "fn changed() {}").unwrap();
 
@@ -461,18 +471,25 @@ mod tests {
         model.nodes.push(node("node-1", "API", Kind::Container));
         model.boundaries.insert(
             "node-1".into(),
-            vec![Source { pattern: "api/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
         // One claim is anchored to a non-source config file.
         model.source_map.insert(
             "resp-1".into(),
-            vec![serde_json::from_value(
-                serde_json::json!({ "pattern": "api/settings.yaml" }),
-            )
-            .unwrap()],
+            vec![
+                serde_json::from_value(serde_json::json!({ "pattern": "api/settings.yaml" }))
+                    .unwrap(),
+            ],
         );
 
-        let sync = SyncState { reconciled_at: now_secs(), commit: None, ..Default::default() };
+        let sync = SyncState {
+            reconciled_at: now_secs(),
+            commit: None,
+            ..Default::default()
+        };
         std::thread::sleep(std::time::Duration::from_millis(1100));
         // Asset + lockfile churn under the boundary: no drift.
         std::fs::write(root.join("api/icon.png"), [0u8; 4]).unwrap();
@@ -486,7 +503,10 @@ mod tests {
         std::fs::write(root.join("api/settings.yaml"), "changed: true").unwrap();
         let scopes = drifted_scopes(&model, root, &sync);
         assert_eq!(scopes.len(), 1);
-        assert_eq!(scopes[0].changed_files, vec!["api/settings.yaml".to_string()]);
+        assert_eq!(
+            scopes[0].changed_files,
+            vec!["api/settings.yaml".to_string()]
+        );
 
         // Product source under the boundary drifts as before.
         std::fs::write(root.join("api/server.rs"), "fn f() {}").unwrap();
@@ -524,13 +544,20 @@ mod tests {
         model.nodes.push(node("node-1", "API", Kind::Container));
         model.boundaries.insert(
             "node-1".into(),
-            vec![Source { pattern: "api/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
 
         // Dirty the working tree (uncommitted), THEN reconcile against it.
         std::fs::write(root.join("api/src/server.rs"), "fn v2() {}").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let sync = SyncState { reconciled_at: now_secs(), commit: Some(commit), ..Default::default() };
+        let sync = SyncState {
+            reconciled_at: now_secs(),
+            commit: Some(commit),
+            ..Default::default()
+        };
 
         // Working tree differs from HEAD, but nothing changed since reconcile.
         assert!(
@@ -560,11 +587,17 @@ mod tests {
         model.nodes.push(node("node-2", "Web", Kind::Container));
         model.boundaries.insert(
             "node-1".into(),
-            vec![Source { pattern: "api/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
         model.boundaries.insert(
             "node-2".into(),
-            vec![Source { pattern: "web/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "web/**/*".into(),
+                comment: None,
+            }],
         );
 
         // Global anchor in the past; both boundaries are touched after it.
@@ -573,7 +606,11 @@ mod tests {
         std::fs::write(root.join("api/src/server.rs"), "fn a2() {}").unwrap();
         std::fs::write(root.join("web/src/app.ts"), "const x = 2;").unwrap();
 
-        let mut sync = SyncState { reconciled_at: global, commit: None, ..Default::default() };
+        let mut sync = SyncState {
+            reconciled_at: global,
+            commit: None,
+            ..Default::default()
+        };
         assert_eq!(
             drifted_scopes(&model, root, &sync).len(),
             2,
@@ -619,7 +656,10 @@ mod tests {
         model.nodes.push(node("node-1", "API", Kind::Container));
         model.boundaries.insert(
             "node-1".into(),
-            vec![Source { pattern: "api/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
 
         let r = crate::ModelRef::ProjectLocal(root.to_path_buf());
@@ -636,7 +676,10 @@ mod tests {
         let scopes = drifted_scopes(&model, root, &sync);
         assert_eq!(scopes.len(), 1, "the deletion reaches its boundary owner");
         assert_eq!(scopes[0].node_id, "node-1");
-        assert!(scopes[0].changed_files.iter().any(|f| f == "api/src/server.rs"));
+        assert!(scopes[0]
+            .changed_files
+            .iter()
+            .any(|f| f == "api/src/server.rs"));
     }
 
     /// A dismissal reconciles the deletions it saw (`missing`): they stop
@@ -655,11 +698,17 @@ mod tests {
         model.nodes.push(node("node-2", "Web", Kind::Container));
         model.boundaries.insert(
             "node-1".into(),
-            vec![Source { pattern: "api/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "api/**/*".into(),
+                comment: None,
+            }],
         );
         model.boundaries.insert(
             "node-2".into(),
-            vec![Source { pattern: "web/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "web/**/*".into(),
+                comment: None,
+            }],
         );
 
         let r = crate::ModelRef::ProjectLocal(root.to_path_buf());
@@ -689,11 +738,19 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn a() {}").unwrap();
         let mut model = ScryModel::new();
         model.nodes.push(node("node-1", "Root", Kind::Container));
-        model
-            .boundaries
-            .insert("node-1".into(), vec![Source { pattern: "**/*".into(), comment: None }]);
+        model.boundaries.insert(
+            "node-1".into(),
+            vec![Source {
+                pattern: "**/*".into(),
+                comment: None,
+            }],
+        );
         // Anchor in the future → nothing is newer.
-        let sync = SyncState { reconciled_at: now_secs() + 10, commit: None, ..Default::default() };
+        let sync = SyncState {
+            reconciled_at: now_secs() + 10,
+            commit: None,
+            ..Default::default()
+        };
         assert!(drifted_scopes(&model, dir.path(), &sync).is_empty());
     }
 
@@ -713,5 +770,4 @@ mod tests {
         assert!(ids.contains(&"node-2".to_string()));
         assert_eq!(ids.len(), 2, "each cycle member visited exactly once");
     }
-
 }

@@ -50,12 +50,35 @@ pub struct LocateRequest {
 pub struct SearchModelRequest {
     pub project: Option<String>,
     /// Text to find; space-separated terms must ALL match on the node (name, description, technology, statements, labels).
-    pub query: String,
+    #[serde(default)]
+    pub query: Option<String>,
     /// Optional kind filter: "person", "system", "container", "component", or "symbol".
     pub kind: Option<String>,
     /// "plan" (default) or "committed".
     #[serde(default)]
     pub layer: Layer,
+    /// OCCURRENCES MODE: every use of this exact term in the model's prose,
+    /// instead of the ranked node search. Give this OR `query`.
+    #[serde(default)]
+    pub occurrences: Option<Occurrences>,
+}
+
+/// The occurrences mode's three parameters, under one key so its `layers`
+/// (which can say BOTH) is never read as the ranked search's `layer`.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct Occurrences {
+    /// The exact term. Case-insensitive.
+    #[schemars(description = "The exact term to find every use of. Case-insensitive.")]
+    pub term: String,
+    /// Match inside longer words too — `fold` would then report `folded`.
+    /// Whole-word by default, which is what a sweep wants.
+    #[serde(default)]
+    #[schemars(description = "Match inside longer words too; whole-word by default.")]
+    pub substring: bool,
+    /// `plan` (default), `committed`, or `both`.
+    #[serde(default)]
+    #[schemars(description = "Which layers to read: plan (default), committed, or both.")]
+    pub layers: Option<String>,
 }
 
 /// One predicate: a `field`, an `op`, and (except for exists/absent) a `value`.

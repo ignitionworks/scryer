@@ -58,22 +58,46 @@ mod tests {
 
     #[test]
     fn classifies_each_keyword_form() {
-        assert_eq!(classify("When a callback arrives, append an event"), EarsPattern::Event);
-        assert_eq!(classify("While a reconcile runs, queue edits"), EarsPattern::State);
-        assert_eq!(classify("If the signature is invalid, then reject"), EarsPattern::Unwanted);
-        assert_eq!(classify("Where previews are enabled, render live"), EarsPattern::Optional);
-        assert_eq!(classify("Authenticate every inbound POST"), EarsPattern::Ubiquitous);
+        assert_eq!(
+            classify("When a callback arrives, append an event"),
+            EarsPattern::Event
+        );
+        assert_eq!(
+            classify("While a reconcile runs, queue edits"),
+            EarsPattern::State
+        );
+        assert_eq!(
+            classify("If the signature is invalid, then reject"),
+            EarsPattern::Unwanted
+        );
+        assert_eq!(
+            classify("Where previews are enabled, render live"),
+            EarsPattern::Optional
+        );
+        assert_eq!(
+            classify("Authenticate every inbound POST"),
+            EarsPattern::Ubiquitous
+        );
     }
 
     #[test]
     fn reads_through_display_markup() {
-        assert_eq!(classify("**When** a callback arrives, **append** an event"), EarsPattern::Event);
-        assert_eq!(classify("**Authenticate** every inbound POST"), EarsPattern::Ubiquitous);
+        assert_eq!(
+            classify("**When** a callback arrives, **append** an event"),
+            EarsPattern::Event
+        );
+        assert_eq!(
+            classify("**Authenticate** every inbound POST"),
+            EarsPattern::Ubiquitous
+        );
     }
 
     #[test]
     fn keyword_needs_a_word_boundary() {
-        assert_eq!(classify("Whenever possible, batch the writes"), EarsPattern::Ubiquitous);
+        assert_eq!(
+            classify("Whenever possible, batch the writes"),
+            EarsPattern::Ubiquitous
+        );
         assert_eq!(classify("Whereas the ledger…"), EarsPattern::Ubiquitous);
         assert_eq!(classify("If"), EarsPattern::Ubiquitous);
     }

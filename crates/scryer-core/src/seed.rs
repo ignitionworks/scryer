@@ -35,12 +35,13 @@ pub fn mint_initial_structure(
     project_name: &str,
     units: &[SeedUnit],
 ) -> (String, Vec<(String, String, String)>) {
-    let mk_node = |id: &str, kind: &str, name: &str, parent: Option<&str>, tech: &Option<String>| {
-        serde_json::from_value::<Node>(serde_json::json!({
-            "id": id, "kind": kind, "name": name, "parentId": parent, "technology": tech,
-        }))
-        .expect("static node shape")
-    };
+    let mk_node =
+        |id: &str, kind: &str, name: &str, parent: Option<&str>, tech: &Option<String>| {
+            serde_json::from_value::<Node>(serde_json::json!({
+                "id": id, "kind": kind, "name": name, "parentId": parent, "technology": tech,
+            }))
+            .expect("static node shape")
+        };
 
     let system_id = match model
         .nodes
@@ -61,16 +62,20 @@ pub fn mint_initial_structure(
     // Inverts the glob this function mints: `{dir}/**/*`, or the bare `**/*`
     // for a root unit (dir == "").
     let node_dir = |model: &ScryModel, n: &Node| -> Option<String> {
-        model.boundaries.get(&n.id).and_then(|s| s.first()).map(|s| {
-            if s.pattern == "**/*" {
-                return String::new();
-            }
-            s.pattern
-                .trim_end_matches("/**/*")
-                .trim_end_matches("/**")
-                .trim_end_matches("/*")
-                .to_string()
-        })
+        model
+            .boundaries
+            .get(&n.id)
+            .and_then(|s| s.first())
+            .map(|s| {
+                if s.pattern == "**/*" {
+                    return String::new();
+                }
+                s.pattern
+                    .trim_end_matches("/**/*")
+                    .trim_end_matches("/**")
+                    .trim_end_matches("/*")
+                    .to_string()
+            })
     };
 
     let mut triples: Vec<(String, String, String)> = Vec::new();
@@ -112,8 +117,10 @@ pub fn mint_initial_structure(
                 };
                 model.boundaries.insert(
                     id.clone(),
-                    vec![serde_json::from_value(serde_json::json!({ "pattern": glob }))
-                        .expect("static source shape")],
+                    vec![
+                        serde_json::from_value(serde_json::json!({ "pattern": glob }))
+                            .expect("static source shape"),
+                    ],
                 );
                 (id, unit.name.clone())
             }
@@ -129,9 +136,13 @@ pub fn mint_initial_structure(
         .map(|(unit, (id, _, _))| (unit.dir.as_str(), id.as_str()))
         .collect();
     for unit in units {
-        let Some(&src) = id_by_dir.get(unit.dir.as_str()) else { continue };
+        let Some(&src) = id_by_dir.get(unit.dir.as_str()) else {
+            continue;
+        };
         for dep in &unit.dep_dirs {
-            let Some(&dst) = id_by_dir.get(dep.as_str()) else { continue };
+            let Some(&dst) = id_by_dir.get(dep.as_str()) else {
+                continue;
+            };
             let exists = model
                 .links
                 .iter()
@@ -206,7 +217,12 @@ mod tests {
         // "scryer" but live in different dirs — they must NOT collapse into one
         // container (which would schedule two Wave-2 sessions for one node).
         let units = vec![
-            SeedUnit { dir: "".into(), name: "scryer".into(), technology: None, dep_dirs: vec![] },
+            SeedUnit {
+                dir: "".into(),
+                name: "scryer".into(),
+                technology: None,
+                dep_dirs: vec![],
+            },
             SeedUnit {
                 dir: "src-tauri".into(),
                 name: "scryer".into(),
@@ -218,12 +234,29 @@ mod tests {
         let (_system_id, triples) = mint_initial_structure(&mut model, "scryer", &units);
 
         assert_eq!(triples.len(), 2);
-        assert_ne!(triples[0].0, triples[1].0, "distinct dirs must mint distinct container ids");
-        assert_eq!(model.nodes.iter().filter(|n| n.kind == Kind::Container).count(), 2);
+        assert_ne!(
+            triples[0].0, triples[1].0,
+            "distinct dirs must mint distinct container ids"
+        );
+        assert_eq!(
+            model
+                .nodes
+                .iter()
+                .filter(|n| n.kind == Kind::Container)
+                .count(),
+            2
+        );
         // Re-running discovery on the same dirs stays idempotent.
         let (_s, triples_again) = mint_initial_structure(&mut model, "scryer", &units);
         assert_eq!(triples, triples_again);
-        assert_eq!(model.nodes.iter().filter(|n| n.kind == Kind::Container).count(), 2);
+        assert_eq!(
+            model
+                .nodes
+                .iter()
+                .filter(|n| n.kind == Kind::Container)
+                .count(),
+            2
+        );
     }
 
     #[test]

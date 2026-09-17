@@ -6549,24 +6549,14 @@ mod tests {
 
     // ---- chg-krevwf: the basis on every model write (resp-azc2d9, resp-0fqnf3)
 
-    /// `SCRYER_REQUIRE_BASIS` is process-global, so the tests that set it
-    /// serialize on this and restore the prior value — correct under `cargo
-    /// test`'s threads as well as nextest's process-per-test.
+    /// The switch, forced for the length of one call. PER THREAD, never
+    /// through the environment: `SCRYER_REQUIRE_BASIS` is process-global, and a
+    /// test that set it refused writes in whatever test cargo happened to be
+    /// running beside it (`refile` and `sign_off` went red that way, on nothing
+    /// but parallelism). What the variable's STRINGS mean is tested where it is
+    /// read, on the strings themselves.
     fn with_basis_required<T>(on: bool, body: impl FnOnce() -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let prior = std::env::var("SCRYER_REQUIRE_BASIS").ok();
-        if on {
-            std::env::set_var("SCRYER_REQUIRE_BASIS", "1");
-        } else {
-            std::env::remove_var("SCRYER_REQUIRE_BASIS");
-        }
-        let out = body();
-        match prior {
-            Some(v) => std::env::set_var("SCRYER_REQUIRE_BASIS", v),
-            None => std::env::remove_var("SCRYER_REQUIRE_BASIS"),
-        }
-        out
+        crate::helpers::with_basis_switch(on, body)
     }
 
     /// One node carrying two claims, with a change open in the session so the

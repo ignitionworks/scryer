@@ -70,15 +70,11 @@ pub fn read_refusals(r: &ModelRef) -> Vec<Refusal> {
 /// standing refusal for the claims in `folded` — a later successful fold is
 /// what resolves a refusal. One read-modify-write; best-effort callers may
 /// ignore the result.
-pub fn update_refusals(
-    r: &ModelRef,
-    refused: &[Refusal],
-    folded: &[String],
-) -> Result<(), String> {
+pub fn update_refusals(r: &ModelRef, refused: &[Refusal], folded: &[String]) -> Result<(), String> {
     let mut ledger = read(r);
-    ledger
-        .refusals
-        .retain(|x| !folded.contains(&x.resp_id) && !refused.iter().any(|n| n.resp_id == x.resp_id));
+    ledger.refusals.retain(|x| {
+        !folded.contains(&x.resp_id) && !refused.iter().any(|n| n.resp_id == x.resp_id)
+    });
     ledger.refusals.extend(refused.iter().cloned());
     write(r, &ledger)
 }
@@ -88,7 +84,9 @@ pub fn update_refusals(
 pub fn prune_refusals(r: &ModelRef, live_resp_ids: &std::collections::HashSet<String>) {
     let mut ledger = read(r);
     let before = ledger.refusals.len();
-    ledger.refusals.retain(|x| live_resp_ids.contains(&x.resp_id));
+    ledger
+        .refusals
+        .retain(|x| live_resp_ids.contains(&x.resp_id));
     if ledger.refusals.len() != before {
         let _ = write(r, &ledger);
     }
@@ -121,7 +119,10 @@ mod tests {
         update_refusals(&r, &[refusal("r1", "no-verdict")], &[]).unwrap();
         let now = read_refusals(&r);
         assert_eq!(now.len(), 2);
-        assert_eq!(now.iter().find(|x| x.resp_id == "r1").unwrap().kind, "no-verdict");
+        assert_eq!(
+            now.iter().find(|x| x.resp_id == "r1").unwrap().kind,
+            "no-verdict"
+        );
 
         // A successful fold clears its refusal; the other stands.
         update_refusals(&r, &[], &["r1".into()]).unwrap();

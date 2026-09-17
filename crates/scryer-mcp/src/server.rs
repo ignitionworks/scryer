@@ -326,9 +326,11 @@ mod rule_wiring {
         // `restore_change` and `delete_change_permanently`, and a description
         // each has to carry which of them can be undone.
         // 17700 → 17900: `sign_off` says it carries a basis (judgement 733).
+        // 17900 → 18300: `search_model` now answers two questions and its
+        // description has to say which is which (chg-7bcf3z, resp-9rp8zq).
         assert!(
-            total <= 17_900,
-            "descriptions total {total} chars (budget 17900)"
+            total <= 18_300,
+            "descriptions total {total} chars (budget 18300)"
         );
         for (name, d) in &descs {
             assert!(
@@ -481,10 +483,11 @@ mod rule_wiring {
         // `abandon_change`'s `expiresAt` (chg-qc2tqb, resp-2z80nv); a further
         // ~1.2 KB is the bin's two acts and the `confirm {by, at}` shape
         // (resp-q48seb).
-        // 34400 → 34600: `sign_off`'s own `basis` (judgement 733).
+        // 34400 → 34600: `sign_off`'s own `basis` (judgement 733); → 35300
+        // for `search_model`'s occurrences mode (chg-7bcf3z, resp-9rp8zq).
         assert!(
-            total <= 34_600,
-            "schemas total {total} chars (budget 34600)"
+            total <= 35_300,
+            "schemas total {total} chars (budget 35300)"
         );
     }
 }

@@ -51,7 +51,13 @@ fn slug_for(project: &Path) -> String {
         .unwrap_or_else(|| "project".into());
     let safe: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let mut h: u64 = 0xcbf29ce484222325;
     for b in project.to_string_lossy().as_bytes() {
@@ -134,7 +140,10 @@ fn create(project: &Path, wt: &Path) -> Result<(), String> {
     }
     let _ = git(project, &["worktree", "prune"]);
     let path = wt.to_string_lossy().to_string();
-    git(project, &["worktree", "add", "--detach", "--force", &path, "HEAD"])?;
+    git(
+        project,
+        &["worktree", "add", "--detach", "--force", &path, "HEAD"],
+    )?;
     Ok(())
 }
 
@@ -236,7 +245,10 @@ mod tests {
             // Never clear the root here: nextest gives each test its own
             // process, so a wipe would race sibling tests already using it.
             // Slugs are unique per fixture, and /tmp is the OS's to reap.
-            std::env::set_var("SCRYER_PROBES_DIR", std::env::temp_dir().join("scryer-worktree-tests"));
+            std::env::set_var(
+                "SCRYER_PROBES_DIR",
+                std::env::temp_dir().join("scryer-worktree-tests"),
+            );
         });
     }
 
@@ -260,7 +272,10 @@ mod tests {
     /// places never shares (and corrupts) one tree.
     #[test]
     fn two_checkouts_of_one_name_get_separate_worktrees() {
-        assert_ne!(slug_for(Path::new("/a/scryer")), slug_for(Path::new("/b/scryer")));
+        assert_ne!(
+            slug_for(Path::new("/a/scryer")),
+            slug_for(Path::new("/b/scryer"))
+        );
         assert!(slug_for(Path::new("/a/my proj")).starts_with("my-proj-"));
     }
 
@@ -287,7 +302,9 @@ mod tests {
         let wt = ensure_synced(p).unwrap();
 
         assert!(fs::read_to_string(wt.join("m.rs")).unwrap().contains("two"));
-        assert!(fs::read_to_string(wt.join("new.rs")).unwrap().contains("brand new"));
+        assert!(fs::read_to_string(wt.join("new.rs"))
+            .unwrap()
+            .contains("brand new"));
         fs::remove_dir_all(&wt).ok();
     }
 
@@ -308,9 +325,14 @@ mod tests {
 
         let second = ensure_synced(p).unwrap();
         assert_eq!(first, second, "one worktree per project, reused");
-        assert!(second.join("build/cache.bin").exists(), "the build cache survives");
         assert!(
-            fs::read_to_string(second.join("m.rs")).unwrap().contains("one"),
+            second.join("build/cache.bin").exists(),
+            "the build cache survives"
+        );
+        assert!(
+            fs::read_to_string(second.join("m.rs"))
+                .unwrap()
+                .contains("one"),
             "the mutation does not"
         );
         fs::remove_dir_all(&second).ok();
@@ -326,7 +348,10 @@ mod tests {
         fs::remove_dir_all(&wt).unwrap();
 
         let again = ensure_synced(p).unwrap();
-        assert!(again.join("m.rs").exists(), "rebuilt after the directory vanished");
+        assert!(
+            again.join("m.rs").exists(),
+            "rebuilt after the directory vanished"
+        );
         fs::remove_dir_all(&again).ok();
     }
 }

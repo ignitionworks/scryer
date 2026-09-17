@@ -154,7 +154,9 @@ pub fn derive_graph(model: &ScryModel, edges: &BuildEdges) -> DerivedGraph {
         }
     }
     for (key, locs) in &model.source_map {
-        let Some(host) = resp_host.get(key.as_str()) else { continue };
+        let Some(host) = resp_host.get(key.as_str()) else {
+            continue;
+        };
         for loc in locs {
             if let Some(sym) = &loc.symbol {
                 by_symbol
@@ -199,7 +201,12 @@ pub fn derive_graph(model: &ScryModel, edges: &BuildEdges) -> DerivedGraph {
             let depth = depth_of(id.as_str());
             for s in sources {
                 if let Ok(pat) = glob::Pattern::new(&s.pattern) {
-                    v.push((id.as_str(), pat, crate::ownership::pattern_rank(&s.pattern), depth));
+                    v.push((
+                        id.as_str(),
+                        pat,
+                        crate::ownership::pattern_rank(&s.pattern),
+                        depth,
+                    ));
                 }
             }
         }
@@ -236,7 +243,11 @@ pub fn derive_graph(model: &ScryModel, edges: &BuildEdges) -> DerivedGraph {
                 break;
             }
             out.push(n.id.as_str());
-            cur = n.parent_id.as_deref().and_then(|p| node_by_id.get(p)).copied();
+            cur = n
+                .parent_id
+                .as_deref()
+                .and_then(|p| node_by_id.get(p))
+                .copied();
         }
         out
     };
@@ -420,19 +431,30 @@ mod tests {
         };
         let g = derive_graph(&m, &edges);
 
-        let audit = |id: &str| g.link_audit.iter().find(|a| a.link_id == id).unwrap().edge_count;
+        let audit = |id: &str| {
+            g.link_audit
+                .iter()
+                .find(|a| a.link_id == id)
+                .unwrap()
+                .edge_count
+        };
         assert_eq!(audit("link-1"), 1, "declared link is code-backed");
         assert_eq!(audit("link-2"), 0, "reverse claim is asserted-only");
 
         // compa→compa2: siblings the code connects, no declared link — candidate.
         assert!(
-            g.unmodeled.iter().any(|e| e.src == "compa" && e.dst == "compa2"),
+            g.unmodeled
+                .iter()
+                .any(|e| e.src == "compa" && e.dst == "compa2"),
             "unmodeled sibling pair surfaces: {:?}",
             g.unmodeled
         );
         // compa→compb crosses containers (not siblings) — propagation covers it
         // via the declared ca→cb link, so it is NOT a candidate.
-        assert!(g.unmodeled.iter().all(|e| !(e.src == "compa" && e.dst == "compb")));
+        assert!(g
+            .unmodeled
+            .iter()
+            .all(|e| !(e.src == "compa" && e.dst == "compb")));
         // Symbol pairs are volume, not architecture — never in unmodeled.
         assert!(g.unmodeled.iter().all(|e| e.src != "syma"));
 
@@ -444,10 +466,16 @@ mod tests {
                 .find(|e| e.src_node == sn && e.dst_node == dn)
         };
         let cross = find("syma", "symb").expect("cross-container leaf edge kept");
-        assert_eq!((cross.src_symbol.as_str(), cross.dst_symbol.as_str()), ("useThing", "thing"));
+        assert_eq!(
+            (cross.src_symbol.as_str(), cross.dst_symbol.as_str()),
+            ("useThing", "thing")
+        );
         assert_eq!(cross.count, 1);
         let sib = find("syma", "syma2").expect("cross-component leaf edge kept");
-        assert_eq!((sib.src_symbol.as_str(), sib.dst_symbol.as_str()), ("useThing", "zed"));
+        assert_eq!(
+            (sib.src_symbol.as_str(), sib.dst_symbol.as_str()),
+            ("useThing", "zed")
+        );
         // Only the two real edges — no containment/self rows.
         assert_eq!(g.resolved_edges.len(), 2, "{:?}", g.resolved_edges);
     }
@@ -464,25 +492,41 @@ mod tests {
         m.nodes.push(node("cb", Kind::Container, Some("sys")));
         m.boundaries.insert(
             "ca".into(),
-            vec![Source { pattern: "a/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "a/**/*".into(),
+                comment: None,
+            }],
         );
         m.boundaries.insert(
             "cb".into(),
-            vec![Source { pattern: "b/**/*".into(), comment: None }],
+            vec![Source {
+                pattern: "b/**/*".into(),
+                comment: None,
+            }],
         );
 
         let edges = BuildEdges {
             symbol_edges: vec![
                 // Cross-container: counts via file-owner fallback.
-                CachedEdge { src: "a/m.ts#f@1".into(), dst: "b/n.ts#g@1".into() },
+                CachedEdge {
+                    src: "a/m.ts#f@1".into(),
+                    dst: "b/n.ts#g@1".into(),
+                },
                 // Same container: containment, never evidence.
-                CachedEdge { src: "a/m.ts#f@1".into(), dst: "a/o.ts#h@1".into() },
+                CachedEdge {
+                    src: "a/m.ts#f@1".into(),
+                    dst: "a/o.ts#h@1".into(),
+                },
             ],
         };
         let g = derive_graph(&m, &edges);
         assert_eq!(
             g.unmodeled,
-            vec![DerivedEdge { src: "ca".into(), dst: "cb".into(), count: 1 }]
+            vec![DerivedEdge {
+                src: "ca".into(),
+                dst: "cb".into(),
+                count: 1
+            }]
         );
     }
 
@@ -499,9 +543,27 @@ mod tests {
         m.nodes.push(node("c0", Kind::Container, Some("sys")));
         m.nodes.push(node("c1", Kind::Container, Some("sys")));
         m.nodes.push(node("c2", Kind::Container, Some("sys")));
-        m.boundaries.insert("c0".into(), vec![Source { pattern: "**/*".into(), comment: None }]);
-        m.boundaries.insert("c1".into(), vec![Source { pattern: "a/**/*".into(), comment: None }]);
-        m.boundaries.insert("c2".into(), vec![Source { pattern: "b/**/*".into(), comment: None }]);
+        m.boundaries.insert(
+            "c0".into(),
+            vec![Source {
+                pattern: "**/*".into(),
+                comment: None,
+            }],
+        );
+        m.boundaries.insert(
+            "c1".into(),
+            vec![Source {
+                pattern: "a/**/*".into(),
+                comment: None,
+            }],
+        );
+        m.boundaries.insert(
+            "c2".into(),
+            vec![Source {
+                pattern: "b/**/*".into(),
+                comment: None,
+            }],
+        );
 
         let edges = BuildEdges {
             // Both endpoints are also matched by c0's `**/*`; the specific owners
@@ -514,7 +576,11 @@ mod tests {
         let g = derive_graph(&m, &edges);
         assert_eq!(
             g.unmodeled,
-            vec![DerivedEdge { src: "c1".into(), dst: "c2".into(), count: 1 }],
+            vec![DerivedEdge {
+                src: "c1".into(),
+                dst: "c2".into(),
+                count: 1
+            }],
             "narrow boundaries own their files; the `**/*` net never wins a contested file"
         );
     }

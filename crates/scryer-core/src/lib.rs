@@ -8,6 +8,7 @@ pub mod ears;
 pub mod health;
 pub mod history;
 pub mod locate;
+pub mod occurrences;
 pub mod ownership;
 pub mod refusals;
 pub mod worktree;

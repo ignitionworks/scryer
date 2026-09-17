@@ -40,13 +40,7 @@ pub const SKIP_DIRS: &[&str] = &[
 
 /// Directories that are build output and uninteresting for structure.
 pub const SKIP_BUILD_DIRS: &[&str] = &[
-    "dist",
-    "build",
-    "out",
-    "target",
-    ".build",
-    "bin",
-    "obj", // .NET
+    "dist", "build", "out", "target", ".build", "bin", "obj", // .NET
     "pkg", // wasm-pack
 ];
 
@@ -58,13 +52,13 @@ pub const SOURCE_EXTS: &[&str] = &[
     "ts", "mts", "cts", "tsx", // TypeScript
     "js", "jsx", "mjs", "cjs", // JavaScript
     "vue", // Vue single-file components (script parsed as TypeScript)
-    "py", "pyi", // Python
-    "go", // Go
+    "py", "pyi",  // Python
+    "go",   // Go
     "java", // Java
-    "rb", // Ruby
+    "rb",   // Ruby
     "c", "h", // C
     "cpp", "cc", "cxx", "hpp", "hh", "hxx", // C++
-    "cs", // C#
+    "cs",  // C#
     "php", // PHP
     "clj", "cljs", "cljc", "cljr", // Clojure / ClojureScript / cross-platform / CLR
 ];
@@ -105,13 +99,11 @@ pub fn is_product_code(rel_path: &str) -> bool {
 fn classify_file(name: &str, rel_path: &Path) -> Option<Category> {
     // Manifests
     match name {
-        "package.json" | "Cargo.toml" | "go.mod" | "pyproject.toml" | "setup.py"
-        | "setup.cfg" | "pom.xml" | "build.gradle" | "build.gradle.kts" | "Gemfile"
-        | "composer.json" | "mix.exs" | "pubspec.yaml" | "Package.swift"
-        | "Makefile" | "CMakeLists.txt" | "deno.json" | "deno.jsonc"
-        | "bun.lock" | "flake.nix"
-        | "deps.edn" | "project.clj" | "shadow-cljs.edn" | "bb.edn"
-        | "build.boot" => return Some(Category::Manifest),
+        "package.json" | "Cargo.toml" | "go.mod" | "pyproject.toml" | "setup.py" | "setup.cfg"
+        | "pom.xml" | "build.gradle" | "build.gradle.kts" | "Gemfile" | "composer.json"
+        | "mix.exs" | "pubspec.yaml" | "Package.swift" | "Makefile" | "CMakeLists.txt"
+        | "deno.json" | "deno.jsonc" | "bun.lock" | "flake.nix" | "deps.edn" | "project.clj"
+        | "shadow-cljs.edn" | "bb.edn" | "build.boot" => return Some(Category::Manifest),
         _ => {}
     }
     if name.ends_with(".csproj") || name.ends_with(".fsproj") || name.ends_with(".sln") {
@@ -120,12 +112,20 @@ fn classify_file(name: &str, rel_path: &Path) -> Option<Category> {
 
     // Infrastructure
     match name {
-        "fly.toml" | "Procfile" | "vercel.json" | "netlify.toml" | "render.yaml"
-        | "railway.json" | "app.yaml" | "Jenkinsfile" | "shell.nix"
-        | "docker-compose.yml" | "docker-compose.yaml"
-        | "serverless.yml" | "serverless.yaml" | "skaffold.yaml" => {
-            return Some(Category::Infrastructure)
-        }
+        "fly.toml"
+        | "Procfile"
+        | "vercel.json"
+        | "netlify.toml"
+        | "render.yaml"
+        | "railway.json"
+        | "app.yaml"
+        | "Jenkinsfile"
+        | "shell.nix"
+        | "docker-compose.yml"
+        | "docker-compose.yaml"
+        | "serverless.yml"
+        | "serverless.yaml"
+        | "skaffold.yaml" => return Some(Category::Infrastructure),
         _ => {}
     }
     if name.starts_with("Dockerfile") {
@@ -149,7 +149,8 @@ fn classify_file(name: &str, rel_path: &Path) -> Option<Category> {
     }
     // CI/CD — normalized so the `/`-separated prefixes match on Windows too.
     let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-    if rel_str.starts_with(".github/workflows/") && (name.ends_with(".yml") || name.ends_with(".yaml"))
+    if rel_str.starts_with(".github/workflows/")
+        && (name.ends_with(".yml") || name.ends_with(".yaml"))
     {
         return Some(Category::Infrastructure);
     }
@@ -160,7 +161,10 @@ fn classify_file(name: &str, rel_path: &Path) -> Option<Category> {
         return Some(Category::Infrastructure);
     }
     // K8s manifests in conventional directories
-    if (rel_str.starts_with("k8s/") || rel_str.starts_with("kubernetes/") || rel_str.starts_with("deploy/") || rel_str.starts_with("infra/"))
+    if (rel_str.starts_with("k8s/")
+        || rel_str.starts_with("kubernetes/")
+        || rel_str.starts_with("deploy/")
+        || rel_str.starts_with("infra/"))
         && (name.ends_with(".yml") || name.ends_with(".yaml"))
     {
         return Some(Category::Infrastructure);
@@ -270,11 +274,17 @@ impl TreeNode {
         // Annotated files first
         for (name, label) in &annotated_files {
             idx += 1;
-            let connector = if idx == total_items { "└── " } else { "├── " };
+            let connector = if idx == total_items {
+                "└── "
+            } else {
+                "├── "
+            };
             let padding = 30usize.saturating_sub(name.len());
             out.push_str(&format!(
                 "{}{}{}{} [{}]\n",
-                prefix, connector, name,
+                prefix,
+                connector,
+                name,
                 " ".repeat(padding),
                 label
             ));
@@ -284,14 +294,22 @@ impl TreeNode {
         // manifests.
         for name in plain_files.iter().take(shown_plain) {
             idx += 1;
-            let connector = if idx == total_items { "└── " } else { "├── " };
+            let connector = if idx == total_items {
+                "└── "
+            } else {
+                "├── "
+            };
             out.push_str(&format!("{}{}{}\n", prefix, connector, name));
         }
 
         // Interesting dirs (have annotated descendants) — recurse
         for (name, child) in &interesting_dirs {
             idx += 1;
-            let connector = if idx == total_items { "└── " } else { "├── " };
+            let connector = if idx == total_items {
+                "└── "
+            } else {
+                "├── "
+            };
             let extension = if idx == total_items { "    " } else { "│   " };
             out.push_str(&format!("{}{}{}/\n", prefix, connector, name));
             let child_prefix = format!("{}{}", prefix, extension);
@@ -301,7 +319,11 @@ impl TreeNode {
         // Context dirs (no annotations, just structure) — recurse to show shape
         for (name, child) in &context_dirs {
             idx += 1;
-            let connector = if idx == total_items { "└── " } else { "├── " };
+            let connector = if idx == total_items {
+                "└── "
+            } else {
+                "├── "
+            };
             let extension = if idx == total_items { "    " } else { "│   " };
             out.push_str(&format!("{}{}{}/\n", prefix, connector, name));
             let child_prefix = format!("{}{}", prefix, extension);
@@ -311,8 +333,15 @@ impl TreeNode {
         // Hidden content (unannotated files or dirs beyond depth limit)
         if hidden_count > 0 {
             idx += 1;
-            let connector = if idx == total_items { "└── " } else { "├── " };
-            out.push_str(&format!("{}{}... ({} more)\n", prefix, connector, hidden_count));
+            let connector = if idx == total_items {
+                "└── "
+            } else {
+                "├── "
+            };
+            out.push_str(&format!(
+                "{}{}... ({} more)\n",
+                prefix, connector, hidden_count
+            ));
         }
     }
 }
@@ -322,10 +351,23 @@ impl TreeNode {
 /// Looks for `.git`, manifest files, or common source directories at the root level.
 pub fn is_codebase(path: &Path) -> bool {
     const MANIFEST_FILES: &[&str] = &[
-        "package.json", "Cargo.toml", "go.mod", "pyproject.toml", "setup.py",
-        "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile",
-        "composer.json", "mix.exs", "pubspec.yaml", "Package.swift",
-        "Makefile", "CMakeLists.txt", "deno.json", "flake.nix",
+        "package.json",
+        "Cargo.toml",
+        "go.mod",
+        "pyproject.toml",
+        "setup.py",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Gemfile",
+        "composer.json",
+        "mix.exs",
+        "pubspec.yaml",
+        "Package.swift",
+        "Makefile",
+        "CMakeLists.txt",
+        "deno.json",
+        "flake.nix",
     ];
     if path.join(".git").exists() {
         return true;
@@ -497,13 +539,19 @@ mod tests {
 
         let tree = project_structure(root).unwrap();
         assert!(tree.contains("main.rs"), "source files render: {tree}");
-        assert!(tree.contains("auth.rs"), "nested source structure renders: {tree}");
+        assert!(
+            tree.contains("auth.rs"),
+            "nested source structure renders: {tree}"
+        );
         assert!(tree.contains("Cargo.toml"), "{tree}");
         assert!(
             tree.contains("f00.rs") && !tree.contains("f29.rs"),
             "per-dir cap holds: {tree}"
         );
-        assert!(tree.contains("(5 more)"), "the collapsed tail is counted: {tree}");
+        assert!(
+            tree.contains("(5 more)"),
+            "the collapsed tail is counted: {tree}"
+        );
     }
 
     #[test]
@@ -539,10 +587,7 @@ mod tests {
     #[test]
     fn classify_ci_files() {
         assert!(matches!(
-            classify_file(
-                "deploy.yml",
-                Path::new(".github/workflows/deploy.yml")
-            ),
+            classify_file("deploy.yml", Path::new(".github/workflows/deploy.yml")),
             Some(Category::Infrastructure)
         ));
         assert!(matches!(
@@ -581,7 +626,10 @@ mod tests {
     #[test]
     fn a_git_folder_or_manifest_marks_a_codebase() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!is_codebase(dir.path()), "an empty directory is not a codebase");
+        assert!(
+            !is_codebase(dir.path()),
+            "an empty directory is not a codebase"
+        );
 
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         assert!(is_codebase(dir.path()));

@@ -442,6 +442,99 @@ fn normalize_project_rel(model_ref: &scryer_core::ModelRef, path: &str) -> Strin
     file.trim_start_matches("./").to_string()
 }
 
+/// THE OCCURRENCES MODE of `search_model` (resp-9rp8zq, L315 F): every use of
+/// one exact term in the model's prose, with no cap and no ranking.
+///
+/// Not a method on the tool router — it is called from `search_model` before
+/// the ranked search starts, so the two questions share a door without sharing
+/// a body.
+impl ScryerServer {
+    fn model_occurrences(
+        &self,
+        model_ref: &crate::helpers::ResolvedProject,
+        occ: &Occurrences,
+    ) -> Result<CallToolResult, McpError> {
+        let term = occ.term.trim();
+        if term.is_empty() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Give `occurrences.term` — the exact word or phrase to find every use of.",
+            )]));
+        }
+        let want = occ
+            .layers
+            .as_deref()
+            .unwrap_or("plan")
+            .trim()
+            .to_lowercase();
+        if !matches!(want.as_str(), "plan" | "planned" | "committed" | "both") {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "`occurrences.layers` is \"plan\", \"committed\" or \"both\" — not \"{want}\"."
+            ))]));
+        }
+        let committed = match scryer_core::read_model_at(model_ref) {
+            Ok(m) => m,
+            Err(e) => {
+                return Ok(CallToolResult::error(vec![Content::text(read_fail(
+                    "model", model_ref, &e,
+                ))]));
+            }
+        };
+        // The plan is seeded from committed when it has never diverged, so a
+        // project with no draft still answers its own prose rather than
+        // nothing.
+        let planned = scryer_core::read_planned_at(model_ref).unwrap_or_else(|_| committed.clone());
+
+        let mut layers: Vec<(&'static str, &scryer_core::ScryModel)> = Vec::new();
+        if want == "committed" || want == "both" {
+            layers.push(("committed", &committed));
+        }
+        if want != "committed" {
+            layers.push(("planned", &planned));
+        }
+
+        let hits = scryer_core::occurrences::find(&layers, term, !occ.substring);
+        // The two counts a summary is written from: how many USES, and in how
+        // many PLACES — "all 22 uses of proxy in the Yada component" needs
+        // both, and a place is the node or group that holds the prose, not the
+        // element (a node's description and its own directive are one place).
+        let mut places: std::collections::BTreeSet<(&str, &str)> =
+            std::collections::BTreeSet::new();
+        for h in &hits {
+            places.insert((h.layer, h.host_id.as_deref().unwrap_or(h.id.as_str())));
+        }
+        let note = if hits.is_empty() {
+            Some(format!(
+                "No use of \"{term}\" in the model's prose ({}){}. The prose read is claims, \
+                 descriptions and directives — a node's NAME, a property's LABEL and a \
+                 technology badge are identifiers, not prose, and are never hits.",
+                want,
+                if occ.substring {
+                    ""
+                } else {
+                    ", whole-word (pass substring: true to match inside longer words)"
+                }
+            ))
+        } else {
+            None
+        };
+        let mut payload = serde_json::json!({
+            "view": "occurrences",
+            "term": term,
+            "wholeWord": !occ.substring,
+            "layers": want,
+            "total": hits.len(),
+            "places": places.len(),
+            "occurrences": hits,
+            "note": note,
+        });
+        strip_fields_compact(&mut payload);
+        model_ref.stamp(&mut payload);
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()),
+        )]))
+    }
+}
+
 #[tool_router(router = tool_router_read, vis = "pub(crate)")]
 impl ScryerServer {
     #[tool(
@@ -577,10 +670,15 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "Search nodes by free text: space-separated terms must ALL match somewhere on the node \
-         (name, description, technology, statements, property labels), as substring or close \
-         edit-distance. Ranked, each hit with id, kind, breadcrumb, `score`, and matched fields. \
-         Optional `kind` filter; top 50. Then read_model `{node}` into a hit.\n\
+        description = "Two searches, one door. `query`: rank NODES by free text — space-separated terms must \
+         ALL match somewhere on the node (name, description, technology, statements, property \
+         labels), as substring or close edit-distance; each hit with id, kind, breadcrumb, \
+         `score` and matched fields, top 50, then read_model `{node}` into one. \
+         `occurrences {term, substring, layers}`: EVERY use of one exact term in the model's \
+         prose — claims, descriptions and directives — case-insensitive, whole-word by default, \
+         NO cap and no ranking, each hit naming the element by id with the sentence around the \
+         term, on the plan, committed, or both. The second is the full-text read a sweep or a \
+         reader after a word wants; the first is for orienting.\n\
          Rules: loop-orient"
     )]
     pub fn search_model(
@@ -588,6 +686,15 @@ impl ScryerServer {
         Parameters(req): Parameters<SearchModelRequest>,
     ) -> Result<CallToolResult, McpError> {
         let model_ref = resolve_model_ref(req.project.as_deref())?;
+        if let Some(occ) = &req.occurrences {
+            return self.model_occurrences(&model_ref, occ);
+        }
+        let Some(query) = req.query.as_deref() else {
+            return Ok(CallToolResult::error(vec![Content::text(
+                "Give `query` (the ranked node search) or `occurrences {term}` (every use of a \
+                 word in the model's prose) — search_model answers one question or the other.",
+            )]));
+        };
         let model = match read_layer(&model_ref, req.layer) {
             Ok(m) => m,
             Err(e) => {
@@ -606,11 +713,7 @@ impl ScryerServer {
             Some(k) => Some(parse_kind(k)?),
             None => None,
         };
-        let terms: Vec<String> = req
-            .query
-            .split_whitespace()
-            .map(|t| t.to_lowercase())
-            .collect();
+        let terms: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
         if terms.is_empty() {
             return Ok(CallToolResult::error(vec![Content::text("Empty query.")]));
         }
@@ -2574,7 +2677,8 @@ mod tests {
         let r = server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project),
-                query: "forged".into(),
+                occurrences: None,
+                query: Some("forged".into()),
                 kind: None,
                 layer: Layer::Plan,
             }))
@@ -2782,7 +2886,8 @@ mod tests {
         let r = server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project.clone()),
-                query: "verify hash".into(),
+                occurrences: None,
+                query: Some("verify hash".into()),
                 kind: None,
                 layer: Layer::Plan,
             }))
@@ -2792,7 +2897,8 @@ mod tests {
         let r = server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project),
-                query: "Auth".into(),
+                occurrences: None,
+                query: Some("Auth".into()),
                 kind: Some("symbol".into()),
                 layer: Layer::Plan,
             }))
@@ -2808,7 +2914,8 @@ mod tests {
         let r = server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project),
-                query: "verfy".into(),
+                occurrences: None,
+                query: Some("verfy".into()),
                 kind: None,
                 layer: Layer::Plan,
             }))
@@ -2826,7 +2933,8 @@ mod tests {
         let r = server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project),
-                query: "elephant".into(),
+                occurrences: None,
+                query: Some("elephant".into()),
                 kind: None,
                 layer: Layer::Plan,
             }))
@@ -2854,7 +2962,8 @@ mod tests {
         let r = server
             .search_model(Parameters(SearchModelRequest {
                 project: Some(project),
-                query: "charges".into(),
+                occurrences: None,
+                query: Some("charges".into()),
                 kind: None,
                 layer: Layer::Plan,
             }))
@@ -3891,5 +4000,195 @@ mod tests {
                 .unwrap(),
         );
         assert!(v["note"].as_str().unwrap().contains("No model intent maps"));
+    }
+    // ---- resp-9rp8zq: the occurrences mode on search_model
+
+    fn occurrences_call(
+        server: &ScryerServer,
+        project: &str,
+        term: &str,
+        substring: bool,
+        layers: Option<&str>,
+    ) -> CallToolResult {
+        server
+            .search_model(Parameters(SearchModelRequest {
+                project: Some(project.to_string()),
+                occurrences: Some(Occurrences {
+                    term: term.to_string(),
+                    substring,
+                    layers: layers.map(str::to_string),
+                }),
+                query: None,
+                kind: None,
+                layer: Layer::Plan,
+            }))
+            .unwrap()
+    }
+
+    /// resp-9rp8zq: `search_model {occurrences}` answers EVERY use of one exact
+    /// term in the model's prose — claims, descriptions and directives — each
+    /// hit naming its element by id with the sentence around the term, and no
+    /// ranking anywhere in it. The ranked search is still there under `query`;
+    /// one door, two questions, and giving neither is refused rather than
+    /// guessed at.
+    #[test]
+    fn resp_9rp8zq_the_occurrences_mode_answers_every_use_with_its_sentence() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = dir.path().to_string_lossy().to_string();
+        let mut m = ScryModel::new();
+        m.nodes.push(node("node-1", Kind::System, "Acme", None));
+        let mut api = node("node-2", Kind::Container, "API", Some("node-1"));
+        api.description = Some("Holds the proxy. The proxy is not a proxying thing.".into());
+        api.directives = vec!["must never log a proxy token".into()];
+        let mut claim = resp("resp-1", "**Answers** through the proxy");
+        claim.directives = vec!["must name the proxy".into()];
+        api.responsibilities = vec![claim, resp("resp-2", "**Refuses** a forged credential")];
+        m.nodes.push(api);
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+
+        let server = ScryerServer::new();
+        let v = result_json(&occurrences_call(&server, &project, "proxy", false, None));
+        assert_eq!(v["view"], "occurrences");
+        assert_eq!(v["term"], "proxy");
+        assert_eq!(
+            v["wholeWord"], true,
+            "whole-word is not the caller's to remember"
+        );
+        assert_eq!(v["layers"], "plan");
+        assert_eq!(v["total"], 5, "every use: {v}");
+        assert_eq!(
+            v["places"], 1,
+            "all of them in one place — the node that holds the prose"
+        );
+        assert!(v["occurrences"][0]["score"].is_null(), "no ranking: {v}");
+
+        let hits = v["occurrences"].as_array().expect("occurrences").clone();
+        let shape: Vec<(String, String, String)> = hits
+            .iter()
+            .map(|h| {
+                (
+                    h["kind"].as_str().unwrap_or("").to_string(),
+                    h["id"].as_str().unwrap_or("").to_string(),
+                    h["sentence"].as_str().unwrap_or("").to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (
+                    "description".to_string(),
+                    "node-2".to_string(),
+                    "Holds the proxy.".to_string()
+                ),
+                (
+                    "description".to_string(),
+                    "node-2".to_string(),
+                    "The proxy is not a proxying thing.".to_string()
+                ),
+                (
+                    "directive".to_string(),
+                    "node-2".to_string(),
+                    "must never log a proxy token".to_string()
+                ),
+                (
+                    "claim".to_string(),
+                    "resp-1".to_string(),
+                    "**Answers** through the proxy".to_string()
+                ),
+                (
+                    "directive".to_string(),
+                    "resp-1".to_string(),
+                    "must name the proxy".to_string()
+                ),
+            ],
+            "the element by id, with the sentence around the term: {shape:?}"
+        );
+        assert_eq!(hits[3]["hostId"], "node-2", "and where the claim sits");
+        assert_eq!(hits[3]["path"], "Acme / API", "and its place");
+        assert_eq!(hits[3]["layer"], "planned");
+
+        // The substring flag finds "proxied" as well; the default did not.
+        let v = result_json(&occurrences_call(&server, &project, "proxy", true, None));
+        assert_eq!(v["total"], 6, "one more, inside 'proxying': {v}");
+        assert_eq!(v["wholeWord"], false);
+
+        // A term nobody wrote says so, and says what prose is read.
+        let v = result_json(&occurrences_call(&server, &project, "widget", false, None));
+        assert_eq!(v["total"], 0);
+        let note = v["note"].as_str().expect("a note");
+        assert!(note.contains("whole-word"), "{note}");
+        assert!(note.contains("NAME"), "it names what is NOT prose: {note}");
+
+        // BOTH layers, told apart. The plan reworded the claim.
+        let mut planned = m.clone();
+        planned.nodes[1].responsibilities[0].statement = "**Answers** past the proxy".into();
+        scryer_core::write_planned_at(&model_ref, &planned).unwrap();
+        let v = result_json(&occurrences_call(
+            &server,
+            &project,
+            "proxy",
+            false,
+            Some("both"),
+        ));
+        assert_eq!(v["layers"], "both");
+        assert_eq!(v["total"], 10, "five in each layer: {v}");
+        let layers: Vec<&str> = v["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["layer"].as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(layers.iter().filter(|l| **l == "committed").count(), 5);
+        assert_eq!(layers.iter().filter(|l| **l == "planned").count(), 5);
+        let v = result_json(&occurrences_call(
+            &server,
+            &project,
+            "proxy",
+            false,
+            Some("committed"),
+        ));
+        assert_eq!(v["total"], 5, "committed alone");
+        assert!(v["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|h| h["layer"] == "committed"));
+
+        // The two questions share one door, and neither given is refused.
+        let neither = server
+            .search_model(Parameters(SearchModelRequest {
+                project: Some(project.clone()),
+                occurrences: None,
+                query: None,
+                kind: None,
+                layer: Layer::Plan,
+            }))
+            .unwrap();
+        assert_eq!(neither.is_error, Some(true));
+        assert!(result_text(&neither).contains("one question or the other"));
+        let empty = occurrences_call(&server, &project, "  ", false, None);
+        assert_eq!(empty.is_error, Some(true));
+        let wrong = occurrences_call(&server, &project, "proxy", false, Some("everything"));
+        assert_eq!(wrong.is_error, Some(true));
+        assert!(result_text(&wrong).contains("\"both\""));
+
+        // And the ranked search still answers its own question.
+        let v = result_json(
+            &server
+                .search_model(Parameters(SearchModelRequest {
+                    project: Some(project),
+                    occurrences: None,
+                    query: Some("forged".into()),
+                    kind: None,
+                    layer: Layer::Plan,
+                }))
+                .unwrap(),
+        );
+        assert!(
+            v["results"][0]["score"].is_number(),
+            "the ranked search answers `results` with scores, as before: {v}"
+        );
     }
 }

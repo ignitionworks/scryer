@@ -491,12 +491,51 @@ pub(crate) fn open_changes_line(m: &ScryModel) -> String {
 /// This is a migration switch, not a project setting — when every caller
 /// passes a basis it goes away and the requirement is simply the contract.
 pub(crate) fn basis_required() -> bool {
-    std::env::var("SCRYER_REQUIRE_BASIS").is_ok_and(|v| {
-        matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+    #[cfg(test)]
+    if let Some(forced) = basis_switch_override() {
+        return forced;
+    }
+    // READ ONCE, at the first write of the process. A migration switch is a
+    // property of how the engine was started, not something that changes under
+    // a running session — and reading it per call made it process-global STATE
+    // that a test setting it could leak into whatever ran beside it (two tests
+    // went red that way, under nothing but cargo's thread parallelism). The
+    // parser is tested on its own strings below; the tests drive the switch
+    // through a thread-local, which cannot leak.
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| basis_switch_reads(std::env::var("SCRYER_REQUIRE_BASIS").ok().as_deref()))
+}
+
+/// What the switch's environment variable means. `1`, `true`, `yes` and `on`
+/// (in any case, with space around them) turn it on; ABSENT and anything else
+/// leave it off — a migration switch defaults to the behaviour every existing
+/// caller already has.
+fn basis_switch_reads(raw: Option<&str>) -> bool {
+    matches!(
+        raw.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    )
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The tests' handle on the switch: per-thread, so a test that turns it on
+    /// cannot refuse a write in the test running beside it.
+    static BASIS_SWITCH: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn basis_switch_override() -> Option<bool> {
+    BASIS_SWITCH.with(|c| c.get())
+}
+
+/// Run `body` with the basis requirement forced on or off, on this thread only.
+#[cfg(test)]
+pub(crate) fn with_basis_switch<T>(on: bool, body: impl FnOnce() -> T) -> T {
+    let prior = BASIS_SWITCH.with(|c| c.replace(Some(on)));
+    let out = body();
+    BASIS_SWITCH.with(|c| c.set(prior));
+    out
 }
 
 /// The basis check every model write passes: refuse a write that names none
@@ -546,6 +585,28 @@ pub(crate) fn say_basis(msg: &mut String, basis: Option<String>) {
 pub(crate) fn stamp_basis(payload: &mut serde_json::Value, basis: Option<String>) {
     if let (serde_json::Value::Object(o), Some(b)) = (payload, basis) {
         o.insert("basis".into(), serde_json::Value::String(b));
+    }
+}
+
+#[cfg(test)]
+mod basis_switch_tests {
+    /// resp-azc2d9's switch, on its own strings — which is the whole of what
+    /// the environment variable contributes. Testing it here rather than by
+    /// setting the variable is the point: the variable is process-global, and
+    /// a test that sets it changes the answer for whatever runs beside it.
+    #[test]
+    fn the_switch_reads_the_words_that_mean_on_and_nothing_else() {
+        for on in ["1", "true", "TRUE", " yes ", "On"] {
+            assert!(super::basis_switch_reads(Some(on)), "{on:?} means on");
+        }
+        for off in ["0", "false", "", " ", "maybe", "2", "off"] {
+            assert!(!super::basis_switch_reads(Some(off)), "{off:?} does not");
+        }
+        assert!(
+            !super::basis_switch_reads(None),
+            "and absent is off — a migration switch defaults to what every \
+             existing caller already does"
+        );
     }
 }
 

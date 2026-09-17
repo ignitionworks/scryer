@@ -29,14 +29,18 @@ pub enum Kind {
 /// conformance role.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[schemars(description = "A responsibility: a verb-led business statement with optional concern tag.")]
+#[schemars(
+    description = "A responsibility: a verb-led business statement with optional concern tag."
+)]
 pub struct Responsibility {
     pub id: String,
     /// Verb-led business statement of accountability. No mechanism words.
     /// EARS-shaped (condition first, response last) and may carry display
     /// markup — `**bold**` on the keyword and response verb — which the UI
     /// renders and strips for comparison (statement-ears).
-    #[schemars(description = "Verb-led EARS statement, **bold** on the keyword and response verb.")]
+    #[schemars(
+        description = "Verb-led EARS statement, **bold** on the keyword and response verb."
+    )]
     pub statement: String,
     /// The cross-cutting concern this responsibility serves — at most ONE
     /// kebab-case slug (e.g. "auth", "idempotency"), referencing an entry in
@@ -535,7 +539,10 @@ mod tests {
         m.nodes = vec![root, mid, leaf];
 
         let inh = inherited_directives(&m, "leaf");
-        assert_eq!(inh.iter().map(|i| i.node_id.as_str()).collect::<Vec<_>>(), vec!["mid", "root"]);
+        assert_eq!(
+            inh.iter().map(|i| i.node_id.as_str()).collect::<Vec<_>>(),
+            vec!["mid", "root"]
+        );
     }
 
     /// A symbol with no responsibilities or properties — and not external — is
@@ -544,7 +551,9 @@ mod tests {
     #[test]
     fn a_contentless_internal_symbol_is_empty() {
         let node = |json: &str| -> Node { serde_json::from_str(json).unwrap() };
-        assert!(is_node_empty(&node(r#"{ "id": "n1", "kind": "symbol", "name": "S" }"#)));
+        assert!(is_node_empty(&node(
+            r#"{ "id": "n1", "kind": "symbol", "name": "S" }"#
+        )));
 
         assert!(!is_node_empty(&node(
             r#"{ "id": "n1", "kind": "symbol", "name": "S",
@@ -558,6 +567,8 @@ mod tests {
             r#"{ "id": "n1", "kind": "symbol", "name": "S", "external": true }"#
         )));
         // Structural nodes carry meaning through their children — never "empty".
-        assert!(!is_node_empty(&node(r#"{ "id": "n1", "kind": "component", "name": "C" }"#)));
+        assert!(!is_node_empty(&node(
+            r#"{ "id": "n1", "kind": "component", "name": "C" }"#
+        )));
     }
 }

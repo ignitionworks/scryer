@@ -413,12 +413,24 @@ mod tests {
             <testcase classname="app" name="reads the config :: with defaults"/>
         </testsuite></testsuites>"#;
         let map = attach(&[
-            ("resp-1", "crates/scryer-core/src/storage.rs", Some("stamp_touches_dates_only_truth_changes")),
-            ("resp-2", "tests/config.spec.ts", Some("reads the config :: with defaults")),
+            (
+                "resp-1",
+                "crates/scryer-core/src/storage.rs",
+                Some("stamp_touches_dates_only_truth_changes"),
+            ),
+            (
+                "resp-2",
+                "tests/config.spec.ts",
+                Some("reads the config :: with defaults"),
+            ),
         ]);
         let m = match_report(&map, &parse_junit(xml).unwrap());
         assert_eq!(m.claims["resp-1"].outcome, TestOutcome::Passed);
-        assert_eq!(m.claims["resp-2"].outcome, TestOutcome::Passed, "spaced :: is a title, not a path");
+        assert_eq!(
+            m.claims["resp-2"].outcome,
+            TestOutcome::Passed,
+            "spaced :: is a title, not a path"
+        );
         assert!(m.unseen.is_empty());
     }
 

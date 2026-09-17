@@ -77,8 +77,7 @@ pub struct LocateResult {
 /// project-relative paths, but `SourceLocation.pattern` documents glob support,
 /// so a glob anchor must still be findable from the files it covers.
 fn pattern_covers(pattern: &str, file: &str) -> bool {
-    pattern == file
-        || glob::Pattern::new(pattern).is_ok_and(|p| p.matches(file))
+    pattern == file || glob::Pattern::new(pattern).is_ok_and(|p| p.matches(file))
 }
 
 /// Resolve `file` (project-relative, `/`-separated) against the model. Pass the
@@ -123,7 +122,10 @@ pub fn locate(model: &ScryModel, file: &str, symbol: Option<&str>) -> LocateResu
 
     // The finest node mapping the file (exact-path source-map entries), with
     // the boundary owner as the fallback scope for unmapped files.
-    let fallback = boundary_owner.as_ref().map(|o| o.id.clone()).unwrap_or_default();
+    let fallback = boundary_owner
+        .as_ref()
+        .map(|o| o.id.clone())
+        .unwrap_or_default();
     let finest = owning_node_for_location(model, &fallback, file, symbol);
     let owner_chain: Vec<OwnerLink> = if finest.is_empty() {
         Vec::new()
@@ -204,7 +206,9 @@ pub fn locate_at(
         .into_iter()
         .filter(|c| {
             located_ids.contains(c.id.as_str())
-                || c.owner_id.as_deref().is_some_and(|o| located_ids.contains(o))
+                || c.owner_id
+                    .as_deref()
+                    .is_some_and(|o| located_ids.contains(o))
         })
         .collect();
 
@@ -218,7 +222,11 @@ pub fn locate_at(
             .join(" / ")
     });
 
-    Ok(LocateReport { result, path, pending })
+    Ok(LocateReport {
+        result,
+        path,
+        pending,
+    })
 }
 
 fn owner_link(model: &ScryModel, id: &str) -> Option<OwnerLink> {
@@ -316,7 +324,13 @@ mod tests {
     use super::*;
     use crate::ScryModel;
 
-    fn node(id: &str, kind: &str, name: &str, parent: Option<&str>, resp: &[(&str, &str)]) -> crate::Node {
+    fn node(
+        id: &str,
+        kind: &str,
+        name: &str,
+        parent: Option<&str>,
+        resp: &[(&str, &str)],
+    ) -> crate::Node {
         let resps: Vec<_> = resp
             .iter()
             .map(|(rid, s)| serde_json::json!({ "id": rid, "statement": s }))
@@ -337,18 +351,32 @@ mod tests {
     fn model() -> ScryModel {
         let mut m = ScryModel::new();
         m.nodes.push(node("sys", "system", "Acme", None, &[]));
-        m.nodes.push(node("api", "container", "API", Some("sys"), &[]));
-        m.nodes.push(node("auth", "component", "Auth", Some("api"), &[]));
+        m.nodes
+            .push(node("api", "container", "API", Some("sys"), &[]));
+        m.nodes
+            .push(node("auth", "component", "Auth", Some("api"), &[]));
         m.nodes.push(node(
-            "vt", "symbol", "verify_token", Some("auth"),
+            "vt",
+            "symbol",
+            "verify_token",
+            Some("auth"),
             &[("r-vt", "rejects forged credentials")],
         ));
         m.nodes.push(node(
-            "hp", "symbol", "hash_password", Some("auth"),
+            "hp",
+            "symbol",
+            "hash_password",
+            Some("auth"),
             &[("r-hp", "stores only salted hashes")],
         ));
-        m.source_map.insert("r-vt".into(), vec![loc("src/auth.rs", Some("verify_token"))]);
-        m.source_map.insert("r-hp".into(), vec![loc("src/auth.rs", Some("hash_password"))]);
+        m.source_map.insert(
+            "r-vt".into(),
+            vec![loc("src/auth.rs", Some("verify_token"))],
+        );
+        m.source_map.insert(
+            "r-hp".into(),
+            vec![loc("src/auth.rs", Some("hash_password"))],
+        );
         m.boundaries.insert(
             "api".into(),
             vec![serde_json::from_value(serde_json::json!({ "pattern": "src/**/*" })).unwrap()],
@@ -363,7 +391,10 @@ mod tests {
         // Two symbols tie for deepest → chain starts at their component.
         let ids: Vec<&str> = res.owner_chain.iter().map(|o| o.id.as_str()).collect();
         assert_eq!(ids, ["auth", "api", "sys"]);
-        assert_eq!(res.boundary_owner.as_ref().map(|o| o.id.as_str()), Some("api"));
+        assert_eq!(
+            res.boundary_owner.as_ref().map(|o| o.id.as_str()),
+            Some("api")
+        );
         assert!(!res.symbol_matched);
     }
 
@@ -387,7 +418,10 @@ mod tests {
     fn unanchored_file_reports_only_the_boundary_owner() {
         let res = locate(&model(), "src/dark.rs", None);
         assert!(res.claims.is_empty());
-        assert_eq!(res.boundary_owner.as_ref().map(|o| o.id.as_str()), Some("api"));
+        assert_eq!(
+            res.boundary_owner.as_ref().map(|o| o.id.as_str()),
+            Some("api")
+        );
         // Fallback scope: the chain is the boundary owner's ancestry.
         assert_eq!(res.owner_chain[0].id, "api");
     }
@@ -403,7 +437,10 @@ mod tests {
     #[test]
     fn glob_anchor_is_found_from_a_covered_file() {
         let mut m = model();
-        m.source_map.insert("r-vt".into(), vec![loc("src/auth/**/*.rs", Some("verify_token"))]);
+        m.source_map.insert(
+            "r-vt".into(),
+            vec![loc("src/auth/**/*.rs", Some("verify_token"))],
+        );
         let res = locate(&m, "src/auth/token.rs", None);
         assert_eq!(res.claims.len(), 1);
         assert_eq!(res.claims[0].id, "r-vt");
@@ -415,8 +452,10 @@ mod tests {
     #[test]
     fn test_entries_ride_claims_and_reverse_from_the_test_file() {
         let mut m = model();
-        m.test_map
-            .insert("r-vt".into(), vec![loc("tests/auth.rs", Some("forged_token_rejected"))]);
+        m.test_map.insert(
+            "r-vt".into(),
+            vec![loc("tests/auth.rs", Some("forged_token_rejected"))],
+        );
 
         let res = locate(&m, "src/auth.rs", None);
         let vt = res.claims.iter().find(|c| c.id == "r-vt").unwrap();
@@ -426,7 +465,11 @@ mod tests {
         assert!(hp.tests.is_empty());
 
         let res = locate(&m, "tests/auth.rs", None);
-        assert_eq!(res.claims.len(), 1, "the test file locates the claim it backs");
+        assert_eq!(
+            res.claims.len(),
+            1,
+            "the test file locates the claim it backs"
+        );
         assert_eq!(res.claims[0].id, "r-vt");
         assert!(res.claims[0].via_test);
         assert_eq!(res.claims[0].anchor.pattern, "tests/auth.rs");
@@ -452,7 +495,10 @@ mod tests {
         let hp = res.claims.iter().find(|c| c.id == "r-hp").unwrap();
         assert!(!hp.untested, "a ubiquitous claim is never flagged");
 
-        m.test_map.insert("r-vt".into(), vec![loc("tests/auth.rs", Some("forged_rejected"))]);
+        m.test_map.insert(
+            "r-vt".into(),
+            vec![loc("tests/auth.rs", Some("forged_rejected"))],
+        );
         let res = locate(&m, "src/auth.rs", None);
         let vt = res.claims.iter().find(|c| c.id == "r-vt").unwrap();
         assert!(!vt.untested, "attaching the test clears the flag");
@@ -461,12 +507,21 @@ mod tests {
     #[test]
     fn directives_come_from_the_finest_node_and_its_ancestry() {
         let mut m = model();
-        m.nodes.iter_mut().find(|n| n.id == "auth").unwrap().directives =
-            vec!["must never log tokens".into()];
-        m.nodes.iter_mut().find(|n| n.id == "api").unwrap().directives =
-            vec!["must stay stateless".into()];
+        m.nodes
+            .iter_mut()
+            .find(|n| n.id == "auth")
+            .unwrap()
+            .directives = vec!["must never log tokens".into()];
+        m.nodes
+            .iter_mut()
+            .find(|n| n.id == "api")
+            .unwrap()
+            .directives = vec!["must stay stateless".into()];
         let res = locate(&m, "src/auth.rs", None);
-        assert_eq!(res.own_directives, vec!["must never log tokens".to_string()]);
+        assert_eq!(
+            res.own_directives,
+            vec!["must never log tokens".to_string()]
+        );
         assert_eq!(res.inherited_directives.len(), 1);
         assert_eq!(res.inherited_directives[0].node_id, "api");
     }
