@@ -56,7 +56,8 @@ both layers, their binding directives, the pending entries in scope). Pass it ba
 `basis` on the write. A write whose basis no longer matches is REFUSED, naming what changed since \
 you read it, and nothing is merged: the first committer wins and the second re-reads. Every \
 write's answer carries the NEW basis, so your own next write against the same set is not refused \
-by your own edit. The basis is opaque — never compose one, never edit one, never reuse one from \
+by your own edit. `sign_off` carries one too: a signature is a person's word about words they \
+READ, and one given over a plan that moved since is a signature over sentences they never saw. The basis is opaque — never compose one, never edit one, never reuse one from \
 another read.\n\
 \n\
 Every tool takes an optional `project` (absolute path) that defaults to the working directory. \

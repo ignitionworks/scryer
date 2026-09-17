@@ -325,9 +325,10 @@ mod rule_wiring {
         // 16900 → 17700 for the bin's two acts (chg-qc2tqb, resp-q48seb):
         // `restore_change` and `delete_change_permanently`, and a description
         // each has to carry which of them can be undone.
+        // 17700 → 17900: `sign_off` says it carries a basis (judgement 733).
         assert!(
-            total <= 17_700,
-            "descriptions total {total} chars (budget 17700)"
+            total <= 17_900,
+            "descriptions total {total} chars (budget 17900)"
         );
         for (name, d) in &descs {
             assert!(
@@ -480,9 +481,10 @@ mod rule_wiring {
         // `abandon_change`'s `expiresAt` (chg-qc2tqb, resp-2z80nv); a further
         // ~1.2 KB is the bin's two acts and the `confirm {by, at}` shape
         // (resp-q48seb).
+        // 34400 → 34600: `sign_off`'s own `basis` (judgement 733).
         assert!(
-            total <= 34_400,
-            "schemas total {total} chars (budget 34400)"
+            total <= 34_600,
+            "schemas total {total} chars (budget 34600)"
         );
     }
 }

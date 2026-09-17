@@ -104,6 +104,15 @@ pub struct OpenChangeRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SignOffRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read the signature was given against. A
+    /// sign-off is a person's word about words they READ, so a basis that no
+    /// longer matches is refused naming what changed rather than snapshotting
+    /// sentences the signer never saw. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the signature was given against; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     /// The change to sign off; defaults to the session's current one.
     pub change_id: Option<String>,
 }

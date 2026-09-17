@@ -700,7 +700,9 @@ impl ScryerServer {
     #[tool(
         description = "Record the developer's go-ahead on a change (`change_id`, or the session's current one): \
          snapshots its entries as the approved intent, so a claim you reword or add under it \
-         afterwards lands as an amendment for the developer's verdict instead of folding.\n\
+         afterwards lands as an amendment for the developer's verdict instead of folding. Carries \
+         `basis` like a write — a signature is given over words somebody READ, so a basis that \
+         has moved is refused naming what changed.\n\
          Rules: sign-off, loop-sign-off, fold-after-sign-off"
     )]
     pub fn sign_off(
@@ -727,6 +729,15 @@ impl ScryerServer {
         let _lock = match lock_or_err(&model_ref) {
             Ok(l) => l,
             Err(e) => return Ok(e),
+        };
+        // A SIGN-OFF IS A WRITE FOR THIS PURPOSE (judgement 733). It does not
+        // change a claim, so it never looked like one — but it is a person's
+        // word about the words they READ, and a signature snapshotted over a
+        // plan that moved since is a signature over sentences the signer never
+        // saw. The lost update's cousin, and the same check catches it.
+        let checked = match check_basis(&model_ref, req.basis.as_deref()) {
+            Ok(c) => c,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         let mut plan = match scryer_core::read_planned_seeded_at(&model_ref) {
             Ok(p) => p,
@@ -777,14 +788,16 @@ impl ScryerServer {
             (Some(a), None) => format!(" Signed by {a}."),
             _ => String::new(),
         };
-        Ok(CallToolResult::success(vec![Content::text(format!(
+        let mut msg = format!(
             "Signed off {target} — {n} entr{} snapshotted as the developer's intent.{signature} \
              From here, a claim you reword or add under it is an amendment/addition: it lands \
              as vagrant for the developer's verdict at mark_implemented and does not fold. \
              If implementing shows a planned claim is wrong, reword it and fold the rest — \
              the reword waits.",
             if n == 1 { "y" } else { "ies" }
-        ))]))
+        );
+        say_basis(&mut msg, renewed_basis(&model_ref, checked));
+        Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 
     #[tool(
@@ -2009,6 +2022,7 @@ mod tests {
         // sign_off: a change in the bin is not one anybody approves.
         let out = server
             .sign_off(Parameters(SignOffRequest {
+                basis: None,
                 project: Some(project.clone()),
                 change_id: Some(cid.clone()),
             }))

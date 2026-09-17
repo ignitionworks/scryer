@@ -5273,6 +5273,7 @@ mod tests {
             tool_text(
                 &server
                     .sign_off(Parameters(SignOffRequest {
+                        basis: None,
                         project: project.clone(),
                         change_id: Some(cid.clone()),
                     }))
@@ -5318,6 +5319,7 @@ mod tests {
         as_actor_for(Some("morgan"), None, || {
             server2
                 .sign_off(Parameters(SignOffRequest {
+                    basis: None,
                     project: project2.clone(),
                     change_id: Some(cid2.clone()),
                 }))
@@ -5420,6 +5422,7 @@ mod tests {
                 let cid = author_one_claim(&server, &project, "Verifies the token");
                 server
                     .sign_off(Parameters(SignOffRequest {
+                        basis: None,
                         project: project.clone(),
                         change_id: Some(cid.clone()),
                     }))
@@ -5564,6 +5567,7 @@ mod tests {
             let text = tool_text(
                 &server
                     .sign_off(Parameters(SignOffRequest {
+                        basis: None,
                         project: project.clone(),
                         change_id: Some(cid.clone()),
                     }))
@@ -5599,6 +5603,7 @@ mod tests {
             let server = ScryerServer::new();
             server
                 .sign_off(Parameters(SignOffRequest {
+                    basis: None,
                     project: project.clone(),
                     change_id: Some(cid.clone()),
                 }))
@@ -6519,6 +6524,7 @@ mod tests {
         let text = tool_text(
             &server
                 .sign_off(Parameters(SignOffRequest {
+                    basis: None,
                     project: project.clone(),
                     change_id: None,
                 }))
@@ -7184,5 +7190,100 @@ mod tests {
             &["resp-2", "resp-1"],
             "and the order is the array's"
         );
+    }
+    /// resp-azc2d9 as judgement 733 reads it: A SIGN-OFF CARRIES A BASIS TOO.
+    /// It writes no claim, so it never looked like a write — but it is a
+    /// person's word about the words they READ, and a signature snapshotted
+    /// over a plan that moved since is a signature over sentences the signer
+    /// never saw. The lost update's cousin: writer A rewords a claim between
+    /// the signer's read and their sign-off, and without this check the
+    /// snapshot would record A's wording as approved intent.
+    #[test]
+    fn resp_azc2d9_a_sign_off_carries_a_basis_and_a_stale_one_is_refused() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+        let signers_basis = basis_for_node(&server, &project, "node-2");
+
+        // Somebody rewords a claim after the signer read it.
+        let fresh = basis_for_node(&server, &project, "node-2");
+        reword(
+            &server,
+            &project,
+            vec![
+                worded("resp-1", "A's wording, written after the read"),
+                resp("resp-2"),
+            ],
+            Some(&fresh),
+        );
+
+        let stale = server
+            .sign_off(Parameters(SignOffRequest {
+                basis: Some(signers_basis),
+                project: Some(project.clone()),
+                change_id: None,
+            }))
+            .unwrap();
+        let text = tool_text(&stale);
+        assert_eq!(stale.is_error, Some(true), "{text}");
+        assert!(text.contains("stale"), "{text}");
+        assert!(
+            text.contains("resp-1") && text.contains("A's wording"),
+            "naming what changed since the signature's basis: {text}"
+        );
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(
+            planned.changes[0].signed_off.is_none(),
+            "and nothing was snapshotted"
+        );
+
+        // The signer re-reads and signs; the answer carries the new basis.
+        let now = basis_for_node(&server, &project, "node-2");
+        let ok = server
+            .sign_off(Parameters(SignOffRequest {
+                basis: Some(now),
+                project: Some(project.clone()),
+                change_id: None,
+            }))
+            .unwrap();
+        let text = tool_text(&ok);
+        assert_ne!(ok.is_error, Some(true), "{text}");
+        assert!(
+            text.lines().any(|l| l.starts_with("basis: ")),
+            "the answer carries the new basis: {text}"
+        );
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let snap = planned.changes[0].signed_off.as_ref().expect("signed");
+        assert_eq!(
+            snap.entries
+                .values()
+                .filter_map(|e| e.statement.as_deref())
+                .filter(|s| s.contains("A's wording"))
+                .count(),
+            1,
+            "and what it snapshotted is the wording the signer had just read"
+        );
+
+        // NO basis: refused only behind the switch, like every other write.
+        let (server2, _dir2, project2, _mr2) = basis_write_project();
+        let refused = with_basis_required(true, || {
+            server2
+                .sign_off(Parameters(SignOffRequest {
+                    basis: None,
+                    project: Some(project2.clone()),
+                    change_id: None,
+                }))
+                .unwrap()
+        });
+        assert_eq!(refused.is_error, Some(true), "{}", tool_text(&refused));
+        assert!(tool_text(&refused).contains("names no `basis`"));
+        let through = with_basis_required(false, || {
+            server2
+                .sign_off(Parameters(SignOffRequest {
+                    basis: None,
+                    project: Some(project2),
+                    change_id: None,
+                }))
+                .unwrap()
+        });
+        assert_ne!(through.is_error, Some(true), "{}", tool_text(&through));
     }
 }
