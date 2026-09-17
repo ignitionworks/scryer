@@ -49,6 +49,16 @@ concern each. [[statement-ears]] [[scanning]] [[naming]] [[concerns]]\n\
 - A claim has a test attached or it doesn't; that binary is the model's primary signal, and the \
 `untested` count in every status line is your standing work. [[test-attachment]] [[test-verdicts]]\n\
 \n\
+## Model writes name the basis they were read against\n\
+Every read a write can be based on — `orient`, `read_model`, `locate`, `get_pending` — answers a \
+`basis`: one opaque fingerprint over the RELEVANT SET it showed (the governing nodes' claims in \
+both layers, their binding directives, the pending entries in scope). Pass it back, verbatim, as \
+`basis` on the write. A write whose basis no longer matches is REFUSED, naming what changed since \
+you read it, and nothing is merged: the first committer wins and the second re-reads. Every \
+write's answer carries the NEW basis, so your own next write against the same set is not refused \
+by your own edit. The basis is opaque — never compose one, never edit one, never reuse one from \
+another read.\n\
+\n\
 Every tool takes an optional `project` (absolute path) that defaults to the working directory. \
 Schema version is `0.3`.\n\
 ";

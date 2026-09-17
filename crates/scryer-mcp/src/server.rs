@@ -467,9 +467,13 @@ mod rule_wiring {
                 );
             }
         }
+        // The budget grew by ~2.1 KB when `basis` joined every write's input
+        // schema (chg-krevwf, resp-azc2d9): a write that names no basis cannot
+        // be checked, so the parameter is on twenty-one tools and there is no
+        // cheaper place to put it. One short description, repeated.
         assert!(
-            total <= 30_200,
-            "schemas total {total} chars (budget 30200)"
+            total <= 32_400,
+            "schemas total {total} chars (budget 32400)"
         );
     }
 }

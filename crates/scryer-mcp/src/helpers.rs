@@ -406,6 +406,72 @@ pub(crate) fn basis_at(model_ref: &ModelRef, scope: scryer_core::basis::Scope) -
     basis_of(&committed, &planned, scope)
 }
 
+/// Whether this engine REQUIRES a `basis` on a model write.
+///
+/// THE SWITCH, and why there is one. A stale basis is refused unconditionally —
+/// a caller that names one is asking to be checked, and honouring that costs
+/// nobody anything. But REFUSING A WRITE THAT NAMES NONE is a change to the
+/// contract of every existing caller, and the callers do not all move on the
+/// same day: team-mdd's own lanes and its orchestrator's proxy batches call
+/// `update_nodes` with no basis today, and they learn to pass one when the
+/// host's `model.*` tools thread it through and the standing prompt says so.
+/// So the requirement rides `SCRYER_REQUIRE_BASIS` (`1`/`true`/`yes`/`on`),
+/// OFF by default: a pin bump lands the mechanism without breaking a caller,
+/// and the switch turns the gate on in one act once every writer is ready.
+/// This is a migration switch, not a project setting — when every caller
+/// passes a basis it goes away and the requirement is simply the contract.
+pub(crate) fn basis_required() -> bool {
+    std::env::var("SCRYER_REQUIRE_BASIS").is_ok_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// The basis check every model write passes: refuse a write that names none
+/// (while the switch is on), and refuse one whose basis no longer matches the
+/// relevant set — naming what changed, never merging.
+///
+/// `Ok` carries the validated read set, so the caller can re-derive a fresh
+/// basis over THE SAME SCOPE once its write has landed (resp-0fqnf3): a
+/// session's own successive writes against one set must not refuse themselves.
+pub(crate) fn check_basis(
+    model_ref: &ModelRef,
+    basis: Option<&str>,
+) -> Result<Option<scryer_core::basis::ReadSet>, String> {
+    let Some(token) = basis.map(str::trim).filter(|t| !t.is_empty()) else {
+        if basis_required() {
+            return Err(
+                "REFUSED: this model write names no `basis`, so the engine cannot tell whether                  what you read is still what stands — and a write made on a read set that has                  moved is a lost update. Read the model first (orient, read_model, locate and                  get_pending each answer a `basis`) and pass that value back as `basis`. It is                  opaque: pass it verbatim, do not compose one."
+                    .to_string(),
+            );
+        }
+        return Ok(None);
+    };
+    let committed =
+        scryer_core::read_model_at(model_ref).map_err(|e| read_fail("model", model_ref, &e))?;
+    let planned = scryer_core::read_planned_at(model_ref).unwrap_or_else(|_| committed.clone());
+    scryer_core::basis::check(&committed, &planned, token).map(Some)
+}
+
+/// The basis a write ANSWERS: the same scope, re-derived from the model as the
+/// write has just left it. `None` where the write named no basis — a caller
+/// that did not ask to be checked is told nothing it did not ask for.
+pub(crate) fn renewed_basis(
+    model_ref: &ModelRef,
+    checked: Option<scryer_core::basis::ReadSet>,
+) -> Option<String> {
+    basis_at(model_ref, checked?.scope)
+}
+
+/// Put the renewed basis on a prose answer, the way the tag warnings ride it.
+pub(crate) fn say_basis(msg: &mut String, basis: Option<String>) {
+    if let Some(b) = basis {
+        msg.push_str(&format!("\nbasis: {b}"));
+    }
+}
+
 /// Put the basis on a JSON answer, beside `project`.
 pub(crate) fn stamp_basis(payload: &mut serde_json::Value, basis: Option<String>) {
     if let (serde_json::Value::Object(o), Some(b)) = (payload, basis) {
@@ -690,11 +756,25 @@ pub(crate) fn remint_colliding_node_ids(
 /// exactly as before. Returns conflict warnings for the tool's response: a key
 /// already tagged by a DIFFERENT change is two tasks touching the same element
 /// — the collision the ledger exists to catch before the code merges.
+/// A plan write's answer: the tag warnings, and the basis the write leaves
+/// behind for the caller's next write against the same set.
+pub(crate) struct TaggedWrite {
+    pub warnings: Vec<String>,
+    pub basis: Option<String>,
+}
+
 pub(crate) fn write_planned_tagged(
     model_ref: &ModelRef,
     model: &mut ScryModel,
     change_id: Option<&str>,
-) -> Result<Vec<String>, String> {
+    basis: Option<&str>,
+) -> Result<TaggedWrite, String> {
+    // The basis check comes FIRST, before the change guard and before anything
+    // is written: a write on a read set that has moved is refused whether or
+    // not it also forgot to open a change, and a refusal must leave the plan
+    // exactly as it found it.
+    let checked = check_basis(model_ref, basis)?;
+
     // The guard: every plan write belongs to a change. A session that has
     // not opened one — or points at a change that has since closed — is told
     // exactly which call fixes that, and nothing is written.
@@ -779,7 +859,8 @@ pub(crate) fn write_planned_tagged(
         }
     }
     crate::helpers::write_planned(model_ref, model)?;
-    Ok(warnings)
+    let basis = renewed_basis(model_ref, checked);
+    Ok(TaggedWrite { warnings, basis })
 }
 
 /// Plan-diff element count with vagrants excluded — the same queue

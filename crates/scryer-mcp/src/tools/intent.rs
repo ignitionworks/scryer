@@ -194,6 +194,15 @@ fn existing_same_node(
         .map(|n| n.id.clone())
 }
 
+/// What a write brings from its caller: the session's open change (which the
+/// plan write tags to) and the `basis` the edit was read against (which the
+/// engine checks). Two facts about the CALL rather than the model, carried
+/// together because every authoring road needs both.
+struct WriteFrom<'a> {
+    change: Option<&'a str>,
+    basis: Option<&'a str>,
+}
+
 /// Enforce read-only invariants, write, snapshot the baseline, and return the
 /// minted nodes (compact denormalized view) so the agent has their ids — plus
 /// the follow-through (what a plan write implies next) and the loop-state
@@ -205,15 +214,16 @@ fn commit(
     prior: &ScryModel,
     minted: &[String],
     reused: &[String],
-    change: Option<&str>,
+    from: WriteFrom<'_>,
     lock: scryer_core::ModelLock,
 ) -> Result<CallToolResult, McpError> {
     enforce_readonly_directives(&mut model, prior);
 
-    let tag_warnings = match write_planned_tagged(model_ref, &mut model, change) {
+    let written = match write_planned_tagged(model_ref, &mut model, from.change, from.basis) {
         Ok(w) => w,
         Err(e) => return Ok(err(e)),
     };
+    let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
     let added: Vec<serde_json::Value> = minted
         .iter()
@@ -281,6 +291,9 @@ fn commit(
     if !warnings.is_empty() {
         payload["warnings"] = serde_json::json!(warnings);
     }
+    if let Some(b) = new_basis {
+        payload["basis"] = serde_json::json!(b);
+    }
     drop(lock);
     if let Some(h) = status_header(model_ref) {
         payload["state"] = serde_json::json!(h);
@@ -335,7 +348,10 @@ impl ScryerServer {
             &prior,
             &minted,
             &reused,
-            self.session_change(&model_ref).as_deref(),
+            WriteFrom {
+                change: self.session_change(&model_ref).as_deref(),
+                basis: req.basis.as_deref(),
+            },
             _lock,
         )
     }
@@ -385,7 +401,10 @@ impl ScryerServer {
             &prior,
             &minted,
             &reused,
-            self.session_change(&model_ref).as_deref(),
+            WriteFrom {
+                change: self.session_change(&model_ref).as_deref(),
+                basis: req.basis.as_deref(),
+            },
             _lock,
         )
     }
@@ -470,7 +489,10 @@ impl ScryerServer {
             &prior,
             &minted,
             &reused,
-            self.session_change(&model_ref).as_deref(),
+            WriteFrom {
+                change: self.session_change(&model_ref).as_deref(),
+                basis: req.basis.as_deref(),
+            },
             _lock,
         )
     }
@@ -528,7 +550,10 @@ impl ScryerServer {
             &prior,
             &minted,
             &reused,
-            self.session_change(&model_ref).as_deref(),
+            WriteFrom {
+                change: self.session_change(&model_ref).as_deref(),
+                basis: req.basis.as_deref(),
+            },
             _lock,
         )
     }
@@ -608,14 +633,16 @@ impl ScryerServer {
         // Groups aren't nodes, so commit by hand (the node-returning `commit`
         // helper doesn't apply): enforce read-only invariants, write, baseline.
         enforce_readonly_directives(&mut model, &prior);
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(err(e)),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
         drop(_lock);
         let mut msg = format!("Created {} group(s): {}", minted.len(), minted.join(", "));
         for w in &tag_warnings {
@@ -629,6 +656,9 @@ impl ScryerServer {
                 reused_groups.join(", ")
             ));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -731,7 +761,10 @@ impl ScryerServer {
             &prior,
             &minted,
             &reused,
-            self.session_change(&model_ref).as_deref(),
+            WriteFrom {
+                change: self.session_change(&model_ref).as_deref(),
+                basis: req.basis.as_deref(),
+            },
             _lock,
         )
     }
@@ -1295,6 +1328,7 @@ mod tests {
         let server = ScryerServer::new();
         let r = server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: project.clone(),
                 items: vec![ContainerItem {
                     parent_id: "node-1".into(),
@@ -1322,6 +1356,7 @@ mod tests {
         server.set_session_change(Some((dir.path().to_path_buf(), "chg-gone".into())));
         let r = server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: project.clone(),
                 items: vec![ContainerItem {
                     parent_id: "node-1".into(),
@@ -1340,6 +1375,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         let r = server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project,
                 items: vec![ContainerItem {
                     parent_id: "node-1".into(),
@@ -1433,6 +1469,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project),
                 items: vec![ContainerItem {
                     parent_id: "node-1".into(),
@@ -1473,6 +1510,7 @@ mod tests {
                      embedded on the host's pages via a tag-manager loader script";
         let res = server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project),
                 items: vec![ContainerItem {
                     parent_id: system_id,
@@ -1548,6 +1586,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project),
                 items: vec![ContainerItem {
                     parent_id: "node-1".into(),
@@ -1593,6 +1632,7 @@ mod tests {
         let add = |bdir: &str, name: &str| {
             server
                 .add_container(Parameters(AddContainerRequest {
+                    basis: None,
                     project: Some(project.clone()),
                     items: vec![ContainerItem {
                         parent_id: system_id.clone(),
@@ -1630,6 +1670,7 @@ mod tests {
         // container under the system, with an auto boundary glob
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ContainerItem {
                     parent_id: system_id.clone(),
@@ -1657,6 +1698,7 @@ mod tests {
         // component under the container
         server
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ComponentItem {
                     parent_id: container_id.clone(),
@@ -1673,6 +1715,7 @@ mod tests {
         // a data-shape symbol with properties + a responsibility with sub-range
         server
             .add_symbol(Parameters(AddSymbolRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![SymbolItem {
                     parent_id: component_id.clone(),
@@ -1724,6 +1767,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![
                     ContainerItem {
@@ -1759,6 +1803,7 @@ mod tests {
         // group the two containers under the system
         server
             .add_group(Parameters(AddGroupRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![GroupItem {
                     parent_id: system_id.clone(),
@@ -1779,6 +1824,7 @@ mod tests {
         // children of the system, not of another container)
         let res = server
             .add_group(Parameters(AddGroupRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![GroupItem {
                     parent_id: ids[0].clone(),
@@ -1801,6 +1847,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ContainerItem {
                     parent_id: system_id,
@@ -1901,6 +1948,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ContainerItem {
                     parent_id: system_id,
@@ -2288,6 +2336,7 @@ mod tests {
         // a component's parent must be a container, not the system
         let res = server
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project),
                 items: vec![ComponentItem {
                     parent_id: system_id,
@@ -2394,6 +2443,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         let r = server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ContainerItem {
                     parent_id: system_id,
@@ -2435,6 +2485,7 @@ mod tests {
         let project = dir.path().to_string_lossy().to_string();
         server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ContainerItem {
                     parent_id: system_id,
@@ -2449,6 +2500,7 @@ mod tests {
             .unwrap();
         server
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ComponentItem {
                     parent_id: planned_id(&dir, "API"),
@@ -2460,6 +2512,7 @@ mod tests {
             .unwrap();
         let r = server
             .add_symbol(Parameters(AddSymbolRequest {
+                basis: None,
                 project: Some(project),
                 items: vec![SymbolItem {
                     parent_id: planned_id(&dir, "Auth"),
@@ -2494,6 +2547,7 @@ mod tests {
         let call = || {
             server
                 .add_container(Parameters(AddContainerRequest {
+                    basis: None,
                     project: Some(project.clone()),
                     items: vec![ContainerItem {
                         parent_id: system_id.clone(),
@@ -2534,6 +2588,7 @@ mod tests {
         let server = ScryerServer::new();
         let r = server
             .add_container(Parameters(AddContainerRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 items: vec![ContainerItem {
                     parent_id: "node-1".into(),

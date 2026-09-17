@@ -336,19 +336,24 @@ impl ScryerServer {
         }
         enforce_readonly_directives(&mut model, &prior);
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
         let mut msg = format!("Wrote {} group(s)", count);
         reminter.report_into(&mut msg);
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 
@@ -454,20 +459,25 @@ impl ScryerServer {
         }
         enforce_readonly_directives(&mut model, &prior);
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
         drop(_lock);
         let mut msg = format!("Updated {} group(s)", updated);
         reminter.report_into(&mut msg);
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -511,19 +521,24 @@ impl ScryerServer {
             ))]));
         }
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
         drop(_lock);
         let mut msg = format!("Deleted group '{}'", req.group_id);
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -1052,6 +1067,13 @@ impl ScryerServer {
                     ))]));
                 }
             };
+        // refile does not pass through `write_planned_tagged` — it retags rather
+        // than rewrites — so the basis check is spelled here. Same posture: a
+        // stale basis is refused before anything is written.
+        let checked = match check_basis(&model_ref, req.basis.as_deref()) {
+            Ok(c) => c,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
         if !outcome.moved.is_empty() {
             if let Err(e) = crate::helpers::write_planned(&model_ref, &plan) {
                 return Ok(CallToolResult::error(vec![Content::text(e)]));
@@ -1079,6 +1101,7 @@ impl ScryerServer {
         }
         msg.push('\n');
         msg.push_str(&open_changes_line(&plan));
+        say_basis(&mut msg, renewed_basis(&model_ref, checked));
         drop(_lock);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
@@ -1336,6 +1359,7 @@ mod tests {
 
         server
             .update_group(Parameters(UpdateGroupRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![UpdateGroupItem {
                     group_id: "group-1".into(),
@@ -1359,6 +1383,7 @@ mod tests {
 
         let res = server
             .update_group(Parameters(UpdateGroupRequest {
+                basis: None,
                 project: Some(project),
                 items: vec![UpdateGroupItem {
                     group_id: "group-999".into(),
@@ -1400,6 +1425,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         let res = server
             .update_group(Parameters(UpdateGroupRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 items: vec![UpdateGroupItem {
                     group_id: "group-1".into(),
@@ -1453,6 +1479,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         let res = server
             .replace_groups(Parameters(SetGroupsRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 data: data.to_string(),
             }))

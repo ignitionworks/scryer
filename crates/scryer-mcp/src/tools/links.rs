@@ -112,14 +112,16 @@ impl ScryerServer {
             ))]));
         }
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         drop(_lock);
         let mut msg = format!(
@@ -138,6 +140,9 @@ impl ScryerServer {
                 reused.join(", ")
             ));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -185,20 +190,25 @@ impl ScryerServer {
             updated += 1;
         }
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         drop(_lock);
         let mut msg = format!("Updated {} link(s)", updated);
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -231,14 +241,16 @@ impl ScryerServer {
         let before = model.links.len();
         model.links.retain(|l| !target.contains(l.id.as_str()));
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         drop(_lock);
         let mut msg = format!(
@@ -249,6 +261,9 @@ impl ScryerServer {
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -298,6 +313,7 @@ mod tests {
 
         let r = server
             .add_links(Parameters(AddLinkRequest {
+                basis: None,
                 project: Some(project.clone()),
                 links: vec![
                     AddLinkItem {
@@ -328,6 +344,7 @@ mod tests {
         let first = after.links[0].id.clone();
         let r = server
             .update_links(Parameters(UpdateLinkRequest {
+                basis: None,
                 project: Some(project),
                 links: vec![UpdateLinkItem {
                     link_id: first.clone(),
@@ -359,6 +376,7 @@ mod tests {
         let call = |label: &str| {
             server
                 .add_links(Parameters(AddLinkRequest {
+                    basis: None,
                     project: Some(project.clone()),
                     links: vec![AddLinkItem {
                         src: "a".into(),

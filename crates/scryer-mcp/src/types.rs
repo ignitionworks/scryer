@@ -15,6 +15,14 @@ pub enum Layer {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DescopeRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     /// Node ids to remove from the model; the code stays.
     pub node_ids: Vec<String>,
 }
@@ -124,6 +132,14 @@ pub struct AbandonChangeRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RefileRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     /// Bare ids of pending work to MOVE: node/group (carrier + everything under it), responsibility/link, a change id, or "unfiled".
     pub ids: Vec<String>,
     /// Destination: a change id or "unfiled"; defaults to the session's change.
@@ -145,6 +161,14 @@ pub struct NodeMove {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct MoveNodesRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub moves: Vec<NodeMove>,
 }
 
@@ -263,6 +287,14 @@ pub struct UpdateGroupItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateGroupRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     /// Groups to patch by id; only fields present change.
     pub items: Vec<UpdateGroupItem>,
 }
@@ -297,12 +329,28 @@ pub struct MoveResponsibilityItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct MoveResponsibilitiesRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub moves: Vec<MoveResponsibilityItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateNodeRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub nodes: Vec<UpdateNodeItem>,
 }
 
@@ -319,12 +367,28 @@ pub struct SetDirectivesItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetDirectivesRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<SetDirectivesItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetNodeRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub node_id: String,
     /// JSON `{nodes, links}`; nodes are the descendants rooted at node_id, replacing the existing ones.
     pub data: String,
@@ -333,6 +397,14 @@ pub struct SetNodeRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DeleteNodeRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub node_ids: Vec<String>,
 }
 
@@ -349,6 +421,14 @@ pub struct AddLinkItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddLinkRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub links: Vec<AddLinkItem>,
 }
 
@@ -362,12 +442,28 @@ pub struct UpdateLinkItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateLinkRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub links: Vec<UpdateLinkItem>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DeleteLinkRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub link_ids: Vec<String>,
 }
 
@@ -409,6 +505,14 @@ pub struct UpdateSourceMapRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetGroupsRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     /// JSON: one group or an array; each with name, memberIds, and parentNodeId (the members' parent).
     pub data: String,
 }
@@ -416,6 +520,14 @@ pub struct SetGroupsRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DeleteGroupRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub group_id: String,
 }
 
@@ -439,6 +551,14 @@ pub struct PersonItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddPersonRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<PersonItem>,
 }
 
@@ -460,6 +580,14 @@ pub struct SystemItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddSystemRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<SystemItem>,
 }
 
@@ -483,6 +611,14 @@ pub struct ContainerItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddContainerRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<ContainerItem>,
 }
 
@@ -499,6 +635,14 @@ pub struct ComponentItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddComponentRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<ComponentItem>,
 }
 
@@ -520,6 +664,14 @@ pub struct GroupItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddGroupRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<GroupItem>,
 }
 
@@ -630,6 +782,14 @@ pub struct SymbolItem {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddSymbolRequest {
     pub project: Option<String>,
+    /// The `basis` answered by the read this edit was made against. The engine
+    /// refuses a write whose basis no longer matches the relevant set, naming
+    /// what changed rather than merging. Opaque — pass it back verbatim.
+    #[serde(default)]
+    #[schemars(
+        description = "The `basis` the read this edit was based on; opaque, pass it verbatim."
+    )]
+    pub basis: Option<String>,
     pub items: Vec<SymbolItem>,
 }
 

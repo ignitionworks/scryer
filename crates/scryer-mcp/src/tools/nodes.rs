@@ -847,14 +847,16 @@ impl ScryerServer {
         }
         enforce_readonly_directives(&mut model, &prior);
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         // Accept + warn (never reject — a rejected write invites a duplicate
         // call): field-shape problems on the nodes just touched ride back on
@@ -884,6 +886,9 @@ impl ScryerServer {
         }
 
         drop(_lock);
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -957,19 +962,24 @@ impl ScryerServer {
             updated += 1;
         }
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
         drop(_lock);
         let mut msg = format!("Set directives on {} target(s)", updated);
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -1981,14 +1991,16 @@ impl ScryerServer {
         }
 
         enforce_readonly_directives(&mut model, &prior);
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         // Timeline: a `move` event per node that actually changed parent.
         let name_of = |m: &ScryModel, id: &str| {
@@ -2040,6 +2052,9 @@ impl ScryerServer {
             }
         }
         drop(_lock);
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -2151,6 +2166,13 @@ impl ScryerServer {
                 })
             });
 
+        // `replace_subtree` writes BOTH layers itself rather than through
+        // `write_planned_tagged`, so the basis check is spelled here — before
+        // either write, so a refusal leaves both layers as it found them.
+        let checked = match check_basis(&model_ref, req.basis.as_deref()) {
+            Ok(c) => c,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
         // Write the plan first: if the committed write then fails, committed lags
         // the plan (recoverable pending work), never leads it (a phantom deletion).
         if let Err(e) = crate::helpers::write_planned(&model_ref, &model) {
@@ -2191,6 +2213,7 @@ impl ScryerServer {
                 msg.push_str(&format!("\n- {}", w));
             }
         }
+        say_basis(&mut msg, renewed_basis(&model_ref, checked));
         Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 
@@ -2244,14 +2267,16 @@ impl ScryerServer {
             g.member_ids.retain(|m| !to_remove.contains(m));
         }
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         drop(_lock);
         let mut msg = format!(
@@ -2262,6 +2287,9 @@ impl ScryerServer {
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -2322,6 +2350,11 @@ impl ScryerServer {
         let (rc, remc, dc) = fold_out_layer(&mut committed, &req.node_ids);
         let (relocated, removed, dropped) = (rp.max(rc), remp.max(remc), dp.max(dc));
 
+        // `descope` writes both layers itself too — the same check, spelled here.
+        let checked = match check_basis(&model_ref, req.basis.as_deref()) {
+            Ok(c) => c,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
         if let Err(e) = crate::helpers::write_planned(&model_ref, &planned) {
             return Ok(CallToolResult::error(vec![Content::text(e)]));
         }
@@ -2343,6 +2376,7 @@ impl ScryerServer {
                 if dropped == 1 { "y" } else { "ies" }
             ));
         }
+        say_basis(&mut msg, renewed_basis(&model_ref, checked));
         drop(_lock);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
@@ -2442,14 +2476,16 @@ impl ScryerServer {
             moved += 1;
         }
 
-        let tag_warnings = match write_planned_tagged(
+        let written = match write_planned_tagged(
             &model_ref,
             &mut model,
             self.session_change(&model_ref).as_deref(),
+            req.basis.as_deref(),
         ) {
             Ok(w) => w,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let (tag_warnings, new_basis) = (written.warnings, written.basis);
 
         // Timeline: a `move` event on each destination node.
         let now = scryer_core::drift::now_secs();
@@ -2466,6 +2502,9 @@ impl ScryerServer {
         for w in &tag_warnings {
             msg.push_str(&format!("\n{w}"));
         }
+        // The write's answer carries the NEW basis over the same set, so a
+        // session's own next write against it is not refused by its own edit.
+        say_basis(&mut msg, new_basis);
         if let Some(h) = status_header_named(&model_ref) {
             msg.push_str(&format!("\n{h}"));
         }
@@ -2582,6 +2621,7 @@ mod tests {
         let server = ScryerServer::new();
         server
             .descope(Parameters(DescopeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 node_ids: vec!["node-2".into()],
             }))
@@ -2656,6 +2696,7 @@ mod tests {
         };
         let res = server
             .set_directives(Parameters(SetDirectivesRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 items: vec![
                     item(Some("sys"), None, &["must stay stateless"]),
@@ -2714,6 +2755,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         server
             .set_directives(Parameters(SetDirectivesRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 items: vec![
                     SetDirectivesItem {
@@ -2780,6 +2822,7 @@ mod tests {
             // A valid edit batched BEHIND the bad item must not land either.
             let res = server
                 .set_directives(Parameters(SetDirectivesRequest {
+                    basis: None,
                     project: Some(dir.path().to_string_lossy().to_string()),
                     items: vec![
                         bad,
@@ -2867,6 +2910,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         server
             .move_nodes(Parameters(MoveNodesRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 moves: vec![
                     NodeMove {
@@ -2922,6 +2966,7 @@ mod tests {
         let server = ScryerServer::new();
         server
             .replace_subtree(Parameters(SetNodeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 node_id: "node-1".into(),
                 data: payload.to_string(),
@@ -2972,6 +3017,7 @@ mod tests {
         let server = ScryerServer::new();
         let result = server
             .replace_subtree(Parameters(SetNodeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 node_id: "node-1".into(),
                 data: payload.to_string(),
@@ -3356,6 +3402,7 @@ mod tests {
         // Stage the deletion of the whole `parent-1` subtree in the plan.
         server
             .delete_nodes(Parameters(DeleteNodeRequest {
+                basis: None,
                 project: project.clone(),
                 node_ids: vec!["parent-1".into()],
             }))
@@ -3619,6 +3666,7 @@ mod tests {
         // Valid: component A→B. The subtree (sym) follows; the group lets go.
         let r = server
             .move_nodes(Parameters(MoveNodesRequest {
+                basis: None,
                 project: Some(project.clone()),
                 moves: vec![NodeMove {
                     node_id: "comp".into(),
@@ -3641,6 +3689,7 @@ mod tests {
         // Invalid kind pair: component under system.
         let r = server
             .move_nodes(Parameters(MoveNodesRequest {
+                basis: None,
                 project: Some(project.clone()),
                 moves: vec![NodeMove {
                     node_id: "comp".into(),
@@ -3653,6 +3702,7 @@ mod tests {
         // Cycle: container under a symbol inside its own subtree.
         let r = server
             .move_nodes(Parameters(MoveNodesRequest {
+                basis: None,
                 project: Some(project),
                 moves: vec![NodeMove {
                     node_id: "cb".into(),
@@ -3695,6 +3745,7 @@ mod tests {
         // Re-parent the System under its own grandchild: a cycle.
         let r = server
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: Some(project.clone()),
                 nodes: vec![reparent("sys", "comp")],
             }))
@@ -3709,6 +3760,7 @@ mod tests {
         // A node set as its own parent is likewise rejected.
         let r = server
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: Some(project),
                 nodes: vec![reparent("ca", "ca")],
             }))
@@ -3739,6 +3791,7 @@ mod tests {
 
         let r = server
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: Some(project),
                 nodes: vec![UpdateNodeItem {
                     node_id: "comp".into(),
@@ -3867,6 +3920,7 @@ mod tests {
         let attempt = |item: UpdateNodeItem| {
             server
                 .update_nodes(Parameters(UpdateNodeRequest {
+                    basis: None,
                     project: Some(project.clone()),
                     nodes: vec![item],
                 }))
@@ -5016,6 +5070,7 @@ mod tests {
         );
         server
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: project.clone(),
                 nodes: vec![serde_json::from_value(serde_json::json!({
                     "node_id": "vt",
@@ -5542,6 +5597,7 @@ mod tests {
         // An authoring write in this session tags what it changed.
         server
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ComponentItem {
                     parent_id: "node-2".into(),
@@ -5686,6 +5742,7 @@ mod tests {
         // Written while chg-1 is selected — this is the mis-filing.
         server
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ComponentItem {
                     parent_id: "node-2".into(),
@@ -5701,6 +5758,7 @@ mod tests {
 
         let r = server
             .refile(Parameters(RefileRequest {
+                basis: None,
                 project: Some(project.clone()),
                 ids: vec![rl.clone(), "node-99".into()],
                 to: Some(chg2.clone()),
@@ -5738,6 +5796,7 @@ mod tests {
         // Detaching sends them back to the unfiled bucket.
         let r = server
             .refile(Parameters(RefileRequest {
+                basis: None,
                 project: Some(project.clone()),
                 ids: vec![chg2.clone()],
                 to: Some("unfiled".into()),
@@ -5780,6 +5839,7 @@ mod tests {
         );
         server
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ComponentItem {
                     parent_id: "node-2".into(),
@@ -5878,6 +5938,7 @@ mod tests {
         );
         session1
             .add_component(Parameters(AddComponentRequest {
+                basis: None,
                 project: Some(project.clone()),
                 items: vec![ComponentItem {
                     parent_id: "node-2".into(),
@@ -5902,6 +5963,7 @@ mod tests {
         );
         let r = session2
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: Some(project.clone()),
                 nodes: vec![UpdateNodeItem {
                     node_id: rl.clone(),
@@ -5959,6 +6021,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         let r = server
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 nodes: vec![UpdateNodeItem {
                     node_id: "node-1".into(),
@@ -6030,6 +6093,7 @@ mod tests {
         let server = ScryerServer::with_change(dir.path());
         let r = server
             .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 nodes: vec![UpdateNodeItem {
                     node_id: "node-1".into(),
@@ -6105,6 +6169,7 @@ mod tests {
         let server = ScryerServer::new();
         let r = server
             .replace_subtree(Parameters(SetNodeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 node_id: "node-2".into(),
                 data: payload.to_string(),
@@ -6165,6 +6230,7 @@ mod tests {
         let server = ScryerServer::new();
         let r = server
             .replace_subtree(Parameters(SetNodeRequest {
+                basis: None,
                 project: Some(dir.path().to_string_lossy().to_string()),
                 node_id: "node-1".into(),
                 data: payload.to_string(),
@@ -6266,6 +6332,7 @@ mod tests {
             }
             let r = server
                 .update_nodes(Parameters(UpdateNodeRequest {
+                    basis: None,
                     project: project.clone(),
                     nodes: vec![serde_json::from_value(serde_json::json!({
                         "node_id": "vt", "responsibilities": resps
@@ -6300,5 +6367,344 @@ mod tests {
         // The write itself landed — the agent can always record what it did.
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(planned.nodes[0].responsibilities.len(), 2);
+    }
+
+    // ---- chg-krevwf: the basis on every model write (resp-azc2d9, resp-0fqnf3)
+
+    /// `SCRYER_REQUIRE_BASIS` is process-global, so the tests that set it
+    /// serialize on this and restore the prior value — correct under `cargo
+    /// test`'s threads as well as nextest's process-per-test.
+    fn with_basis_required<T>(on: bool, body: impl FnOnce() -> T) -> T {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let prior = std::env::var("SCRYER_REQUIRE_BASIS").ok();
+        if on {
+            std::env::set_var("SCRYER_REQUIRE_BASIS", "1");
+        } else {
+            std::env::remove_var("SCRYER_REQUIRE_BASIS");
+        }
+        let out = body();
+        match prior {
+            Some(v) => std::env::set_var("SCRYER_REQUIRE_BASIS", v),
+            None => std::env::remove_var("SCRYER_REQUIRE_BASIS"),
+        }
+        out
+    }
+
+    /// One node carrying two claims, with a change open in the session so the
+    /// ledger guard is satisfied and the basis is the only thing under test.
+    fn basis_write_project() -> (ScryerServer, tempfile::TempDir, String, ModelRef) {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let project = dir.path().to_string_lossy().to_string();
+        let mut m = ScryModel::new();
+        m.nodes.push(node("node-1", Kind::System, "Acme", None));
+        let mut api = node("node-2", Kind::Container, "API", Some("node-1"));
+        api.responsibilities = vec![resp("resp-1"), resp("resp-2")];
+        m.nodes.push(api);
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::new();
+        server
+            .open_change(Parameters(OpenChangeRequest {
+                title: None,
+                project: Some(project.clone()),
+                rationale: Some("two writers on one node".into()),
+                change_id: None,
+            }))
+            .unwrap();
+        (server, dir, project, model_ref)
+    }
+
+    /// The basis the node's own read answers.
+    fn basis_for_node(server: &ScryerServer, project: &str, node_id: &str) -> String {
+        let r = server
+            .read_model(Parameters(ReadModelRequest {
+                project: Some(project.to_string()),
+                node: Some(node_id.to_string()),
+                layer: Default::default(),
+            }))
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&tool_text(&r)).unwrap();
+        v["basis"]
+            .as_str()
+            .unwrap_or_else(|| panic!("read_model answered no basis: {v}"))
+            .to_string()
+    }
+
+    fn reword(
+        server: &ScryerServer,
+        project: &str,
+        claims: Vec<Responsibility>,
+        basis: Option<&str>,
+    ) -> CallToolResult {
+        server
+            .update_nodes(Parameters(UpdateNodeRequest {
+                basis: basis.map(str::to_string),
+                project: Some(project.to_string()),
+                nodes: vec![UpdateNodeItem {
+                    node_id: "node-2".into(),
+                    kind: None,
+                    name: None,
+                    description: None,
+                    technology: None,
+                    external: None,
+                    responsibilities: Some(claims),
+                    properties: None,
+                    parent_id: None,
+                }],
+            }))
+            .unwrap()
+    }
+
+    fn worded(id: &str, statement: &str) -> Responsibility {
+        let mut r = resp(id);
+        r.statement = statement.into();
+        r
+    }
+
+    /// resp-azc2d9, first half: a model write that names NO basis is refused
+    /// while the switch is on, in the posture of "plan writes are refused while
+    /// no change is open" — and passes untouched while it is off, which is what
+    /// lets the mechanism land before every caller has moved.
+    #[test]
+    fn resp_azc2d9_a_write_naming_no_basis_is_refused_behind_the_switch() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+
+        let refused = with_basis_required(true, || {
+            reword(
+                &server,
+                &project,
+                vec![
+                    worded("resp-1", "answers within the budget"),
+                    resp("resp-2"),
+                ],
+                None,
+            )
+        });
+        let text = tool_text(&refused);
+        assert_eq!(refused.is_error, Some(true), "{text}");
+        assert!(text.contains("names no `basis`"), "{text}");
+        assert!(
+            text.contains("orient") && text.contains("get_pending"),
+            "the refusal names the reads that answer one: {text}"
+        );
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            planned.nodes[1].responsibilities[0].statement, "does resp-1",
+            "nothing was written"
+        );
+
+        // Switch off: the same call lands, exactly as it did before.
+        let ok = with_basis_required(false, || {
+            reword(
+                &server,
+                &project,
+                vec![
+                    worded("resp-1", "answers within the budget"),
+                    resp("resp-2"),
+                ],
+                None,
+            )
+        });
+        assert_ne!(ok.is_error, Some(true), "{}", tool_text(&ok));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            planned.nodes[1].responsibilities[0].statement,
+            "answers within the budget"
+        );
+    }
+
+    /// resp-azc2d9, second half — THE WRITE SKEW, which is why the check is on
+    /// the read SET and not on the claim being written. Writer A rewords claim
+    /// 1; writer B, on the basis it read before A wrote, rewords claim 2 on the
+    /// same node. Neither touched the other's claim and a per-claim from→to
+    /// check would have passed both, silently dropping A's wording. B is
+    /// refused NAMING claim 1's change, nothing is merged, and B's re-read then
+    /// writes clean.
+    ///
+    /// The switch is OFF throughout: a caller that names a basis is asking to
+    /// be checked, and that check never waited for the switch.
+    #[test]
+    fn resp_azc2d9_a_stale_basis_is_refused_naming_what_changed_and_never_merged() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+        let b_basis = basis_for_node(&server, &project, "node-2");
+
+        // A writes first, on a basis of its own, and wins.
+        let a_basis = basis_for_node(&server, &project, "node-2");
+        let a = reword(
+            &server,
+            &project,
+            vec![
+                worded("resp-1", "answers within the budget"),
+                resp("resp-2"),
+            ],
+            Some(&a_basis),
+        );
+        assert_ne!(a.is_error, Some(true), "{}", tool_text(&a));
+
+        // B writes claim 2 on the basis it read BEFORE A wrote.
+        let b = reword(
+            &server,
+            &project,
+            vec![
+                resp("resp-1"),
+                worded("resp-2", "retries once on a timeout"),
+            ],
+            Some(&b_basis),
+        );
+        let text = tool_text(&b);
+        assert_eq!(b.is_error, Some(true), "{text}");
+        assert!(text.contains("stale"), "{text}");
+        assert!(
+            text.contains("resp-1") && text.contains("answers within the budget"),
+            "the refusal names claim 1's change, as a diff: {text}"
+        );
+        assert!(
+            text.contains("first committer wins"),
+            "and says whose turn it is: {text}"
+        );
+        assert!(!text.contains("resp-2"), "resp-2 did not move: {text}");
+
+        // Nothing merged: A's wording stands and B's is nowhere.
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let claims = &planned.nodes[1].responsibilities;
+        assert_eq!(claims[0].statement, "answers within the budget");
+        assert_eq!(claims[1].statement, "does resp-2", "B's write did not land");
+
+        // B re-reads and writes clean.
+        let fresh = basis_for_node(&server, &project, "node-2");
+        let b2 = reword(
+            &server,
+            &project,
+            vec![
+                worded("resp-1", "answers within the budget"),
+                worded("resp-2", "retries once on a timeout"),
+            ],
+            Some(&fresh),
+        );
+        assert_ne!(b2.is_error, Some(true), "{}", tool_text(&b2));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let claims = &planned.nodes[1].responsibilities;
+        assert_eq!(claims[0].statement, "answers within the budget");
+        assert_eq!(claims[1].statement, "retries once on a timeout");
+    }
+
+    /// resp-azc2d9: the LOST UPDATE — both writers reword the SAME claim. The
+    /// second is refused on the same read-set check; no from→to field is needed
+    /// for it, because the claim it is rewording is in the set it read.
+    #[test]
+    fn resp_azc2d9_the_lost_update_is_refused_on_the_same_check() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+        let stale = basis_for_node(&server, &project, "node-2");
+
+        let fresh = basis_for_node(&server, &project, "node-2");
+        reword(
+            &server,
+            &project,
+            vec![worded("resp-1", "A's wording"), resp("resp-2")],
+            Some(&fresh),
+        );
+        let b = reword(
+            &server,
+            &project,
+            vec![worded("resp-1", "B's wording"), resp("resp-2")],
+            Some(&stale),
+        );
+        assert_eq!(b.is_error, Some(true), "{}", tool_text(&b));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            planned.nodes[1].responsibilities[0].statement, "A's wording",
+            "the first committer's wording stands"
+        );
+    }
+
+    /// resp-0fqnf3: a write's answer carries the NEW basis over the same set,
+    /// so a session's own successive writes do not refuse themselves. Without
+    /// it the very edit a writer just made would make its own next write stale.
+    #[test]
+    fn resp_0fqnf3_a_writes_answer_carries_the_new_basis() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+        let first = basis_for_node(&server, &project, "node-2");
+
+        let r = reword(
+            &server,
+            &project,
+            vec![worded("resp-1", "step one"), resp("resp-2")],
+            Some(&first),
+        );
+        let text = tool_text(&r);
+        let next = text
+            .lines()
+            .find_map(|l| l.strip_prefix("basis: "))
+            .unwrap_or_else(|| panic!("the answer carries the new basis: {text}"))
+            .to_string();
+        assert_ne!(next, first, "and it is the set as the write left it");
+
+        // The same writer writes again, against the basis its own write gave it.
+        let again = reword(
+            &server,
+            &project,
+            vec![worded("resp-1", "step one"), worded("resp-2", "step two")],
+            Some(&next),
+        );
+        assert_ne!(
+            again.is_error,
+            Some(true),
+            "a writer is never refused by its own edit: {}",
+            tool_text(&again)
+        );
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(planned.nodes[1].responsibilities[1].statement, "step two");
+
+        // And the stale first basis is still refused, so the renewal is not a
+        // way round the check.
+        let stale = reword(
+            &server,
+            &project,
+            vec![worded("resp-1", "step three"), resp("resp-2")],
+            Some(&first),
+        );
+        assert_eq!(stale.is_error, Some(true), "{}", tool_text(&stale));
+    }
+
+    /// resp-azc2d9: the check is at the CHOKE POINT, so it is not a thing one
+    /// tool can forget — `set_directives` and `refile`, which reach the plan by
+    /// two different roads, are both refused on a stale basis.
+    #[test]
+    fn resp_azc2d9_every_write_road_passes_the_same_check() {
+        let (server, _dir, project, _mr) = basis_write_project();
+        let stale = basis_for_node(&server, &project, "node-2");
+        let fresh = basis_for_node(&server, &project, "node-2");
+        reword(
+            &server,
+            &project,
+            vec![worded("resp-1", "moved on"), resp("resp-2")],
+            Some(&fresh),
+        );
+
+        let d = server
+            .set_directives(Parameters(SetDirectivesRequest {
+                basis: Some(stale.clone()),
+                project: Some(project.clone()),
+                items: vec![SetDirectivesItem {
+                    node_id: Some("node-2".into()),
+                    responsibility_id: None,
+                    directives: vec!["must answer within 50ms".into()],
+                }],
+            }))
+            .unwrap();
+        assert_eq!(d.is_error, Some(true), "{}", tool_text(&d));
+        assert!(tool_text(&d).contains("stale"), "{}", tool_text(&d));
+
+        let f = server
+            .refile(Parameters(RefileRequest {
+                basis: Some(stale),
+                project: Some(project.clone()),
+                ids: vec!["resp-1".into()],
+                to: Some("unfiled".into()),
+            }))
+            .unwrap();
+        assert_eq!(f.is_error, Some(true), "{}", tool_text(&f));
+        assert!(tool_text(&f).contains("stale"), "{}", tool_text(&f));
     }
 }
