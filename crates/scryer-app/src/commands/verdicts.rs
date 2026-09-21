@@ -694,6 +694,7 @@ fn reimplement_responsibility_at(
         // The plan had dropped it — reconstruct from committed so the to-do exists.
         if let Some(n) = planned.nodes.iter_mut().find(|n| &n.id == chost) {
             n.responsibilities.push(scryer_core::Responsibility {
+                cites: Vec::new(),
                 concern: None,
                 id: resp_id.clone(),
                 statement: cstmt.clone(),

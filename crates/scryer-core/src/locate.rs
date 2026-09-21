@@ -36,9 +36,15 @@ pub struct LocatedClaim {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vagrant: Option<bool>,
     /// The claim's own binding directives (node-level inheritance is reported
-    /// once on the result, not repeated per claim).
+    /// once on the result, not repeated per claim). Each carries its own
+    /// `cites` when it has any.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub directives: Vec<String>,
+    pub directives: Vec<crate::Directive>,
+    /// The EXTERNAL ANCHOR IDS this claim cites — answered with the claim on
+    /// every locate so a caller can hand a reader the why beside the what
+    /// (resp-b10631). Opaque: the engine never interprets one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cites: Vec<String>,
     pub anchor: SourceLocation,
     /// The claim's attached tests (its `test_map` entry), when it has any.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -66,7 +72,7 @@ pub struct LocateResult {
     pub claims: Vec<LocatedClaim>,
     /// The finest node's own directives; ancestors' contributions follow in
     /// `inherited_directives`, nearest first.
-    pub own_directives: Vec<String>,
+    pub own_directives: Vec<crate::Directive>,
     pub inherited_directives: Vec<InheritedDirectives>,
     /// True when a requested symbol narrowed `claims`; false when the symbol
     /// matched no anchor and whole-file claims are returned instead.
@@ -275,6 +281,7 @@ fn resolve_claim(
                 stale: r.stale,
                 vagrant: r.vagrant,
                 directives: r.directives.clone(),
+                cites: r.cites.clone(),
                 anchor: loc.clone(),
                 untested: untested(&r.statement, &tests),
                 tests,
@@ -291,6 +298,9 @@ fn resolve_claim(
                 stale: n.stale,
                 vagrant: n.vagrant,
                 directives: n.directives.clone(),
+                // A NODE does not cite — only a responsibility and a directive
+                // do — so a node-keyed anchor answers no citations of its own.
+                cites: Vec::new(),
                 anchor: loc.clone(),
                 untested: false,
                 tests: Vec::new(),
@@ -309,6 +319,7 @@ fn resolve_claim(
                 stale: r.stale,
                 vagrant: r.vagrant,
                 directives: r.directives.clone(),
+                cites: r.cites.clone(),
                 anchor: loc.clone(),
                 untested: untested(&r.statement, &tests),
                 tests,

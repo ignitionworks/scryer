@@ -1409,6 +1409,7 @@ mod tests {
 
     fn mk_resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: statement.into(),
@@ -1420,6 +1421,74 @@ mod tests {
             vagrant_origin: None,
             approved_statement: None,
         }
+    }
+
+    /// resp-b00631 — the citations FOLD. A citation added in the plan reaches
+    /// the committed model when its claim is committed, and the plan diff then
+    /// goes empty: the committed layer is what the code is believed to satisfy,
+    /// and the why the claim serves belongs there beside the what. A directive's
+    /// citations fold with the directive that holds them, at both altitudes.
+    #[test]
+    fn resp_b00631_a_citation_folds_into_the_committed_model() {
+        let (_dir, r) = temp_ref();
+        let mut m = ScryModel::new();
+        let mut n = mk_node("n1", "Auth", None);
+        n.directives = vec!["must never log a token".into()];
+        n.responsibilities
+            .push(mk_resp("r1", "**Rejects** a forgery"));
+        m.nodes.push(n);
+        write_model_at(&r, &m).unwrap();
+
+        // The plan gains a citation on the claim, one on the claim's directive
+        // and one on the node's own — and nothing else moves.
+        ensure_planned_at(&r).unwrap();
+        let mut planned = read_planned_at(&r).unwrap();
+        {
+            let n = &mut planned.nodes[0];
+            n.directives = vec![crate::Directive::cited(
+                "must never log a token",
+                vec!["doc-rules".into()],
+            )];
+            let claim = &mut n.responsibilities[0];
+            claim.cites = vec!["doc-intro".into()];
+            claim.directives = vec![crate::Directive::cited(
+                "must stay stateless",
+                vec!["doc-two".into()],
+            )];
+        }
+        write_planned_at(&r, &planned).unwrap();
+
+        // The plan HAS work to fold — a citation is a reword, not a no-op.
+        assert!(
+            !plan_diff_at(&r).unwrap().is_empty(),
+            "a citation added in the plan is plan work"
+        );
+
+        commit_element(&r, diff::ElementKind::Responsibility, Some("n1"), "r1").unwrap();
+        commit_element(&r, diff::ElementKind::Node, None, "n1").unwrap();
+
+        let model = read_model_at(&r).unwrap();
+        let n = &model.nodes[0];
+        assert_eq!(
+            n.responsibilities[0].cites,
+            vec!["doc-intro".to_string()],
+            "the claim's citation is committed"
+        );
+        assert_eq!(
+            n.responsibilities[0].directives[0].cites,
+            vec!["doc-two".to_string()],
+            "and its directive's"
+        );
+        assert_eq!(
+            n.directives[0].cites,
+            vec!["doc-rules".to_string()],
+            "and the node's own"
+        );
+        assert!(
+            plan_diff_at(&r).unwrap().is_empty(),
+            "the plan clears once the citations are folded: {:?}",
+            plan_diff_at(&r).unwrap()
+        );
     }
 
     /// Committing an added/renamed node folds the draft into the model; once

@@ -408,11 +408,15 @@ fn diff_nodes(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) {
                     prev.description.as_deref().unwrap_or(""),
                     n.description.as_deref().unwrap_or(""),
                 );
+                // A directive's CITATIONS are part of what it says (resp-b00631):
+                // the rendering carries them, so an anchor added to or removed
+                // from a directive whose prose never moved still reads as a
+                // reword of this node's directives rather than folding invisibly.
                 reword(
                     &mut changes,
                     "directives",
-                    &prev.directives.join("\n"),
-                    &n.directives.join("\n"),
+                    &crate::directives_rendered(&prev.directives),
+                    &crate::directives_rendered(&n.directives),
                 );
                 // `kind` and `external` are truth-bearing, not cosmetic: `kind`
                 // sets a node's altitude (parent/child legality), `external` flips
@@ -600,8 +604,17 @@ fn diff_responsibilities(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) 
                 reword(
                     &mut changes,
                     "directives",
-                    &prev.resp.directives.join("\n"),
-                    &owned.resp.directives.join("\n"),
+                    &crate::directives_rendered(&prev.resp.directives),
+                    &crate::directives_rendered(&owned.resp.directives),
+                );
+                // The claim's OWN citations, the same way: an external anchor id
+                // added or removed is a reword of the claim (resp-b00631), so it
+                // enters the plan queue and folds like any other wording change.
+                reword(
+                    &mut changes,
+                    "cites",
+                    &prev.resp.cites.join(", "),
+                    &owned.resp.cites.join(", "),
                 );
                 if !changes.is_empty() {
                     out.changes.push(ElementChange {
@@ -804,6 +817,7 @@ mod tests {
 
     fn resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.to_string(),
             statement: statement.to_string(),
@@ -815,6 +829,107 @@ mod tests {
             vagrant_origin: None,
             approved_statement: None,
         }
+    }
+
+    /// resp-b00631 — the DIFF half of `cites`. A citation is part of what an
+    /// element says, so adding or removing one is a REWORD in the plan diff and
+    /// nothing else: it enters the queue, it folds, and it never reads as an
+    /// add, a move or a delete. Three grains: a claim's own citations, a
+    /// claim's DIRECTIVE's citations, and a NODE's directive's citations — the
+    /// last two with the prose held still, because a rendering that showed only
+    /// the words would let a citation change fold invisibly.
+    #[test]
+    fn resp_b00631_a_citation_added_or_removed_reads_as_a_reword() {
+        let rewords = |d: &ModelDiff, id: &str| -> Vec<(String, String, String)> {
+            d.changes
+                .iter()
+                .filter(|c| c.id == id)
+                .flat_map(|c| c.changes.iter())
+                .filter_map(|c| match c {
+                    Change::Reworded { field, from, to } => {
+                        Some((field.clone(), from.clone(), to.clone()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let mut before = ScryModel::new();
+        let mut n = node("n1", "N", None);
+        n.directives = vec!["must never log a token".into()];
+        let mut r = resp("r1", "**Does** a thing");
+        r.directives = vec!["must stay stateless".into()];
+        n.responsibilities.push(r);
+        before.nodes.push(n);
+
+        // (1) A CITATION ARRIVES on the claim. Its statement never moved.
+        let mut after = before.clone();
+        after.nodes[0].responsibilities[0].cites = vec!["anchor-one".into()];
+        let d = diff(&before, &after);
+        assert_eq!(
+            rewords(&d, "r1"),
+            vec![("cites".to_string(), String::new(), "anchor-one".to_string())],
+            "a citation arriving is a reword of the claim and nothing else"
+        );
+        assert!(
+            !d.changes
+                .iter()
+                .any(|c| c.id == "r1" && c.changes.iter().any(|ch| matches!(ch, Change::Added))),
+            "a claim that gained a citation is not a NEW claim"
+        );
+
+        // (2) And LEAVING is the same reword, the other way round.
+        let d = diff(&after, &before);
+        assert_eq!(
+            rewords(&d, "r1"),
+            vec![("cites".to_string(), "anchor-one".to_string(), String::new())],
+            "a citation removed is a reword too — not a silent no-op"
+        );
+
+        // (3) A citation on the CLAIM'S DIRECTIVE, prose unchanged. The
+        // rendering carries the anchors, so the directives field rewords.
+        let mut after = before.clone();
+        after.nodes[0].responsibilities[0].directives = vec![crate::Directive::cited(
+            "must stay stateless",
+            vec!["anchor-two".into()],
+        )];
+        let d = diff(&before, &after);
+        assert_eq!(
+            rewords(&d, "r1"),
+            vec![(
+                "directives".to_string(),
+                "must stay stateless".to_string(),
+                "must stay stateless [cites: anchor-two]".to_string()
+            )],
+            "a directive's citation changes what the directive says"
+        );
+
+        // (4) The same at NODE altitude — a node's own directives carry down,
+        // so a citation on one is a reword of the node.
+        let mut after = before.clone();
+        after.nodes[0].directives = vec![crate::Directive::cited(
+            "must never log a token",
+            vec!["anchor-three".into()],
+        )];
+        let d = diff(&before, &after);
+        assert_eq!(
+            rewords(&d, "n1"),
+            vec![(
+                "directives".to_string(),
+                "must never log a token".to_string(),
+                "must never log a token [cites: anchor-three]".to_string()
+            )]
+        );
+
+        // (5) NOTHING changed is nothing said: an identical model with its
+        // citations in place is a clean diff, so a citation never churns the
+        // queue on a re-read.
+        let mut both = before.clone();
+        both.nodes[0].responsibilities[0].cites = vec!["anchor-one".into()];
+        assert!(
+            diff(&both, &both.clone()).changes.is_empty(),
+            "a model diffed against itself is clean, citations and all"
+        );
     }
 
     fn link(id: &str, src: &str, dst: &str) -> Link {

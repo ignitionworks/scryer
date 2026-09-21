@@ -22,6 +22,180 @@ pub enum Kind {
     Symbol,
 }
 
+// --- Directives ---
+
+/// One prescriptive HOW-constraint, with the external anchors that motivate it.
+///
+/// A directive is its WORDS: it carries no id, and `set_directives` replaces a
+/// holder's whole list, so the text is the whole of its identity. `cites` rides
+/// beside the text — a list of EXTERNAL ANCHOR IDS, opaque strings this engine
+/// stores, diffs, folds and answers on every read and NEVER interprets. What an
+/// id points at, and whether it still resolves, is the caller's business: the
+/// engine neither parses nor validates one, so any project can hang its own
+/// anchoring on this field without the engine learning that project's scheme.
+///
+/// ON THE WIRE a directive with no citation is a BARE STRING, exactly as
+/// directives have always been stored — every model written before `cites`
+/// existed reads back unchanged, and one written after is unchanged again the
+/// moment its last citation goes. Only a cited directive takes the object form
+/// `{ "text": …, "cites": [ … ] }`, and both forms are accepted on read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Directive {
+    /// The constraint itself — verb-led "must"/"never" prose.
+    pub text: String,
+    /// External anchor ids this directive cites; empty when it cites nothing.
+    pub cites: Vec<String>,
+}
+
+impl Directive {
+    /// A directive with no citations.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            cites: Vec::new(),
+        }
+    }
+
+    /// A directive citing `cites`.
+    pub fn cited(text: impl Into<String>, cites: Vec<String>) -> Self {
+        Self {
+            text: text.into(),
+            cites,
+        }
+    }
+
+    /// The constraint's words, for a reader that wants only the prose.
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+}
+
+impl std::ops::Deref for Directive {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl AsRef<str> for Directive {
+    fn as_ref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl std::fmt::Display for Directive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+impl From<&str> for Directive {
+    fn from(text: &str) -> Self {
+        Self::new(text)
+    }
+}
+
+impl From<String> for Directive {
+    fn from(text: String) -> Self {
+        Self::new(text)
+    }
+}
+
+/// Compares against bare prose, so a caller (and a test) that holds only the
+/// words can still ask whether a directive says them. An uncited directive and
+/// its text are equal; a cited one is NOT — its citations are part of what it
+/// says, and a comparison that ignored them would hide a citation's arrival.
+impl PartialEq<str> for Directive {
+    fn eq(&self, other: &str) -> bool {
+        self.cites.is_empty() && self.text == other
+    }
+}
+
+impl PartialEq<&str> for Directive {
+    fn eq(&self, other: &&str) -> bool {
+        self.cites.is_empty() && self.text == *other
+    }
+}
+
+impl PartialEq<String> for Directive {
+    fn eq(&self, other: &String) -> bool {
+        self.cites.is_empty() && &self.text == other
+    }
+}
+
+impl Serialize for Directive {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        if self.cites.is_empty() {
+            return ser.serialize_str(&self.text);
+        }
+        let mut st = ser.serialize_struct("Directive", 2)?;
+        st.serialize_field("text", &self.text)?;
+        st.serialize_field("cites", &self.cites)?;
+        st.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Directive {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Bare(String),
+            Object {
+                text: String,
+                #[serde(default)]
+                cites: Vec<String>,
+            },
+        }
+        Ok(match Wire::deserialize(de)? {
+            Wire::Bare(text) => Directive::new(text),
+            Wire::Object { text, cites } => Directive::cited(text, cites),
+        })
+    }
+}
+
+impl schemars::JsonSchema for Directive {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Directive".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "The prose, or {text, cites} — opaque external anchor ids.",
+            "oneOf": [
+                { "type": "string" },
+                {
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string" },
+                        "cites": { "type": "array", "items": { "type": "string" } }
+                    },
+                    "required": ["text"]
+                }
+            ]
+        })
+    }
+}
+
+/// The citations on a list of directives, rendered as one comparable,
+/// human-legible line — the form the plan diff and the basis fingerprint read,
+/// so a citation added to or removed from a directive registers as a REWORD of
+/// that holder's directives even when every word of the prose is unchanged.
+pub fn directives_rendered(directives: &[Directive]) -> String {
+    directives
+        .iter()
+        .map(|d| {
+            if d.cites.is_empty() {
+                d.text.clone()
+            } else {
+                format!("{} [cites: {}]", d.text, d.cites.join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // --- Responsibility ---
 
 /// A pure business-responsibility statement. The `statement` field is the spec;
@@ -52,6 +226,18 @@ pub struct Responsibility {
     #[schemars(description = "ONE kebab-case concern slug; omit for core domain flow.")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concern: Option<String>,
+    /// EXTERNAL ANCHOR IDS this claim cites — opaque strings the engine stores,
+    /// diffs, folds and answers on every read, and NEVER interprets. The engine
+    /// does not parse an id, resolve it, or check that anything answers to it:
+    /// what an anchor is, and where it lives, belong to the caller, so a project
+    /// can anchor its claims in its own documents without the engine learning
+    /// that project's scheme. Agent-writable (`update_claim`, `update_nodes`),
+    /// unlike `directives`. Truth-bearing beside the statement: a citation
+    /// added or removed is a REWORD of the claim in the plan diff, and re-dates
+    /// `last_touched_at`.
+    #[schemars(description = "Opaque external anchor ids this claim cites.")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cites: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vagrant: Option<bool>,
     /// Why a claim is vagrant when it did NOT come from code: `"amendment"` (a
@@ -96,7 +282,7 @@ pub struct Responsibility {
     /// edits the user explicitly requested. Not part of conformance.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(skip)]
-    pub directives: Vec<String>,
+    pub directives: Vec<Directive>,
     /// Unix seconds of the last truth-bearing edit (statement / status / flags /
     /// directives). Drives the canvas "fossilization" patina: a fresh edit
     /// glistens, long-untouched code-backed responsibilities weather to stone.
@@ -259,7 +445,7 @@ pub struct Node {
     /// the user explicitly requested. Plain text — not part of conformance.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(skip)]
-    pub directives: Vec<String>,
+    pub directives: Vec<Directive>,
 }
 
 /// The `empty` flag — a SYMBOL that carries no semantic content of its own: no
@@ -282,7 +468,7 @@ pub fn is_node_empty(node: &Node) -> bool {
 pub struct InheritedDirectives {
     pub node_id: String,
     pub name: String,
-    pub directives: Vec<String>,
+    pub directives: Vec<Directive>,
 }
 
 /// The directives a node inherits from its ancestry: every ancestor's
@@ -451,6 +637,100 @@ pub fn test_resp_id(key: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// resp-b00631 — the STORAGE half of `cites`. A citation is an opaque
+    /// external anchor id: the engine keeps it, hands it back byte for byte,
+    /// and reads nothing into it. On the wire an UNCITED directive stays the
+    /// bare string it has always been, so every model written before this field
+    /// existed loads unchanged and re-serializes identically; only a cited one
+    /// takes the `{text, cites}` form, and both forms load.
+    #[test]
+    fn resp_b00631_citations_round_trip_and_an_uncited_directive_stays_a_bare_string() {
+        // A model in the OLD shape — directives as bare strings, no `cites`
+        // anywhere — loads with empty citation lists and no error.
+        let legacy: Node = serde_json::from_str(
+            r#"{ "id": "n1", "kind": "component", "name": "N",
+                 "directives": ["must never log a token"],
+                 "responsibilities": [
+                   { "id": "r1", "statement": "**Does** a thing",
+                     "directives": ["must stay stateless"] }
+                 ] }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy.directives,
+            vec!["must never log a token".to_string()]
+        );
+        assert!(legacy.directives[0].cites.is_empty());
+        assert!(legacy.responsibilities[0].cites.is_empty());
+        assert!(legacy.responsibilities[0].directives[0].cites.is_empty());
+
+        // And it re-serializes into the SAME shape: a bare string, and no
+        // `cites` key at all. A field nobody uses costs nobody a diff.
+        let back = serde_json::to_value(&legacy).unwrap();
+        assert_eq!(
+            back["directives"],
+            serde_json::json!(["must never log a token"]),
+            "an uncited directive serializes as the bare string it came in as"
+        );
+        assert!(
+            back["responsibilities"][0].get("cites").is_none(),
+            "a claim that cites nothing writes no `cites` key: {back:#}"
+        );
+
+        // The CITED shape, on a claim and on a directive, both altitudes.
+        let cited: Node = serde_json::from_str(
+            r#"{ "id": "n1", "kind": "component", "name": "N",
+                 "directives": [{ "text": "must never log a token",
+                                  "cites": ["anchor-one", "anchor-two"] }],
+                 "responsibilities": [
+                   { "id": "r1", "statement": "**Does** a thing",
+                     "cites": ["anchor-three"],
+                     "directives": [{ "text": "must stay stateless",
+                                      "cites": ["anchor-four"] }] }
+                 ] }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cited.directives[0].cites,
+            vec!["anchor-one".to_string(), "anchor-two".to_string()]
+        );
+        assert_eq!(cited.directives[0].text, "must never log a token");
+        assert_eq!(
+            cited.responsibilities[0].cites,
+            vec!["anchor-three".to_string()]
+        );
+        assert_eq!(
+            cited.responsibilities[0].directives[0].cites,
+            vec!["anchor-four".to_string()]
+        );
+
+        // Round-tripped, a citation survives byte for byte — including an id
+        // in a scheme the engine has never heard of, which it must not parse,
+        // normalize or reject. Opaque means opaque.
+        let mut odd = cited.clone();
+        odd.responsibilities[0].cites = vec![
+            "doc-intro".into(),
+            "§4".into(),
+            "https://example.test/doc#frag".into(),
+            "  ".into(),
+        ];
+        let text = serde_json::to_string(&odd).unwrap();
+        let again: Node = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            again.responsibilities[0].cites, odd.responsibilities[0].cites,
+            "every id comes back exactly as given, whatever it looks like"
+        );
+
+        // And a cited directive DOES take the object form, so a reader sees the
+        // citation beside the words rather than having to ask twice.
+        let out = serde_json::to_value(&cited).unwrap();
+        assert_eq!(
+            out["directives"][0],
+            serde_json::json!({ "text": "must never log a token",
+                                "cites": ["anchor-one", "anchor-two"] })
+        );
+    }
 
     /// Legacy `.scry` files written before the schema/symbol merge stored data
     /// shapes as `"kind":"schema"`. The serde alias must load them as symbols

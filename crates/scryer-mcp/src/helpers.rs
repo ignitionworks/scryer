@@ -158,7 +158,10 @@ pub(crate) fn breadcrumb(model: &ScryModel, node_id: &str) -> String {
 /// `directives`. Before committing any AI write, force each back to whatever
 /// the prior on-disk model held for that id; ids with no prior entry get none.
 /// This lets the AI create, edit, and move responsibilities and nodes while
-/// leaving directives entirely under the user's control. (The interactive
+/// leaving directives entirely under the user's control. A directive's own
+/// `cites` travels inside the directive, so it is restored with it; a CLAIM's
+/// `cites` is the agent's to write (`update_claim`, `update_nodes`) and is
+/// deliberately left alone here. (The interactive
 /// patch path can't reach them — they're `schemars(skip)` — but the whole-node
 /// generation primitives `replace_model`/`replace_subtree` rebuild nodes from JSON and
 /// would otherwise drop them.) Not applied to `move_responsibilities`, which
@@ -171,7 +174,7 @@ pub(crate) fn enforce_readonly_directives(model: &mut ScryModel, prior: &ScryMod
         .iter()
         .flat_map(|n| n.responsibilities.iter())
         .chain(prior.groups.iter().flat_map(|g| g.responsibilities.iter()));
-    let prior_dir: HashMap<&str, &Vec<String>> = prior_resps
+    let prior_dir: HashMap<&str, &Vec<scryer_core::Directive>> = prior_resps
         .map(|r| (r.id.as_str(), &r.directives))
         .collect();
     let restore = |r: &mut Responsibility| {
@@ -181,7 +184,7 @@ pub(crate) fn enforce_readonly_directives(model: &mut ScryModel, prior: &ScryMod
             .unwrap_or_default();
     };
     // Node-level directives, keyed by node id (same read-only guarantee).
-    let prior_node_dir: HashMap<&str, &Vec<String>> = prior
+    let prior_node_dir: HashMap<&str, &Vec<scryer_core::Directive>> = prior
         .nodes
         .iter()
         .map(|n| (n.id.as_str(), &n.directives))

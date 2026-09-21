@@ -71,6 +71,7 @@ impl IdMinter {
     fn resp(&mut self, statement: &str, concern: Option<&str>) -> Responsibility {
         let id = self.mint("resp");
         Responsibility {
+            cites: Vec::new(),
             concern: concern.map(Into::into),
             id,
             statement: statement.trim().to_string(),

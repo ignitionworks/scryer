@@ -136,7 +136,7 @@ pub fn write_model_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
 }
 
 /// Whether two responsibilities differ in any *truth-bearing* field — the spec
-/// statement, drift flags, or directives. Excludes `last_touched_at`
+/// statement, drift flags, citations, or directives. Excludes `last_touched_at`
 /// itself (that's the output) so an unchanged responsibility keeps its date,
 /// and `concern` — a tag is presentation metadata, so retagging never resets
 /// the fossilization patina.
@@ -145,6 +145,10 @@ fn resp_truth_changed(a: &Responsibility, b: &Responsibility) -> bool {
         || a.vagrant != b.vagrant
         || a.stale != b.stale
         || a.directives != b.directives
+        // A citation says why the claim is here, so its arrival or departure is
+        // an edit to the claim's truth and re-dates it like a reword
+        // (resp-b00631). A directive's own citations ride in `directives`.
+        || a.cites != b.cites
 }
 
 /// Whether two properties differ in any truth-bearing field (label /
@@ -666,6 +670,7 @@ mod tests {
             technology: None,
             description: None,
             responsibilities: vec![Responsibility {
+                cites: Vec::new(),
                 concern: None,
                 id: "r1".into(),
                 statement: statement.into(),
@@ -715,6 +720,75 @@ mod tests {
             edited.nodes[0].responsibilities[0].last_touched_at,
             Some(300),
             "a changed statement re-dates the responsibility"
+        );
+    }
+
+    /// resp-b00631 — a CITATION re-dates the claim. The fossilization clock
+    /// reads "when did what this claim says last change?", and what a claim
+    /// cites is part of what it says: a patina that glistened for a reword but
+    /// stayed stone for an arriving why would tell the reader the wrong thing.
+    /// Its DIRECTIVE's citations count the same way, with the prose held still.
+    #[test]
+    fn resp_b00631_a_citation_re_dates_the_claim_like_a_reword() {
+        let mut m = one_resp_model("does X");
+        stamp_touches(&mut m, None, 100);
+        assert_eq!(m.nodes[0].responsibilities[0].last_touched_at, Some(100));
+
+        // (1) An anchor arrives on the claim, nothing else moves: re-dated.
+        let prior = m.clone();
+        let mut cited = m.clone();
+        cited.nodes[0].responsibilities[0].cites = vec!["doc-intro".into()];
+        stamp_touches(&mut cited, Some(&prior), 200);
+        assert_eq!(
+            cited.nodes[0].responsibilities[0].last_touched_at,
+            Some(200),
+            "a citation is an edit to what the claim says"
+        );
+
+        // (2) And LEAVING is a touch too — a claim that lost its why is not
+        // the claim it was.
+        let prior = cited.clone();
+        let mut uncited = cited.clone();
+        uncited.nodes[0].responsibilities[0].cites = Vec::new();
+        stamp_touches(&mut uncited, Some(&prior), 300);
+        assert_eq!(
+            uncited.nodes[0].responsibilities[0].last_touched_at,
+            Some(300)
+        );
+
+        // (3) An anchor on the claim's DIRECTIVE, prose unchanged: re-dated,
+        // because a comparison over the words alone would read this as still.
+        let prior = uncited.clone();
+        let mut worded = uncited.clone();
+        worded.nodes[0].responsibilities[0].directives = vec!["must stay stateless".into()];
+        stamp_touches(&mut worded, Some(&prior), 400);
+        assert_eq!(
+            worded.nodes[0].responsibilities[0].last_touched_at,
+            Some(400)
+        );
+        let prior = worded.clone();
+        let mut anchored = worded.clone();
+        anchored.nodes[0].responsibilities[0].directives = vec![crate::Directive::cited(
+            "must stay stateless",
+            vec!["doc-rules".into()],
+        )];
+        stamp_touches(&mut anchored, Some(&prior), 500);
+        assert_eq!(
+            anchored.nodes[0].responsibilities[0].last_touched_at,
+            Some(500),
+            "a directive's citation arriving re-dates its holder"
+        );
+
+        // (4) And a re-write that says the same thing, citations and all,
+        // carries the date forward — a citation never churns the patina.
+        let prior = anchored.clone();
+        let mut same = anchored.clone();
+        same.nodes[0].icon = Some("Box".into());
+        stamp_touches(&mut same, Some(&prior), 600);
+        assert_eq!(
+            same.nodes[0].responsibilities[0].last_touched_at,
+            Some(500),
+            "identical citations are not a touch"
         );
     }
 
@@ -1302,6 +1376,7 @@ mod tests {
 
     fn mk_resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: statement.into(),

@@ -1016,10 +1016,22 @@ impl ScryerServer {
             scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
             for (score, n) in scored.iter().take(3) {
                 finest.insert(n.id.clone());
-                let resps: Vec<&str> = n
+                // Each matched claim answers its ID and its CITATIONS beside
+                // the statement (resp-b10631): the id is what a caller needs to
+                // reach the claim with a write, and the citations are the why a
+                // host hands the session beside the what. `cites` is absent
+                // wherever a claim cites nothing — the compacting strip below
+                // drops the empty array.
+                let resps: Vec<serde_json::Value> = n
                     .responsibilities
                     .iter()
-                    .map(|r| r.statement.as_str())
+                    .map(|r| {
+                        serde_json::json!({
+                            "id": r.id,
+                            "statement": r.statement,
+                            "cites": r.cites,
+                        })
+                    })
                     .collect();
                 // Testable claims on this node with no test attached — same
                 // gate as health's `untested` (person/external never expect
@@ -2316,6 +2328,7 @@ mod tests {
 
     fn resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: statement.into(),
@@ -3169,6 +3182,7 @@ mod tests {
         let mut m = ScryModel::new();
         let mut sys = node("sys", Kind::System, "Sys", None);
         sys.responsibilities.push(Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: "r-sys".into(),
             statement: "orchestrates everything".into(),
@@ -3183,6 +3197,7 @@ mod tests {
         m.nodes.push(sys);
         let mut leaf = node("leaf", Kind::Symbol, "leafFn", Some("sys"));
         leaf.responsibilities.push(Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: "r-leaf".into(),
             statement: "does the thing".into(),
@@ -3774,6 +3789,175 @@ mod tests {
         );
         let inh = serde_json::to_string(&v["inheritedDirectives"]).unwrap();
         assert!(inh.contains("must never log tokens") && inh.contains("must stay stateless"));
+    }
+
+    /// resp-b10631 — the citations are ANSWERED, not just stored: every
+    /// responsibility and every directive that `orient`, `read_model` and
+    /// `locate` return carries its own `cites`, so a host can hand a session
+    /// the why beside the what without a second read. Three surfaces, one
+    /// model: the claim's own anchors, its directive's, and the node-level
+    /// directives that bind it from above.
+    #[test]
+    fn resp_b10631_orient_read_model_and_locate_answer_cites_with_every_claim_and_directive() {
+        let (server, _dir, project, model_ref) = locate_project();
+
+        // Citations at every altitude the reads report: a claim, the claim's
+        // own directive, the finest node's own directive, and an ANCESTOR's
+        // (which reaches the reader through `inheritedDirectives`).
+        let mut m = scryer_core::read_model_at(&model_ref).unwrap();
+        {
+            let sym = m.nodes.iter_mut().find(|n| n.id == "vt").unwrap();
+            sym.directives = vec![scryer_core::Directive::cited(
+                "must reject an expired token",
+                vec!["doc-anchors".into()],
+            )];
+            let r = sym
+                .responsibilities
+                .iter_mut()
+                .find(|r| r.id == "r-vt")
+                .unwrap();
+            r.cites = vec!["doc-intro".into(), "doc-two".into()];
+            r.directives = vec![scryer_core::Directive::cited(
+                "must never log tokens",
+                vec!["doc-rules".into()],
+            )];
+        }
+        m.nodes
+            .iter_mut()
+            .find(|n| n.id == "auth")
+            .unwrap()
+            .directives = vec![scryer_core::Directive::cited(
+            "must never log tokens",
+            vec!["doc-context".into()],
+        )];
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+
+        // (1) LOCATE — the claim it reports carries its citations, and so does
+        // the directive on it.
+        let v = result_json(
+            &server
+                .locate(Parameters(LocateRequest {
+                    project: Some(project.clone()),
+                    file: "src/auth.rs".into(),
+                    symbol: None,
+                }))
+                .unwrap(),
+        );
+        assert_eq!(v["claims"][0]["id"], "r-vt");
+        assert_eq!(
+            v["claims"][0]["cites"],
+            serde_json::json!(["doc-intro", "doc-two"]),
+            "locate answers the claim's anchors with the claim: {v:#}"
+        );
+        assert_eq!(
+            v["claims"][0]["directives"][0],
+            serde_json::json!({ "text": "must never log tokens",
+                                "cites": ["doc-rules"] }),
+            "and the claim's directive answers its own: {v:#}"
+        );
+        assert_eq!(
+            v["ownDirectives"][0],
+            serde_json::json!({ "text": "must reject an expired token",
+                                "cites": ["doc-anchors"] }),
+            "the finest node's own directives too: {v:#}"
+        );
+        let inh = serde_json::to_string(&v["inheritedDirectives"]).unwrap();
+        assert!(
+            inh.contains("doc-context"),
+            "an ANCESTOR's directive carries its citation down: {inh}"
+        );
+
+        // (2) READ_MODEL — the same, on the node subtree.
+        let v = result_json(
+            &server
+                .read_model(Parameters(ReadModelRequest {
+                    project: Some(project.clone()),
+                    node: Some("vt".into()),
+                    layer: Default::default(),
+                }))
+                .unwrap(),
+        );
+        assert_eq!(
+            v["node"]["responsibilities"][0]["cites"],
+            serde_json::json!(["doc-intro", "doc-two"]),
+            "read_model answers the claim's anchors: {v:#}"
+        );
+        assert_eq!(
+            v["node"]["responsibilities"][0]["directives"][0]["cites"],
+            serde_json::json!(["doc-rules"])
+        );
+        assert_eq!(
+            v["node"]["directives"][0]["cites"],
+            serde_json::json!(["doc-anchors"])
+        );
+        assert!(
+            serde_json::to_string(&v["inheritedDirectives"])
+                .unwrap()
+                .contains("doc-context"),
+            "{v:#}"
+        );
+
+        // (3) ORIENT — both halves of its answer. The FILE side reports the
+        // located claims; the TASK side reports the matched node's claims, and
+        // each of those now names its id and its anchors, which is what lets a
+        // caller reach the claim and read its why in one call.
+        let v = result_json(
+            &server
+                .orient(Parameters(OrientRequest {
+                    project: Some(project.clone()),
+                    task: Some("verify token".into()),
+                    files: Some(vec!["src/auth.rs".into()]),
+                }))
+                .unwrap(),
+        );
+        assert_eq!(
+            v["files"][0]["claims"][0]["cites"],
+            serde_json::json!(["doc-intro", "doc-two"]),
+            "orient's file side: {v:#}"
+        );
+        assert_eq!(
+            v["files"][0]["claims"][0]["directives"][0]["cites"],
+            serde_json::json!(["doc-rules"])
+        );
+        let matched = v["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .find(|m| m["id"] == "vt")
+            .unwrap_or_else(|| panic!("no match on vt: {v:#}"));
+        assert_eq!(
+            matched["responsibilities"][0],
+            serde_json::json!({ "id": "r-vt",
+                                "statement": "rejects forged credentials",
+                                "cites": ["doc-intro", "doc-two"] }),
+            "orient's task side answers each claim's id, words and anchors: {v:#}"
+        );
+
+        // (4) A claim that cites NOTHING answers no `cites` key — the reads stay
+        // as terse as they were for every model that has no citations at all.
+        let mut m = scryer_core::read_model_at(&model_ref).unwrap();
+        m.nodes
+            .iter_mut()
+            .find(|n| n.id == "vt")
+            .unwrap()
+            .responsibilities[0]
+            .cites = Vec::new();
+        scryer_core::write_model_at(&model_ref, &m).unwrap();
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let v = result_json(
+            &server
+                .locate(Parameters(LocateRequest {
+                    project: Some(project),
+                    file: "src/auth.rs".into(),
+                    symbol: None,
+                }))
+                .unwrap(),
+        );
+        assert!(
+            v["claims"][0].get("cites").is_none(),
+            "an uncited claim costs the reader no key: {v:#}"
+        );
     }
 
     /// locate reports the owning scope's health — the finest node's own +

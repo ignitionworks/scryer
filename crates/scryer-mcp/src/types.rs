@@ -466,6 +466,14 @@ pub struct UpdateClaimRequest {
     /// The claim's new concern slug; empty string clears it; omit to leave it.
     #[schemars(description = "New concern slug; \"\" clears it; omit to leave it.")]
     pub concern: Option<String>,
+    /// The claim's new citation list — the EXTERNAL ANCHOR IDS that motivate it.
+    /// The FULL replacement array; `[]` clears every citation; omit the field to
+    /// leave the claim's citations alone. Opaque to the engine, which stores,
+    /// diffs, folds and answers them and interprets none.
+    #[schemars(
+        description = "Full list of opaque external anchor ids; [] clears; omit to leave them."
+    )]
+    pub cites: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -474,8 +482,10 @@ pub struct SetDirectivesItem {
     pub node_id: Option<String>,
     /// Responsibility id whose directives are replaced; exactly one of node_id / responsibility_id.
     pub responsibility_id: Option<String>,
-    /// Full replacement list of "must"/"never" directives; empty clears.
-    pub directives: Vec<String>,
+    /// Full replacement list of "must"/"never" directives; empty clears. An
+    /// entry is the prose, or `{text, cites}` naming its opaque external
+    /// anchor ids.
+    pub directives: Vec<scryer_core::Directive>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

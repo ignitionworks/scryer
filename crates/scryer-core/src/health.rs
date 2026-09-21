@@ -773,6 +773,7 @@ mod tests {
 
     fn resp(id: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: format!("does {id}"),

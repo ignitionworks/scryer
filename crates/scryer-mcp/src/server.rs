@@ -328,9 +328,14 @@ mod rule_wiring {
         // 17700 → 17900: `sign_off` says it carries a basis (judgement 733).
         // 17900 → 18300: `search_model` now answers two questions and its
         // description has to say which is which (chg-7bcf3z, resp-9rp8zq).
+        // 18300 → 18400: `update_claim` and `set_directives` each say that they
+        // carry `cites` — the external anchor ids an element cites — and what
+        // shape it takes (chg-t1tefn, resp-b00631). Two callers cannot write a
+        // citation they are not told about, and this is the only always-loaded
+        // place to tell them; the field's own prose lives in the schema.
         assert!(
-            total <= 18_300,
-            "descriptions total {total} chars (budget 18300)"
+            total <= 18_400,
+            "descriptions total {total} chars (budget 18400)"
         );
         for (name, d) in &descs {
             assert!(
@@ -485,9 +490,16 @@ mod rule_wiring {
         // (resp-q48seb).
         // 34400 → 34600: `sign_off`'s own `basis` (judgement 733); → 35300
         // for `search_model`'s occurrences mode (chg-7bcf3z, resp-9rp8zq).
+        // 35300 → 36000 for `cites` (chg-t1tefn, resp-b00631): a claim's
+        // citations are agent-writable, so the field rides in EVERY tool that
+        // carries a responsibility — about 0.5 KB spread over them — plus
+        // `update_claim`'s own `cites` and `set_directives`' string-or-object
+        // directive. There is no cheaper place: a caller cannot write a
+        // citation it is not told about, and hiding the field from the write
+        // schemas would leave `cites` readable and unwritable.
         assert!(
-            total <= 35_300,
-            "schemas total {total} chars (budget 35300)"
+            total <= 36_000,
+            "schemas total {total} chars (budget 36000)"
         );
     }
 }

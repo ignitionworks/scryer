@@ -898,11 +898,12 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "Reword ONE claim in place: `claim_id` and its new `statement` and/or `concern`, on the \
-         `node_id` that holds it. The smaller road beside update_nodes' whole-array write — use \
-         that one to ADD, remove or reorder claims. Everything not named is left alone: the \
-         directives, the vagrant flag and the statement a sign-off approved all survive a reword, \
-         which a whole-array resend drops. Carries `basis` like every write.\n\
+        description = "Reword ONE claim in place: `claim_id` and its new `statement`, `concern` and/or \
+         `cites`, on the `node_id` that holds it. The smaller road beside update_nodes' \
+         whole-array write — use that one to ADD, remove or reorder claims. Everything not \
+         named is left alone: the directives, the vagrant flag and the statement a sign-off \
+         approved all survive a reword, which a whole-array resend drops. `cites` replaces the \
+         whole list of external anchor ids ([] clears). Carries `basis` like every write.\n\
          Rules: statement-ears, scanning, naming, concerns, altitude"
     )]
     pub fn update_claim(
@@ -923,10 +924,10 @@ impl ScryerServer {
             }
         };
 
-        if req.statement.is_none() && req.concern.is_none() {
+        if req.statement.is_none() && req.concern.is_none() && req.cites.is_none() {
             return Ok(CallToolResult::error(vec![Content::text(
-                "Give `statement` and/or `concern` — update_claim rewords a claim, and a call \
-                 that names neither has nothing to write."
+                "Give `statement`, `concern` and/or `cites` — update_claim rewords a claim, and \
+                 a call that names none of them has nothing to write."
                     .to_string(),
             )]));
         }
@@ -1023,6 +1024,27 @@ impl ScryerServer {
                 claim.concern = next;
             }
         }
+        // THE CITATIONS ARE THE FULL ARRAY, like the directives: an empty array
+        // clears them, omitting the field leaves them. Each id is stored as
+        // given — the engine trims the blanks and drops duplicates, and reads
+        // nothing else into an id: what it anchors is the caller's business
+        // (resp-b00631). A citation change is a reword, so it re-dates the claim
+        // and enters the plan diff, but it is NOT drift's verdict: unlike a
+        // statement reword it leaves `stale` alone, because the code the claim
+        // describes has not been re-described.
+        if let Some(cites) = &req.cites {
+            let mut next: Vec<String> = Vec::new();
+            for c in cites {
+                let c = c.trim();
+                if !c.is_empty() && !next.iter().any(|k| k == c) {
+                    next.push(c.to_string());
+                }
+            }
+            if next != claim.cites {
+                said.push("cites".to_string());
+                claim.cites = next;
+            }
+        }
         let claim_id = req.claim_id.clone();
 
         let written = match write_planned_tagged(
@@ -1071,7 +1093,9 @@ impl ScryerServer {
         description = "Replace the directives on nodes or responsibilities — the ONE write path to directives. \
          Call it ONLY when the user explicitly asked, in this conversation, for directives to be \
          written, edited, or deleted. Each item names `node_id` OR `responsibility_id` plus \
-         `directives` as the FULL replacement array (empty clears). Writes the plan layer.\n\
+         `directives` as the FULL replacement array (empty clears); an entry is the prose, or \
+         `{text, cites}` naming the opaque external anchor ids behind it. Writes the plan \
+         layer.\n\
          Rules: directives-binding"
     )]
     pub fn set_directives(
@@ -2711,6 +2735,7 @@ mod tests {
 
     fn resp(id: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: format!("does {id}"),
@@ -2864,7 +2889,7 @@ mod tests {
         let item = |n: Option<&str>, r: Option<&str>, d: &[&str]| SetDirectivesItem {
             node_id: n.map(Into::into),
             responsibility_id: r.map(Into::into),
-            directives: d.iter().map(|s| s.to_string()).collect(),
+            directives: d.iter().map(|s| (*s).into()).collect(),
         };
         let res = server
             .set_directives(Parameters(SetDirectivesRequest {
@@ -6630,6 +6655,192 @@ mod tests {
         r
     }
 
+    // ---- resp-b00631 / resp-b10631: citations on a claim and on a directive
+
+    /// resp-b00631 — the three write paths CARRY a citation, and the engine
+    /// interprets none of them. `update_claim` is the per-claim road (the full
+    /// array; `[]` clears; omitted leaves it), `update_nodes` the whole-array
+    /// road, and `set_directives` the one road to a DIRECTIVE's citations at
+    /// both altitudes. An id is stored as given: the engine trims the blanks and
+    /// drops a duplicate — the only two things it will say about an id — and
+    /// otherwise reads nothing into one, so a project anchors its claims in its
+    /// own documents without this engine learning that project's scheme.
+    #[test]
+    fn resp_b00631_the_write_paths_carry_a_citation_the_engine_never_interprets() {
+        let (server, _dir, project, model_ref) = basis_write_project();
+
+        // (1) update_claim writes the claim's citations.
+        let basis = basis_for_node(&server, &project, "node-2");
+        let r = server
+            .update_claim(Parameters(UpdateClaimRequest {
+                project: Some(project.clone()),
+                basis: Some(basis),
+                node_id: "node-2".into(),
+                claim_id: "resp-1".into(),
+                statement: None,
+                concern: None,
+                cites: Some(vec![
+                    "doc-intro".into(),
+                    "  §4  ".into(),
+                    "doc-intro".into(),
+                    "   ".into(),
+                ]),
+            }))
+            .unwrap();
+        let text = tool_text(&r);
+        assert_ne!(r.is_error, Some(true), "{text}");
+        assert!(
+            text.contains("cites"),
+            "the answer names what it wrote: {text}"
+        );
+
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let c = claim_on(&planned, "node-2", "resp-1");
+        assert_eq!(
+            c.cites,
+            vec!["doc-intro".to_string(), "§4".to_string()],
+            "blanks trimmed, a duplicate dropped, and `§4` kept exactly as given \
+             — the engine does not parse an anchor id"
+        );
+        assert_eq!(
+            c.statement,
+            resp("resp-1").statement,
+            "a citation-only write leaves the wording alone"
+        );
+
+        // A write that names NOTHING is still refused — `cites` joined the
+        // list of things update_claim can say, it did not empty it.
+        let basis = basis_for_node(&server, &project, "node-2");
+        let nothing = server
+            .update_claim(Parameters(UpdateClaimRequest {
+                project: Some(project.clone()),
+                basis: Some(basis.clone()),
+                node_id: "node-2".into(),
+                claim_id: "resp-1".into(),
+                statement: None,
+                concern: None,
+                cites: None,
+            }))
+            .unwrap();
+        assert_eq!(nothing.is_error, Some(true), "{}", tool_text(&nothing));
+
+        // Omitting `cites` on a reword LEAVES the citations standing — the
+        // per-claim road keeps what it was not told to change.
+        let r = update_claim_call(
+            &server,
+            &project,
+            "node-2",
+            "resp-1",
+            Some("**Answers** within the budget"),
+            None,
+            Some(&basis),
+        );
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            claim_on(&planned, "node-2", "resp-1").cites,
+            vec!["doc-intro".to_string(), "§4".to_string()],
+            "a reword that says nothing about citations does not drop them"
+        );
+
+        // (2) update_nodes — the whole-array road — carries them too.
+        let basis = basis_for_node(&server, &project, "node-2");
+        let mut carried = worded("resp-1", "**Answers** within the budget");
+        carried.cites = vec!["doc-anchors".into()];
+        let w = reword(
+            &server,
+            &project,
+            vec![carried, resp("resp-2")],
+            Some(&basis),
+        );
+        assert_ne!(w.is_error, Some(true), "{}", tool_text(&w));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            claim_on(&planned, "node-2", "resp-1").cites,
+            vec!["doc-anchors".to_string()]
+        );
+
+        // (3) `[]` CLEARS every citation — the array is the whole statement of
+        // what the claim cites, so an empty one means "nothing".
+        let basis = basis_for_node(&server, &project, "node-2");
+        let cleared = server
+            .update_claim(Parameters(UpdateClaimRequest {
+                project: Some(project.clone()),
+                basis: Some(basis),
+                node_id: "node-2".into(),
+                claim_id: "resp-1".into(),
+                statement: None,
+                concern: None,
+                cites: Some(Vec::new()),
+            }))
+            .unwrap();
+        assert_ne!(cleared.is_error, Some(true), "{}", tool_text(&cleared));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(
+            claim_on(&planned, "node-2", "resp-1").cites.is_empty(),
+            "an empty array clears the citations"
+        );
+
+        // (4) set_directives carries a DIRECTIVE's citations, on a node and on
+        // a claim — and a bare string, the form it has always taken, clears
+        // them, because the array replaces the whole list.
+        let basis = basis_for_node(&server, &project, "node-2");
+        let d = server
+            .set_directives(Parameters(SetDirectivesRequest {
+                basis: Some(basis),
+                project: Some(project.clone()),
+                items: vec![
+                    SetDirectivesItem {
+                        node_id: Some("node-2".into()),
+                        responsibility_id: None,
+                        directives: vec![scryer_core::Directive::cited(
+                            "must never log a token",
+                            vec!["doc-rules".into()],
+                        )],
+                    },
+                    SetDirectivesItem {
+                        node_id: None,
+                        responsibility_id: Some("resp-1".into()),
+                        directives: vec![scryer_core::Directive::cited(
+                            "must stay stateless",
+                            vec!["doc-context".into()],
+                        )],
+                    },
+                ],
+            }))
+            .unwrap();
+        assert_ne!(d.is_error, Some(true), "{}", tool_text(&d));
+
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let api = planned.nodes.iter().find(|n| n.id == "node-2").unwrap();
+        assert_eq!(api.directives[0].text, "must never log a token");
+        assert_eq!(api.directives[0].cites, vec!["doc-rules".to_string()]);
+        assert_eq!(
+            claim_on(&planned, "node-2", "resp-1").directives[0].cites,
+            vec!["doc-context".to_string()]
+        );
+
+        let basis = basis_for_node(&server, &project, "node-2");
+        let d = server
+            .set_directives(Parameters(SetDirectivesRequest {
+                basis: Some(basis),
+                project: Some(project.clone()),
+                items: vec![SetDirectivesItem {
+                    node_id: Some("node-2".into()),
+                    responsibility_id: None,
+                    directives: vec!["must never log a token".into()],
+                }],
+            }))
+            .unwrap();
+        assert_ne!(d.is_error, Some(true), "{}", tool_text(&d));
+        let planned = scryer_core::read_planned_at(&model_ref).unwrap();
+        let api = planned.nodes.iter().find(|n| n.id == "node-2").unwrap();
+        assert!(
+            api.directives[0].cites.is_empty(),
+            "the array is the whole list: a bare string says the directive cites nothing"
+        );
+    }
+
     /// resp-azc2d9, first half: a model write that names NO basis is refused
     /// while the switch is on, in the posture of "plan writes are refused while
     /// no change is open" — and passes untouched while it is off, which is what
@@ -6895,6 +7106,7 @@ mod tests {
                 claim_id: claim_id.to_string(),
                 statement: statement.map(str::to_string),
                 concern: concern.map(str::to_string),
+                cites: None,
             }))
             .unwrap()
     }
@@ -7036,10 +7248,16 @@ mod tests {
         assert_eq!(no_host.is_error, Some(true));
         assert!(tool_text(&no_host).contains("No node or group 'node-9'"));
 
-        // A call that names neither new word has nothing to write.
+        // A call that names none of the three has nothing to write. (`cites`
+        // joined statement and concern with chg-t1tefn, resp-b00631, so the
+        // refusal names three things where it once named two.)
         let nothing = update_claim_call(&server, &project, "node-2", "resp-1", None, None, None);
         assert_eq!(nothing.is_error, Some(true));
-        assert!(tool_text(&nothing).contains("`statement` and/or `concern`"));
+        assert!(
+            tool_text(&nothing).contains("`statement`, `concern` and/or `cites`"),
+            "{}",
+            tool_text(&nothing)
+        );
 
         // A statement cannot be emptied through this road — that is a deletion.
         let emptied = update_claim_call(

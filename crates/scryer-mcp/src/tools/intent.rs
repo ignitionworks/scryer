@@ -72,6 +72,7 @@ impl RespMinter {
             .map(|s| {
                 let id = self.mint();
                 Responsibility {
+                    cites: Vec::new(),
                     concern: s.concern().map(Into::into),
                     id,
                     statement: s.statement().trim().to_string(),
@@ -99,6 +100,7 @@ impl RespMinter {
             .map(|i| {
                 let id = self.mint();
                 let resp = Responsibility {
+                    cites: Vec::new(),
                     concern: i.concern().map(Into::into),
                     id,
                     statement: i.statement().trim().to_string(),
@@ -1422,6 +1424,7 @@ mod tests {
 
     fn resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: statement.into(),

@@ -144,8 +144,10 @@ fn node_prose(
             sentence: String::new(),
         });
     }
+    // The directive's PROSE only: a citation is an opaque external anchor id,
+    // never the model's words, so a word search never reaches into one.
     for (i, d) in n.directives.iter().enumerate() {
-        push_all(out, needle, whole_word, d, || Occurrence {
+        push_all(out, needle, whole_word, &d.text, || Occurrence {
             kind: "directive",
             layer,
             id: n.id.clone(),
@@ -230,7 +232,7 @@ fn claims_prose(
             sentence: String::new(),
         });
         for (i, d) in r.directives.iter().enumerate() {
-            push_all(out, needle, whole_word, d, || Occurrence {
+            push_all(out, needle, whole_word, &d.text, || Occurrence {
                 kind: "directive",
                 layer,
                 id: r.id.clone(),
@@ -419,6 +421,57 @@ mod tests {
 
     fn one_layer(m: &ScryModel, term: &str, whole: bool) -> Vec<Occurrence> {
         find(&[("planned", m)], term, whole)
+    }
+
+    /// resp-b00631 — a word search does not reach INTO a citation. An anchor id
+    /// is an opaque external string, not the model's prose: the engine stores
+    /// and answers it and interprets none of it, so a sweep over the team's
+    /// words must not report a coincidence inside one. The directive's own
+    /// words are still found, as they always were — the citation rides beside
+    /// them without joining them.
+    #[test]
+    fn resp_b00631_a_word_search_never_reaches_into_a_citation() {
+        let m = model(serde_json::json!({
+            "version": crate::SCRY_VERSION,
+            "nodes": [{
+                "id": "n1",
+                "kind": "component",
+                "name": "Yada",
+                // Every citation below spells the searched word, and none of
+                // them is prose anybody wrote for a reader.
+                "directives": [{ "text": "must never log a token",
+                                 "cites": ["doc-proxy-anchor", "proxy"] }],
+                "responsibilities": [
+                    { "id": "r1", "statement": "**Answers** as the proxy",
+                      "cites": ["proxy", "doc-proxy-first"],
+                      "directives": [{ "text": "must stay stateless",
+                                       "cites": ["proxy"] }] }
+                ]
+            }],
+            "links": []
+        }));
+        let hits = one_layer(&m, "proxy", true);
+        let shape: Vec<(&str, &str, &str)> = hits
+            .iter()
+            .map(|h| (h.kind, h.id.as_str(), h.field.as_str()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![("claim", "r1", "statement")],
+            "only the ONE prose use is reported — six anchor ids spelling the \
+             same word are not uses of it"
+        );
+
+        // And the directives' own words are still searchable: skipping the
+        // citations did not skip the directive.
+        let words = one_layer(&m, "stateless", true);
+        assert_eq!(
+            words
+                .iter()
+                .map(|h| (h.kind, h.field.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("directive", "directive 1")]
+        );
     }
 
     #[test]

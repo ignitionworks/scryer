@@ -229,7 +229,7 @@ fn claim_entries(
         entries.insert(
             format!("{layer}:{}", r.id),
             short(&format!(
-                "{host}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}",
+                "{host}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}",
                 r.statement,
                 r.concern.as_deref().unwrap_or(""),
                 r.vagrant.unwrap_or(false),
@@ -237,7 +237,10 @@ fn claim_entries(
                 r.approved_statement.as_deref().unwrap_or(""),
                 r.stale.unwrap_or(false),
                 r.stale_proposal.as_deref().unwrap_or(""),
-                r.directives.join("\u{2}"),
+                crate::directives_rendered(&r.directives),
+                // A citation is truth-bearing beside the statement, so a basis
+                // read before one arrived is stale for a write made after it.
+                r.cites.join("\u{2}"),
             )),
         );
     }
@@ -248,13 +251,13 @@ fn directive_fingerprint(committed: &ScryModel, planned: &ScryModel, node_id: &s
     let mut buf = String::new();
     for model in [committed, planned] {
         if let Some(n) = model.nodes.iter().find(|n| n.id == node_id) {
-            buf.push_str(&n.directives.join("\u{2}"));
+            buf.push_str(&crate::directives_rendered(&n.directives));
         }
         buf.push('\u{1}');
         for inh in crate::inherited_directives(model, node_id) {
             buf.push_str(&inh.node_id);
             buf.push('\u{3}');
-            buf.push_str(&inh.directives.join("\u{2}"));
+            buf.push_str(&crate::directives_rendered(&inh.directives));
             buf.push('\u{1}');
         }
     }
@@ -472,6 +475,7 @@ mod tests {
 
     fn claim(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             id: id.into(),
             statement: statement.into(),
             concern: None,
@@ -627,6 +631,48 @@ mod tests {
         directed.nodes[0].directives = vec!["Never log a token".into()];
         let refusal = check(&directed, &directed, &token).unwrap_err();
         assert!(refusal.contains("binding directives of n1"), "{refusal}");
+    }
+
+    /// resp-b00631 — a CITATION is in the claim's fingerprint, and a
+    /// directive's citation is in its holder's. The basis is the engine's
+    /// compare-and-swap: a field it leaves out is a field two writers can
+    /// clobber without either being told. So a read taken before an anchor
+    /// arrived is refused as the ground for an edit made after it — at claim
+    /// altitude and at directive altitude both.
+    #[test]
+    fn resp_b00631_a_citation_is_part_of_what_the_basis_fingerprints() {
+        let before = model(vec![node("n1", vec![claim("r1", "**Answers** the call")])]);
+        let token = derive(&before, &before, Scope::nodes(["n1".to_string()])).unwrap();
+
+        // (1) The claim gains an anchor. Nothing else about it moved.
+        let mut cited = before.clone();
+        cited.nodes[0].responsibilities[0].cites = vec!["doc-intro".into()];
+        let refusal = check(&cited, &cited, &token).unwrap_err();
+        assert!(
+            refusal.contains("r1"),
+            "the refusal names the claim whose citation arrived: {refusal}"
+        );
+
+        // (2) A DIRECTIVE gains an anchor with its prose held still — the case a
+        // fingerprint over the words alone cannot see.
+        let mut worded = before.clone();
+        worded.nodes[0].directives = vec!["Never log a token".into()];
+        let token = derive(&worded, &worded, Scope::nodes(["n1".to_string()])).unwrap();
+        let mut anchored = worded.clone();
+        anchored.nodes[0].directives = vec![crate::Directive::cited(
+            "Never log a token",
+            vec!["doc-rules".into()],
+        )];
+        let refusal = check(&anchored, &anchored, &token).unwrap_err();
+        assert!(
+            refusal.contains("directives of n1"),
+            "an anchor on a directive moves the binding set: {refusal}"
+        );
+
+        // (3) And a basis taken WITH the citations in place still passes — a
+        // citation is fingerprinted, not merely feared.
+        let token = derive(&anchored, &anchored, Scope::nodes(["n1".to_string()])).unwrap();
+        assert!(check(&anchored, &anchored, &token).is_ok());
     }
 
     #[test]

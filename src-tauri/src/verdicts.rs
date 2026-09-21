@@ -669,6 +669,7 @@ pub(crate) fn reimplement_responsibility(cwd: String, resp_id: String) -> Result
         // The plan had dropped it — reconstruct from committed so the to-do exists.
         if let Some(n) = planned.nodes.iter_mut().find(|n| &n.id == chost) {
             n.responsibilities.push(scryer_core::Responsibility {
+                cites: Vec::new(),
                 concern: None,
                 id: resp_id.clone(),
                 statement: cstmt.clone(),
@@ -1043,6 +1044,7 @@ mod verdict_tests {
 
     fn resp(id: &str, statement: &str, flags: &str) -> scryer_core::Responsibility {
         scryer_core::Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: statement.into(),
@@ -1415,6 +1417,7 @@ mod plan_seed_tests {
 
     fn resp(id: &str, statement: &str) -> scryer_core::Responsibility {
         scryer_core::Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: id.into(),
             statement: statement.into(),

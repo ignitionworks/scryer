@@ -883,6 +883,7 @@ mod tests {
             technology: None,
             description: None,
             responsibilities: vec![Responsibility {
+                cites: Vec::new(),
                 concern: None,
                 id: "r1".into(),
                 statement: "answers one".into(),
@@ -1234,6 +1235,7 @@ mod tests {
         let (_dir, r) = project();
         let mut m = read_model_at(&r).unwrap();
         m.nodes[0].responsibilities.push(Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: "r2".into(),
             statement: "also answers".into(),
@@ -1464,6 +1466,7 @@ mod tests {
         let committed = read_model_at(&r).unwrap();
         let mut planned = committed.clone();
         planned.nodes[0].responsibilities.push(Responsibility {
+            cites: Vec::new(),
             concern: None,
             id: "r2".into(),
             statement: "answers two".into(),

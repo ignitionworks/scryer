@@ -210,6 +210,7 @@ mod tests {
 
     fn resp(id: &str, concern: Option<&str>) -> Responsibility {
         Responsibility {
+            cites: Vec::new(),
             id: id.into(),
             statement: "does a thing".into(),
             concern: concern.map(Into::into),

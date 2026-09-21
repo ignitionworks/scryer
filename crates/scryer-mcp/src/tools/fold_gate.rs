@@ -426,6 +426,7 @@ pub(crate) fn gate(
                 None => match planned.nodes.iter_mut().find(|n| n.id == host) {
                     Some(n) => {
                         n.responsibilities.push(Responsibility {
+                            cites: Vec::new(),
                             id: rid.clone(),
                             statement: stmt.clone(),
                             concern: None,
