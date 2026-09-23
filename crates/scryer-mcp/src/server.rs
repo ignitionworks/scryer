@@ -497,15 +497,16 @@ mod rule_wiring {
         // directive. There is no cheaper place: a caller cannot write a
         // citation it is not told about, and hiding the field from the write
         // schemas would leave `cites` readable and unwritable.
-        // 36000 → 36100 for the field-level patch (chg-x407b4, resp-jvz3ge):
-        // the two array-write tools now say that a claim in the array keeps
+        // 36000 → 36150 for the field-level patch (chg-x407b4, resp-jvz3ge):
+        // each of the THREE array writes — a node's claims, a group's claims,
+        // a symbol's properties — now says that an entry in the array keeps
         // the fields the write does not name. Roughly 45 chars each, and
         // there is nowhere cheaper to say it — a caller that is not told
         // cannot tell a field it omitted from one it cleared, which is the
         // whole silent wipe the claim exists to stop.
         assert!(
-            total <= 36_100,
-            "schemas total {total} chars (budget 36100)"
+            total <= 36_150,
+            "schemas total {total} chars (budget 36150)"
         );
     }
 }

@@ -361,6 +361,27 @@ pub struct SetModelRequest {
     pub data: String,
 }
 
+/// THE MERGE BOTH WRITE-PATCHES RUN: `prior` re-serialized, the keys the
+/// caller actually NAMED laid over it, read back. Through the serialized form
+/// rather than a hand-written field list, so a field added to the model later
+/// is carried by the same rule without a list here to forget it.
+fn overlay<T: serde::Serialize + serde::de::DeserializeOwned>(
+    prior: &T,
+    sent: &serde_json::Map<String, serde_json::Value>,
+    what: &str,
+) -> Result<T, String> {
+    let serde_json::Value::Object(mut merged) =
+        serde_json::to_value(prior).map_err(|e| format!("{what} could not be read back: {e}"))?
+    else {
+        return Err(format!("{what} could not be read back as an object"));
+    };
+    for (k, v) in sent {
+        merged.insert(k.clone(), v.clone());
+    }
+    serde_json::from_value(serde_json::Value::Object(merged))
+        .map_err(|e| format!("{what} cannot be merged onto the one the plan holds: {e}"))
+}
+
 /// A claim AS THE CALLER SENT IT: the parsed claim beside the RAW object the
 /// write carried, so the engine can tell a field the caller OMITTED from one
 /// it sent empty. Deserialisation alone cannot — `concern` is an `Option` and
@@ -402,8 +423,6 @@ impl ClaimWrite {
 
     /// The claim to store: `prior` with ONLY the fields this write named
     /// replaced, or the claim as sent when the host holds none by that id.
-    /// Merged through the serialized form so a field added to `Responsibility`
-    /// later is carried by the same rule, without a list here to forget it.
     pub fn onto(&self, prior: Option<&Responsibility>) -> Result<Responsibility, String> {
         let Some(prior) = prior else {
             // Nothing to patch onto: a claim new to this host is the one case
@@ -416,24 +435,7 @@ impl ClaimWrite {
             }
             return Ok(self.claim.clone());
         };
-        let serde_json::Value::Object(mut merged) = serde_json::to_value(prior)
-            .map_err(|e| format!("claim '{}' could not be read back: {e}", self.claim.id))?
-        else {
-            return Err(format!(
-                "claim '{}' could not be read back as an object",
-                self.claim.id
-            ));
-        };
-        for (k, v) in &self.sent {
-            merged.insert(k.clone(), v.clone());
-        }
-        let mut out: Responsibility = serde_json::from_value(serde_json::Value::Object(merged))
-            .map_err(|e| {
-                format!(
-                    "claim '{}' cannot be merged onto the one the plan holds: {e}",
-                    self.claim.id
-                )
-            })?;
+        let mut out = overlay(prior, &self.sent, &format!("claim '{}'", self.claim.id))?;
         // Identity is the parsed claim's, which the re-mint may have replaced
         // since the raw object was read.
         out.id = self.claim.id.clone();
@@ -488,6 +490,84 @@ impl schemars::JsonSchema for ClaimWrite {
     }
 }
 
+/// A PROPERTY as the caller sent it — [`ClaimWrite`]'s twin for a data-shape
+/// symbol's fields, keyed by `label` rather than by id, and there for the same
+/// reason: `description` is a defaulted `String` and `vagrant` / `stale` are
+/// `Option`s, so a resend that names only the label wipes the drift verdict
+/// awaiting a person and blanks the description — the claims road's wipe,
+/// one array over.
+///
+/// The same rule, spelled once in [`overlay`]: the key's PRESENCE decides, an
+/// omitted field keeps what the plan holds, `null` / `""` still clears, and
+/// the ARRAY still replaces (a property left out of it is deleted).
+#[derive(Debug, Clone)]
+pub struct PropertyWrite {
+    prop: SchemaProperty,
+    /// The keys the caller's JSON object actually named.
+    sent: serde_json::Map<String, serde_json::Value>,
+}
+
+impl PropertyWrite {
+    pub fn label(&self) -> &str {
+        &self.prop.label
+    }
+
+    /// The property to store: `prior` with ONLY the fields this write named
+    /// replaced, or the property as sent when the node holds none by that
+    /// label. A property IS its label, which the caller always sends (it is
+    /// how the two are matched), so there is no wordless case to refuse.
+    pub fn onto(&self, prior: Option<&SchemaProperty>) -> Result<SchemaProperty, String> {
+        let Some(prior) = prior else {
+            return Ok(self.prop.clone());
+        };
+        let mut out = overlay(
+            prior,
+            &self.sent,
+            &format!("property '{}'", self.prop.label),
+        )?;
+        out.label = self.prop.label.clone();
+        Ok(out)
+    }
+}
+
+/// A property built in Rust behaves as if the caller had sent its serialized
+/// form — every field it carries is named.
+impl From<SchemaProperty> for PropertyWrite {
+    fn from(prop: SchemaProperty) -> Self {
+        let sent = match serde_json::to_value(&prop) {
+            Ok(serde_json::Value::Object(o)) => o,
+            _ => serde_json::Map::new(),
+        };
+        Self { prop, sent }
+    }
+}
+
+impl<'de> Deserialize<'de> for PropertyWrite {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let sent = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
+        let prop = SchemaProperty::deserialize(serde_json::Value::Object(sent.clone()))
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self { prop, sent })
+    }
+}
+
+/// The wire shape is a `SchemaProperty` — the presence tracking is how the
+/// engine READS that shape, not a different one for the caller to learn.
+impl schemars::JsonSchema for PropertyWrite {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        SchemaProperty::schema_name()
+    }
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        SchemaProperty::schema_id()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        SchemaProperty::json_schema(generator)
+    }
+    fn inline_schema() -> bool {
+        SchemaProperty::inline_schema()
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateGroupItem {
     pub group_id: String,
@@ -535,8 +615,10 @@ pub struct UpdateNodeItem {
     /// Full replacement of responsibilities; empty clears. Vagrant claims survive
     /// omission; a claim in it keeps fields you do not name.
     pub responsibilities: Option<Vec<ClaimWrite>>,
-    /// Full replacement of a data-shape symbol's fields; empty clears.
-    pub properties: Option<Vec<SchemaProperty>>,
+    // Per-property patch, per-array replace — see `PropertyWrite`.
+    /// Full replacement of a data-shape symbol's fields; empty clears; a field
+    /// in it keeps what you do not name.
+    pub properties: Option<Vec<PropertyWrite>>,
     /// New parent node id (reparent).
     pub parent_id: Option<String>,
 }

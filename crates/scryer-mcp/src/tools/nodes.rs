@@ -833,11 +833,25 @@ impl ScryerServer {
                 let kept: Vec<_> = n
                     .properties
                     .iter()
-                    .filter(|p| p.vagrant == Some(true) && !v.iter().any(|nv| nv.label == p.label))
+                    .filter(|p| {
+                        p.vagrant == Some(true) && !v.iter().any(|nv| nv.label() == p.label)
+                    })
                     .cloned()
                     .collect();
                 preserved_vagrants += kept.len();
-                n.properties = v.clone();
+                // Per-property patch, per-array replace — the claims road's
+                // rule, one array over: a resend that names only the label
+                // used to blank the description and wipe the drift verdict
+                // awaiting a person.
+                let mut next = Vec::with_capacity(v.len());
+                for w in v {
+                    let prior = n.properties.iter().find(|p| p.label == w.label());
+                    match w.onto(prior) {
+                        Ok(p) => next.push(p),
+                        Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+                    }
+                }
+                n.properties = next;
                 n.properties.extend(kept);
             }
             if let Some(v) = &u.parent_id {
@@ -4184,6 +4198,75 @@ mod tests {
             2,
             "the refusal left the plan as it found it"
         );
+    }
+
+    /// resp-jvz3ge on the OTHER array a node carries: a data-shape symbol's
+    /// properties. Same sentence, same mechanism — "change only the fields the
+    /// caller sent" is not about claims, it is about a plan write. A resend
+    /// that named a property's label and nothing else used to blank its
+    /// description and wipe the drift verdict awaiting a person, as silently
+    /// as the citations went.
+    #[test]
+    fn resp_jvz3ge_a_property_resend_keeps_the_fields_it_did_not_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let prop = |label: &str, desc: &str| scryer_core::SchemaProperty {
+            label: label.into(),
+            description: desc.into(),
+            vagrant: None,
+            stale: None,
+            last_touched_at: None,
+        };
+        let mut m = ScryModel::new();
+        let mut shape = node("shape", Kind::Symbol, "Lead", None);
+        let mut flagged = prop("email", "the contact address");
+        flagged.stale = Some(true);
+        let mut cleared = prop("age", "years since birth");
+        cleared.vagrant = Some(true);
+        shape.properties = vec![flagged, cleared, prop("dropped", "goes away")];
+        m.nodes.push(shape);
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        let req: UpdateNodeRequest = serde_json::from_value(serde_json::json!({
+            "project": project,
+            "nodes": [{
+                "node_id": "shape",
+                "properties": [
+                    { "label": "email" },
+                    { "label": "age", "description": "", "vagrant": null },
+                ],
+            }],
+        }))
+        .unwrap();
+        let r = server.update_nodes(Parameters(req)).unwrap();
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let shape = after.nodes.iter().find(|n| n.id == "shape").unwrap();
+        let field = |label: &str| shape.properties.iter().find(|p| p.label == label);
+
+        let email = field("email").expect("still there");
+        assert_eq!(
+            email.description, "the contact address",
+            "a description the write never named survives it"
+        );
+        assert_eq!(
+            email.stale,
+            Some(true),
+            "and so does the drift verdict awaiting a person"
+        );
+
+        let age = field("age").expect("still there");
+        assert_eq!(age.description, "", "`\"\"` still clears, deliberately");
+        assert_eq!(age.vagrant, None, "and so does `null`");
+
+        assert!(
+            field("dropped").is_none(),
+            "the ARRAY still replaces: a property omitted from it is deleted"
+        );
+        assert_eq!(shape.properties.len(), 2);
     }
 
     /// property_labels partial-folds data fields the way responsibility_ids
