@@ -1184,8 +1184,10 @@ mod tests {
     use scryer_core::{Group, Kind, ModelRef, Node, ScryModel};
 
     fn resp(id: &str) -> scryer_core::Responsibility {
-        serde_json::from_value(serde_json::json!({ "id": id, "statement": format!("does {id}") }))
-            .unwrap()
+        serde_json::from_value(
+            serde_json::json!({ "id": id, "title": id, "statement": format!("does {id}") }),
+        )
+        .unwrap()
     }
 
     fn node(id: &str, kind: Kind, name: &str, parent: Option<&str>) -> Node {
@@ -1217,7 +1219,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let resp = |id: &str| -> scryer_core::Responsibility {
-            serde_json::from_value(serde_json::json!({ "id": id, "statement": "does" })).unwrap()
+            serde_json::from_value(
+                serde_json::json!({ "id": id, "title": id, "statement": "does" }),
+            )
+            .unwrap()
         };
         let mut committed = ScryModel::new();
         let mut comp = node("comp", Kind::Component, "Comp", None);
@@ -1279,7 +1284,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let resp = |id: &str| -> scryer_core::Responsibility {
-            serde_json::from_value(serde_json::json!({ "id": id, "statement": "does" })).unwrap()
+            serde_json::from_value(
+                serde_json::json!({ "id": id, "title": id, "statement": "does" }),
+            )
+            .unwrap()
         };
         let mut committed = ScryModel::new();
         let mut comp = node("comp", Kind::Component, "Comp", None);
@@ -1541,7 +1549,7 @@ mod tests {
             "id": "group-1",
             "name": "Pair",
             "memberIds": ["node-1", "node-2"],
-            "responsibilities": [{ "id": "new", "statement": "coordinates the pair" }]
+            "responsibilities": [{ "id": "new", "title": "pairing", "statement": "coordinates the pair" }]
         }]);
         let server = ScryerServer::with_change(dir.path());
         let res = server

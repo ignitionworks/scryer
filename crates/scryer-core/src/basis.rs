@@ -229,7 +229,12 @@ fn claim_entries(
         entries.insert(
             format!("{layer}:{}", r.id),
             short(&format!(
-                "{host}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}",
+                "{host}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}",
+                // The TITLE is part of what a read saw: a claim retitled since
+                // the read is a claim the writer would now point at by another
+                // name, and an edit grounded on the old reading is grounded on
+                // a name that has moved.
+                r.title.as_deref().unwrap_or(""),
                 r.statement,
                 r.concern.as_deref().unwrap_or(""),
                 r.vagrant.unwrap_or(false),
@@ -475,6 +480,7 @@ mod tests {
 
     fn claim(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             id: id.into(),
             statement: statement.into(),

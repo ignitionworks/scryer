@@ -426,12 +426,26 @@ impl ClaimWrite {
     pub fn onto(&self, prior: Option<&Responsibility>) -> Result<Responsibility, String> {
         let Some(prior) = prior else {
             // Nothing to patch onto: a claim new to this host is the one case
-            // where the statement is not optional — it is the claim.
+            // where the statement is not optional — it is the claim. It is
+            // also the one case where the TITLE is not optional: a claim that
+            // already exists may carry none (every claim written before titles
+            // does, and a write that says nothing about it leaves it alone),
+            // but nothing NEW joins the model without a name a person can say.
             if !self.sent.contains_key("statement") {
                 return Err(format!(
                     "claim '{}' is new to this host and names no `statement` — a claim IS its                      statement, so there is nothing to add. Send the statement, or name the id                      of the claim you meant to patch.",
                     self.claim.id
                 ));
+            }
+            if self
+                .claim
+                .title
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+            {
+                return Err(scryer_core::titles::required(&self.claim.id));
             }
             return Ok(self.claim.clone());
         };
@@ -676,6 +690,13 @@ pub struct UpdateClaimRequest {
     /// The claim's id.
     #[schemars(description = "The responsibility id to reword.")]
     pub claim_id: String,
+    /// The claim's new TITLE — its human name, one or two words, unique among
+    /// the titles on its node. Omit to leave it alone; this is the RETITLE
+    /// road, and a retitle breaks nothing because nothing stores a title as a
+    /// reference. A title is never cleared here: a claim that has a name keeps
+    /// one, and `""` is refused rather than quietly dropping it.
+    #[schemars(description = "New title, one or two words, unique on its node; omit to leave it.")]
+    pub title: Option<String>,
     /// The claim's new statement; omit to leave it alone.
     #[schemars(description = "New EARS statement; omit to leave the wording alone.")]
     pub statement: Option<String>,
@@ -1022,12 +1043,20 @@ pub struct PropertyInput {
     pub description: String,
 }
 
-/// A responsibility: a plain string or `{statement, concern?, line?, endLine?}` (see statement-ears).
+// The PLAIN form carries no title, so it is refused by the roads that ADD a
+// claim — `title` is how the claim will be pointed at, and a claim added
+// without one joins the model unnameable. It is kept because the roads that
+// only READ a statement back (generation, extraction) still speak it. Said
+// here and not in the doc comment: the doc comment IS the schema description a
+// client is served, and that has a length budget.
+/// A responsibility: a plain string or `{statement, title?, concern?, line?, endLine?}` (see statement-ears).
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ResponsibilityInput {
     Rich {
         statement: String,
+        /// One or two words naming this claim, unique among the titles on its node.
+        title: Option<String>,
         /// ONE kebab-case concern slug; omit for core domain flow.
         concern: Option<String>,
         line: Option<u32>,
@@ -1042,6 +1071,14 @@ impl ResponsibilityInput {
         match self {
             Self::Rich { statement, .. } => statement,
             Self::Plain(s) => s,
+        }
+    }
+    /// The claim's human name, or `None` — which every plain-string form is,
+    /// and which the add roads refuse.
+    pub fn title(&self) -> Option<&str> {
+        match self {
+            Self::Rich { title, .. } => title.as_deref(),
+            Self::Plain(_) => None,
         }
     }
     pub fn concern(&self) -> Option<&str> {
@@ -1064,12 +1101,17 @@ impl ResponsibilityInput {
     }
 }
 
-/// A responsibility: a plain string or `{statement, concern?}` (see statement-ears).
+// As with `ResponsibilityInput`, the plain form carries no title and is refused
+// by the roads that ADD a claim; kept out of the doc comment, which is the
+// budgeted schema description.
+/// A responsibility: a plain string or `{statement, title?, concern?}` (see statement-ears).
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum StatementInput {
     Rich {
         statement: String,
+        /// One or two words naming this claim, unique among the titles on its node.
+        title: Option<String>,
         /// ONE kebab-case concern slug; omit for core domain flow.
         concern: Option<String>,
     },
@@ -1081,6 +1123,14 @@ impl StatementInput {
         match self {
             Self::Rich { statement, .. } => statement,
             Self::Plain(s) => s,
+        }
+    }
+    /// The claim's human name, or `None` — which every plain-string form is,
+    /// and which the add roads refuse.
+    pub fn title(&self) -> Option<&str> {
+        match self {
+            Self::Rich { title, .. } => title.as_deref(),
+            Self::Plain(_) => None,
         }
     }
     pub fn concern(&self) -> Option<&str> {

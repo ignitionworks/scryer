@@ -333,9 +333,15 @@ mod rule_wiring {
         // shape it takes (chg-t1tefn, resp-b00631). Two callers cannot write a
         // citation they are not told about, and this is the only always-loaded
         // place to tell them; the field's own prose lives in the schema.
+        // 18400 → 19000: `update_claim` and `update_nodes` each say that a
+        // claim carries a TITLE — the human name a reader is given instead of
+        // `resp-a1b2c3` — what shape it takes, and that it is REQUIRED on a
+        // claim new to the write (chg-whn0kq, resp-sxkqnz). A caller refused
+        // for a missing field it was never told about calls again the same
+        // way; the requirement has to be where the tool is read.
         assert!(
-            total <= 18_400,
-            "descriptions total {total} chars (budget 18400)"
+            total <= 19_000,
+            "descriptions total {total} chars (budget 19000)"
         );
         for (name, d) in &descs {
             assert!(
@@ -504,9 +510,17 @@ mod rule_wiring {
         // there is nowhere cheaper to say it — a caller that is not told
         // cannot tell a field it omitted from one it cleared, which is the
         // whole silent wipe the claim exists to stop.
+        // 36150 → 37500 for the responsibility's TITLE (chg-whn0kq,
+        // resp-sxkqnz): its human name rides in EVERY tool that carries a
+        // responsibility — the claim struct the array writes take, the two
+        // responsibility inputs the add roads take, and `update_claim`'s own
+        // `title` — because a title is how a reader is given the claim, and a
+        // field a write schema does not advertise is a field no caller sets.
+        // Hiding it would leave every claim added through a tool unnamed,
+        // which is the whole fault the title exists to fix.
         assert!(
-            total <= 36_150,
-            "schemas total {total} chars (budget 36150)"
+            total <= 37_500,
+            "schemas total {total} chars (budget 37500)"
         );
     }
 }

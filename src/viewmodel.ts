@@ -32,6 +32,18 @@ export type Kind =
 
 export interface Responsibility {
   id: string;
+  /** The claim's HUMAN NAME: one or two words, unique among the titles of the
+   *  responsibilities on its own node. An id identifies a claim; a title lets a
+   *  person SAY which one is meant — the reference a reader is given is "the
+   *  <title> responsibility of <node name>", which places the claim in the
+   *  model as well as naming it. The id does not go away: it stays the
+   *  server-minted key the model links by and the one reference that can never
+   *  collide.
+   *
+   *  UNDEFINED on a claim written before titles existed — a reader falls back
+   *  to the id for those, so every drawing of a reference handles both. It is
+   *  required on a claim NEW to a write. Mirrors Rust `Responsibility.title`. */
+  title?: string;
   /** Verb-led business statement of accountability. No mechanism words.
    *  EARS-shaped (condition first, response last) and may carry display
    *  markup — `**bold**` on the keyword and response verb — which the UI

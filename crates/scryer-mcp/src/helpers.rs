@@ -520,6 +520,26 @@ fn basis_switch_reads(raw: Option<&str>) -> bool {
     )
 }
 
+/// Every title on ONE node is well-shaped and no two are the same — checked
+/// after a write has assembled the node's claims, so what is judged is the
+/// shape the model would be left in and not the one it started from.
+///
+/// The node is the scope because the reference a reader is given is "the
+/// <title> responsibility of <node name>": the node is already half of it, so
+/// two nodes may both have a claim titled `render` without a reader ever being
+/// in doubt. Untitled claims are passed over — every claim written before
+/// titles carries none, and a write that does not touch them must not be
+/// refused on their account.
+pub(crate) fn check_node_titles(node: &Node) -> Result<(), CallToolResult> {
+    scryer_core::titles::check_node(
+        &node.name,
+        node.responsibilities
+            .iter()
+            .map(|r| (r.id.as_str(), r.title.as_deref())),
+    )
+    .map_err(|e| CallToolResult::error(vec![Content::text(e)]))
+}
+
 #[cfg(test)]
 thread_local! {
     /// The tests' handle on the switch: per-thread, so a test that turns it on

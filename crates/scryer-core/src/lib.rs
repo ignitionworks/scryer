@@ -16,6 +16,7 @@ pub mod rules;
 pub mod scan;
 pub mod seed;
 pub mod test_results;
+pub mod titles;
 pub mod validate;
 
 mod commit;

@@ -385,6 +385,7 @@ mod tests {
             technology: None,
             description: None,
             responsibilities: vec![Responsibility {
+                title: None,
                 cites: Vec::new(),
                 concern: None,
                 id: "r1".into(),

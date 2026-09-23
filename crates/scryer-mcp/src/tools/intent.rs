@@ -28,6 +28,33 @@ use scryer_core::{
 };
 use std::collections::HashMap;
 
+/// Every claim a road ADDS is named: it carries a title, and no two on the node
+/// carry the same one.
+///
+/// A claim that already EXISTS may have none — every claim written before
+/// titles does, and a write that leaves it alone must not be refused on its
+/// account. But a claim joining the model is joining it for a reader, and no
+/// reader can point at `resp-a1b2c3`. So the requirement falls exactly here, on
+/// the roads that add, and the plain-string form of a responsibility input —
+/// which carries no title — is refused by it.
+fn require_titles(node_name: &str, claims: &[Responsibility]) -> Result<(), String> {
+    for claim in claims {
+        if claim
+            .title
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            return Err(scryer_core::titles::required(&claim.id));
+        }
+    }
+    scryer_core::titles::check_node(
+        node_name,
+        claims.iter().map(|r| (r.id.as_str(), r.title.as_deref())),
+    )
+}
+
 /// Mints `resp-…` ids across a single tool call, clear of every existing
 /// responsibility id (on nodes AND groups, so it can't collide with a
 /// group-owned id) and of every id minted earlier in the same call.
@@ -65,6 +92,9 @@ impl RespMinter {
     }
 
     /// Build `implemented` responsibilities from statement inputs, skipping blanks.
+    ///
+    /// The title rides through untouched; whether one was REQUIRED is the
+    /// road's question, not the minter's — see [`require_titles`].
     fn build(&mut self, statements: &[StatementInput]) -> Vec<Responsibility> {
         statements
             .iter()
@@ -75,6 +105,7 @@ impl RespMinter {
                     cites: Vec::new(),
                     concern: s.concern().map(Into::into),
                     id,
+                    title: s.title().map(|t| t.trim().to_string()),
                     statement: s.statement().trim().to_string(),
                     vagrant: None,
                     stale: None,
@@ -103,6 +134,7 @@ impl RespMinter {
                     cites: Vec::new(),
                     concern: i.concern().map(Into::into),
                     id,
+                    title: i.title().map(|t| t.trim().to_string()),
                     statement: i.statement().trim().to_string(),
                     vagrant: None,
                     stale: None,
@@ -543,6 +575,9 @@ impl ScryerServer {
             );
             node.description = item.description.clone();
             node.responsibilities = minter.build(&item.responsibilities);
+            if let Err(e) = require_titles(&node.name, &node.responsibilities) {
+                return Ok(CallToolResult::error(vec![Content::text(e)]));
+            }
             model.nodes.push(node);
             minted.push(id);
         }
@@ -1424,6 +1459,7 @@ mod tests {
 
     fn resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: id.into(),
@@ -1707,7 +1743,11 @@ mod tests {
                     parent_id: container_id.clone(),
                     name: "Auth".into(),
                     description: None,
-                    responsibilities: vec!["authenticates requests".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "authenticates requests".into(),
+                        title: Some("auth".into()),
+                        concern: None,
+                    }],
                 }],
             }))
             .unwrap();
@@ -1727,6 +1767,7 @@ mod tests {
                     line: Some(10),
                     end_line: Some(20),
                     responsibilities: vec![ResponsibilityInput::Rich {
+                        title: None,
                         statement: "holds the logged-in session".into(),
                         concern: None,
                         line: Some(12),
@@ -2072,7 +2113,7 @@ mod tests {
             .push(node(serde_json::json!({ "id": "comp", "kind": "component", "name": "Admin", "parentId": "c" })));
         m.nodes.push(node(serde_json::json!({
             "id": "sym", "kind": "symbol", "name": "admin_handler", "parentId": "comp",
-            "responsibilities": [{ "id": "r-sym", "statement": "handle admin requests" }],
+            "responsibilities": [{ "id": "r-sym", "title": "admin", "statement": "handle admin requests" }],
         })));
         m.source_map.insert(
             "r-sym".into(),

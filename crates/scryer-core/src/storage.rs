@@ -136,12 +136,16 @@ pub fn write_model_at(r: &ModelRef, model: &ScryModel) -> Result<(), String> {
 }
 
 /// Whether two responsibilities differ in any *truth-bearing* field — the spec
-/// statement, drift flags, citations, or directives. Excludes `last_touched_at`
-/// itself (that's the output) so an unchanged responsibility keeps its date,
-/// and `concern` — a tag is presentation metadata, so retagging never resets
-/// the fossilization patina.
+/// statement, the title, drift flags, citations, or directives. Excludes
+/// `last_touched_at` itself (that's the output) so an unchanged responsibility
+/// keeps its date, and `concern` — a tag is presentation metadata, so retagging
+/// never resets the fossilization patina.
 fn resp_truth_changed(a: &Responsibility, b: &Responsibility) -> bool {
     a.statement != b.statement
+        // The TITLE is not metadata: it is the name every reader of this claim
+        // will use for it, so a retitle is an edit the patina should show. A
+        // claim renamed a moment ago has not been sitting untouched.
+        || a.title != b.title
         || a.vagrant != b.vagrant
         || a.stale != b.stale
         || a.directives != b.directives
@@ -670,6 +674,7 @@ mod tests {
             technology: None,
             description: None,
             responsibilities: vec![Responsibility {
+                title: None,
                 cites: Vec::new(),
                 concern: None,
                 id: "r1".into(),
@@ -1376,6 +1381,7 @@ mod tests {
 
     fn mk_resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: id.into(),

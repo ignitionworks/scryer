@@ -650,8 +650,12 @@ impl ScryerServer {
 
     #[tool(
         description = "Patch one or more existing nodes by id. Only fields present in each item change. \
-         `responsibilities` / `properties` replace the whole array (empty clears). Code-side \
-         mapping is written separately via update_source_map.\n\
+         `responsibilities` / `properties` replace the whole array (empty clears), and each entry \
+         patches the claim the node already holds — a field you do not name is kept. A claim NEW \
+         to the array carries a `title`: one or two words naming it, unique among the titles on \
+         that node, since a reader is given \"the <title> responsibility of <node name>\" rather \
+         than its id. A claim that already exists may have none. Code-side mapping is written \
+         separately via update_source_map.\n\
          Rules: statement-ears, scanning, altitude, naming, technology, concerns, \
          node-justification"
     )]
@@ -828,6 +832,13 @@ impl ScryerServer {
                 }
                 n.responsibilities = next;
                 n.responsibilities.extend(kept);
+                // Judged on the shape the node would be LEFT in: a title has to
+                // pick out one claim on its node, and a write that adds two
+                // claims under one title is refused by this and by nothing
+                // else. Before the write, so a refusal costs nothing.
+                if let Err(e) = crate::helpers::check_node_titles(n) {
+                    return Ok(e);
+                }
             }
             if let Some(v) = &u.properties {
                 let kept: Vec<_> = n
@@ -926,11 +937,13 @@ impl ScryerServer {
     }
 
     #[tool(
-        description = "Reword ONE claim in place: `claim_id` and its new `statement`, `concern` and/or \
-         `cites`, on the `node_id` that holds it. The smaller road beside update_nodes' \
-         whole-array write — use that one to ADD, remove or reorder claims. Everything not \
-         named is left alone: the directives, the vagrant flag and the statement a sign-off \
-         approved all survive a reword, which a whole-array resend drops. `cites` replaces the \
+        description = "Reword or RETITLE one claim in place: `claim_id` and its new `title`, \
+         `statement`, `concern` and/or `cites`, on the `node_id` that holds it. The smaller road \
+         beside update_nodes' whole-array write — use that one to ADD, remove or reorder claims. \
+         Everything not named is left alone: the directives, the vagrant flag and the statement \
+         a sign-off approved all survive a reword, which a whole-array resend drops. `title` is \
+         the claim's human name — one or two words, unique on its node, since a reader is given \
+         \"the <title> responsibility of <node name>\" instead of the id. `cites` replaces the \
          whole list of external anchor ids ([] clears). Carries `basis` like every write.\n\
          Rules: statement-ears, scanning, naming, concerns, altitude"
     )]
@@ -952,10 +965,14 @@ impl ScryerServer {
             }
         };
 
-        if req.statement.is_none() && req.concern.is_none() && req.cites.is_none() {
+        if req.statement.is_none()
+            && req.concern.is_none()
+            && req.cites.is_none()
+            && req.title.is_none()
+        {
             return Ok(CallToolResult::error(vec![Content::text(
-                "Give `statement`, `concern` and/or `cites` — update_claim rewords a claim, and \
-                 a call that names none of them has nothing to write."
+                "Give `title`, `statement`, `concern` and/or `cites` — update_claim rewords or \
+                 retitles a claim, and a call that names none of them has nothing to write."
                     .to_string(),
             )]));
         }
@@ -979,6 +996,35 @@ impl ScryerServer {
         };
         // Read off BEFORE the mutable borrow below: where the claim actually
         // sits, when it is not on the host the caller named.
+        // Read off BEFORE the mutable borrow below, for the same reason
+        // `elsewhere` is: a retitle has to be checked against the titles its
+        // own host already holds, and the borrow that hands us the claim to
+        // write locks the rest of the host away.
+        let (host_name, host_titles): (String, Vec<(String, String)>) = model
+            .nodes
+            .iter()
+            .find(|n| n.id == req.node_id)
+            .map(|n| {
+                (
+                    n.name.clone(),
+                    n.responsibilities
+                        .iter()
+                        .filter_map(|r| r.title.clone().map(|t| (r.id.clone(), t)))
+                        .collect(),
+                )
+            })
+            .or_else(|| {
+                model.groups.iter().find(|g| g.id == req.node_id).map(|g| {
+                    (
+                        g.name.clone(),
+                        g.responsibilities
+                            .iter()
+                            .filter_map(|r| r.title.clone().map(|t| (r.id.clone(), t)))
+                            .collect(),
+                    )
+                })
+            })
+            .unwrap_or_default();
         let elsewhere: Option<String> = model
             .nodes
             .iter()
@@ -1018,6 +1064,41 @@ impl ScryerServer {
         };
 
         let mut said: Vec<String> = Vec::new();
+        if let Some(title) = &req.title {
+            let title = title.trim();
+            if title.is_empty() {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "A claim's title cannot be emptied — a claim that has a human name keeps \
+                     one. Send the new title, or omit `title` to leave it alone."
+                        .to_string(),
+                )]));
+            }
+            if let Err(e) = scryer_core::titles::check_shape(title) {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "claim '{}': {e}",
+                    req.claim_id
+                ))]));
+            }
+            if let Some((other_id, other_title)) = scryer_core::titles::collision(
+                title,
+                &req.claim_id,
+                host_titles
+                    .iter()
+                    .map(|(i, t)| (i.as_str(), t.as_str()))
+                    .collect::<Vec<_>>(),
+            ) {
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "'{host_name}' already holds a claim titled {other_title:?} — claim \
+                     '{other_id}'. A title is the reference a reader is given, so it has to \
+                     pick out ONE claim on its node: choose another word, or edit \
+                     '{other_id}' if that is the claim you meant."
+                ))]));
+            }
+            if claim.title.as_deref() != Some(title) {
+                said.push("title".to_string());
+                claim.title = Some(title.to_string());
+            }
+        }
         if let Some(statement) = &req.statement {
             let statement = statement.trim();
             if statement.is_empty() {
@@ -2346,6 +2427,49 @@ impl ScryerServer {
             reminter.remint(&n.id, n.responsibilities.iter_mut());
         }
 
+        // A claim NEW to this write is named, and no node in the payload ends up
+        // holding two claims under one title. "New" is decided against the ids
+        // BOTH layers already hold: a payload that carries an existing claim
+        // forward may leave it untitled — every claim written before titles is
+        // untitled, and a subtree replacement is not the moment to make a
+        // person name forty of them — but a claim arriving for the first time
+        // arrives with a name a reader can say.
+        {
+            let known: std::collections::HashSet<&str> = model
+                .nodes
+                .iter()
+                .chain(committed_floor.nodes.iter())
+                .flat_map(|n| n.responsibilities.iter())
+                .chain(
+                    model
+                        .groups
+                        .iter()
+                        .chain(committed_floor.groups.iter())
+                        .flat_map(|g| g.responsibilities.iter()),
+                )
+                .map(|r| r.id.as_str())
+                .collect();
+            for n in &payload.nodes {
+                for r in &n.responsibilities {
+                    if !known.contains(r.id.as_str())
+                        && r.title.as_deref().map(str::trim).unwrap_or("").is_empty()
+                    {
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            scryer_core::titles::required(&r.id),
+                        )]));
+                    }
+                }
+                if let Err(e) = scryer_core::titles::check_node(
+                    &n.name,
+                    n.responsibilities
+                        .iter()
+                        .map(|r| (r.id.as_str(), r.title.as_deref())),
+                ) {
+                    return Ok(CallToolResult::error(vec![Content::text(e)]));
+                }
+            }
+        }
+
         // Node ids get the same guard. This write owns exactly the subtree it
         // replaces; a payload id naming a node ANYWHERE else is a stale
         // snapshot's collision, and pushing it in would leave two nodes sharing
@@ -2761,8 +2885,25 @@ mod tests {
         }
     }
 
+    /// A fixture claim. It carries a TITLE, as a real claim must: the write
+    /// roads refuse a claim NEW to them without one.
+    ///
+    /// The title is the id, so it is stable across a resend of the same claim —
+    /// a title is truth-bearing, and a helper that invented a fresh one each
+    /// call would make every resend read as a retitle. The one exception is a
+    /// PLACEHOLDER id ("new", ""), which several tests send twice in one array
+    /// to watch the re-mint: those get a counted title, because a node may not
+    /// hold two claims under one name.
     fn resp(id: &str) -> Responsibility {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static PLACEHOLDERS: AtomicUsize = AtomicUsize::new(0);
+        let title = if id.is_empty() || id == "new" {
+            format!("fresh{}", PLACEHOLDERS.fetch_add(1, Ordering::Relaxed))
+        } else {
+            id.to_string()
+        };
         Responsibility {
+            title: Some(title),
             cites: Vec::new(),
             concern: None,
             id: id.into(),
@@ -3184,7 +3325,7 @@ mod tests {
         let payload = serde_json::json!({
             "nodes": [
                 { "id": "node-2", "kind": "container", "name": "API", "parentId": "node-1",
-                  "responsibilities": [{ "id": "resp-1", "statement": "serves requests" }] }
+                  "responsibilities": [{ "id": "resp-1", "title": "serving", "statement": "serves requests" }] }
             ],
             "links": []
         });
@@ -4083,7 +4224,7 @@ mod tests {
             "nodes": [{
                 "node_id": "comp",
                 "responsibilities": [
-                    { "id": "resp-keep", "statement": "**Answers** the probe" },
+                    { "id": "resp-keep", "title": "probe", "statement": "**Answers** the probe" },
                     { "id": "resp-cleared", "statement": "does resp-cleared",
                       "concern": null, "cites": [] },
                 ],
@@ -4144,7 +4285,7 @@ mod tests {
                 "node_id": "comp",
                 "responsibilities": [
                     { "id": "resp-held", "concern": "billing" },
-                    { "id": "new", "statement": "**Records** the receipt" },
+                    { "id": "new", "title": "receipt", "statement": "**Records** the receipt" },
                 ],
             }],
         }))
@@ -5523,7 +5664,7 @@ mod tests {
                 project: project.clone(),
                 nodes: vec![serde_json::from_value(serde_json::json!({
                     "node_id": "vt",
-                    "responsibilities": [{ "id": "resp-1", "statement": stmt }]
+                    "responsibilities": [{ "id": "resp-1", "title": "one", "statement": stmt }]
                 }))
                 .unwrap()],
             }))
@@ -6057,7 +6198,11 @@ mod tests {
                     parent_id: "node-2".into(),
                     name: "RateLimiter".into(),
                     description: None,
-                    responsibilities: vec!["throttles requests per client".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "throttles requests per client".into(),
+                        title: Some("throttling".into()),
+                        concern: None,
+                    }],
                 }],
             }))
             .unwrap();
@@ -6202,7 +6347,11 @@ mod tests {
                     parent_id: "node-2".into(),
                     name: "RateLimiter".into(),
                     description: None,
-                    responsibilities: vec!["throttles requests per client".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "throttles requests per client".into(),
+                        title: Some("throttling".into()),
+                        concern: None,
+                    }],
                 }],
             }))
             .unwrap();
@@ -6748,7 +6897,7 @@ mod tests {
         let payload = serde_json::json!({
             "nodes": [
                 { "id": "node-2", "kind": "container", "name": "API", "parentId": "node-1",
-                  "responsibilities": [{ "id": "new", "statement": "serves requests" }] }
+                  "responsibilities": [{ "id": "new", "title": "serving", "statement": "serves requests" }] }
             ],
             "links": []
         });
@@ -6808,7 +6957,7 @@ mod tests {
             "version": scryer_core::SCRY_VERSION,
             "nodes": [
                 { "id": "node-1", "kind": "system", "name": "Acme",
-                  "responsibilities": [{ "id": "new", "statement": "does things" }] }
+                  "responsibilities": [{ "id": "new", "title": "things", "statement": "does things" }] }
             ],
             "links": []
         });
@@ -6851,9 +7000,10 @@ mod tests {
             .unwrap();
         let cid = opened(&r);
         let write = |stmt: &str, extra: Option<&str>| {
-            let mut resps = vec![serde_json::json!({ "id": "resp-1", "statement": stmt })];
+            let mut resps =
+                vec![serde_json::json!({ "id": "resp-1", "title": "one", "statement": stmt })];
             if let Some(e) = extra {
-                resps.push(serde_json::json!({ "id": "resp-2", "statement": e }));
+                resps.push(serde_json::json!({ "id": "resp-2", "title": "two", "statement": e }));
             }
             let r = server
                 .update_nodes(Parameters(UpdateNodeRequest {
@@ -6996,6 +7146,7 @@ mod tests {
         let basis = basis_for_node(&server, &project, "node-2");
         let r = server
             .update_claim(Parameters(UpdateClaimRequest {
+                title: None,
                 project: Some(project.clone()),
                 basis: Some(basis),
                 node_id: "node-2".into(),
@@ -7036,6 +7187,7 @@ mod tests {
         let basis = basis_for_node(&server, &project, "node-2");
         let nothing = server
             .update_claim(Parameters(UpdateClaimRequest {
+                title: None,
                 project: Some(project.clone()),
                 basis: Some(basis.clone()),
                 node_id: "node-2".into(),
@@ -7088,6 +7240,7 @@ mod tests {
         let basis = basis_for_node(&server, &project, "node-2");
         let cleared = server
             .update_claim(Parameters(UpdateClaimRequest {
+                title: None,
                 project: Some(project.clone()),
                 basis: Some(basis),
                 node_id: "node-2".into(),
@@ -7423,6 +7576,7 @@ mod tests {
     ) -> CallToolResult {
         server
             .update_claim(Parameters(UpdateClaimRequest {
+                title: None,
                 project: Some(project.to_string()),
                 basis: basis.map(str::to_string),
                 node_id: node_id.to_string(),
@@ -7816,5 +7970,326 @@ mod tests {
                 .unwrap()
         });
         assert_ne!(through.is_error, Some(true), "{}", tool_text(&through));
+    }
+
+    // ── resp-sxkqnz: a responsibility's TITLE ──────────────────────────────
+    //
+    // An id identifies a claim; a title lets a person SAY which one is meant.
+    // These tests hold the four things that make a title usable as a reference:
+    // it is REQUIRED on a claim new to a write, ALLOWED to be absent on one
+    // that already exists, UNIQUE on its node, and ANSWERED wherever the claim
+    // is read.
+
+    /// A model with one node holding one UNTITLED claim — the shape every model
+    /// written before titles has, and the shape these tests start from.
+    fn legacy_model(dir: &std::path::Path) -> (ModelRef, ScryerServer, String) {
+        let model_ref = ModelRef::ProjectLocal(dir.to_path_buf());
+        let mut m = ScryModel::new();
+        let mut c = node("comp", Kind::Component, "Change Statement", None);
+        let mut held = resp("resp-held");
+        held.title = None;
+        c.responsibilities = vec![held];
+        m.nodes.push(c);
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        (
+            model_ref,
+            ScryerServer::with_change(dir),
+            dir.to_string_lossy().to_string(),
+        )
+    }
+
+    fn update_nodes_json(server: &ScryerServer, body: serde_json::Value) -> CallToolResult {
+        let req: UpdateNodeRequest = serde_json::from_value(body).unwrap();
+        server.update_nodes(Parameters(req)).unwrap()
+    }
+
+    #[test]
+    fn resp_sxkqnz_a_claim_new_to_a_write_is_refused_without_a_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, server, project) = legacy_model(dir.path());
+
+        let r = update_nodes_json(
+            &server,
+            serde_json::json!({
+                "project": project,
+                "nodes": [{ "node_id": "comp", "responsibilities": [
+                    { "id": "resp-held" },
+                    { "id": "new", "statement": "**Seeds** the headings" },
+                ]}],
+            }),
+        );
+        let said = tool_text(&r);
+        assert_eq!(r.is_error, Some(true), "{said}");
+        assert!(said.contains("names no `title`"), "{said}");
+        // Refused means nothing written: the legacy claim is still there alone.
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(after.nodes[0].responsibilities.len(), 1, "nothing landed");
+    }
+
+    #[test]
+    fn resp_sxkqnz_an_existing_claim_keeps_its_absent_title_through_a_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, server, project) = legacy_model(dir.path());
+
+        // The untitled claim is patched — its concern named, its title not.
+        // Every claim written before titles is in this shape, and a write that
+        // says nothing about the title must not be refused on its account.
+        let r = update_nodes_json(
+            &server,
+            serde_json::json!({
+                "project": project,
+                "nodes": [{ "node_id": "comp", "responsibilities": [
+                    { "id": "resp-held", "concern": "auth" },
+                ]}],
+            }),
+        );
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let held = &after.nodes[0].responsibilities[0];
+        assert_eq!(held.title, None, "an untitled claim stays untitled");
+        assert_eq!(held.concern.as_deref(), Some("auth"));
+    }
+
+    #[test]
+    fn resp_sxkqnz_a_node_may_not_hold_two_claims_under_one_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let (model_ref, server, project) = legacy_model(dir.path());
+
+        // Case and spacing are not a difference: "Seeded  Headings" and
+        // "seeded headings" are one name said twice, and a node holding both
+        // leaves the reference ambiguous exactly where it promised not to be.
+        let r = update_nodes_json(
+            &server,
+            serde_json::json!({
+                "project": project,
+                "nodes": [{ "node_id": "comp", "responsibilities": [
+                    { "id": "resp-held" },
+                    { "id": "new1", "title": "seeded headings", "statement": "**Seeds** them" },
+                    { "id": "new2", "title": "Seeded  Headings", "statement": "**Seeds** more" },
+                ]}],
+            }),
+        );
+        let said = tool_text(&r);
+        assert_eq!(r.is_error, Some(true), "{said}");
+        assert!(said.contains("Change Statement"), "names the node: {said}");
+        assert!(said.contains("two claims titled"), "{said}");
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(after.nodes[0].responsibilities.len(), 1, "nothing landed");
+    }
+
+    #[test]
+    fn resp_sxkqnz_two_nodes_may_each_hold_a_claim_with_the_same_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        m.nodes.push(node("a", Kind::Component, "Alpha", None));
+        m.nodes.push(node("b", Kind::Component, "Beta", None));
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        // The reference a reader is given is "the <title> responsibility of
+        // <node name>", so the node is already half of it. Scoping uniqueness
+        // any wider would refuse `render` on two unrelated nodes for nobody.
+        let r = update_nodes_json(
+            &server,
+            serde_json::json!({
+                "project": project,
+                "nodes": [
+                    { "node_id": "a", "responsibilities": [
+                        { "id": "n1", "title": "render", "statement": "**Draws** it" }]},
+                    { "node_id": "b", "responsibilities": [
+                        { "id": "n2", "title": "render", "statement": "**Draws** it too" }]},
+                ],
+            }),
+        );
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        for id in ["a", "b"] {
+            let n = after.nodes.iter().find(|n| n.id == id).unwrap();
+            assert_eq!(n.responsibilities[0].title.as_deref(), Some("render"));
+        }
+    }
+
+    #[test]
+    fn resp_sxkqnz_a_title_is_one_or_two_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_model_ref, server, project) = legacy_model(dir.path());
+
+        let r = update_nodes_json(
+            &server,
+            serde_json::json!({
+                "project": project,
+                "nodes": [{ "node_id": "comp", "responsibilities": [
+                    { "id": "resp-held" },
+                    { "id": "new", "title": "the seeded headings of the change",
+                      "statement": "**Seeds** them" },
+                ]}],
+            }),
+        );
+        let said = tool_text(&r);
+        assert_eq!(r.is_error, Some(true), "{said}");
+        assert!(said.contains("words"), "says what is wrong: {said}");
+    }
+
+    #[test]
+    fn resp_sxkqnz_update_claim_retitles_and_refuses_a_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        let mut c = node("comp", Kind::Component, "Change Statement", None);
+        let mut one = resp("resp-1");
+        one.title = Some("headings".into());
+        let mut two = resp("resp-2");
+        two.title = Some("ordering".into());
+        c.responsibilities = vec![one, two];
+        m.nodes.push(c);
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        // A retitle lands, and breaks nothing: nothing stores a title as a
+        // reference, so the id the model links by is untouched.
+        let r = server
+            .update_claim(Parameters(UpdateClaimRequest {
+                basis: None,
+                project: Some(project.clone()),
+                node_id: "comp".into(),
+                claim_id: "resp-1".into(),
+                title: Some("seeded headings".into()),
+                statement: None,
+                concern: None,
+                cites: None,
+            }))
+            .unwrap();
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let one = after.nodes[0]
+            .responsibilities
+            .iter()
+            .find(|r| r.id == "resp-1")
+            .unwrap();
+        assert_eq!(one.title.as_deref(), Some("seeded headings"));
+
+        // And a retitle onto a name the node already holds is refused, naming
+        // the claim that holds it — an ambiguous reference is no reference.
+        let clash = server
+            .update_claim(Parameters(UpdateClaimRequest {
+                basis: None,
+                project: Some(project),
+                node_id: "comp".into(),
+                claim_id: "resp-2".into(),
+                title: Some("Seeded Headings".into()),
+                statement: None,
+                concern: None,
+                cites: None,
+            }))
+            .unwrap();
+        let said = tool_text(&clash);
+        assert_eq!(clash.is_error, Some(true), "{said}");
+        assert!(said.contains("resp-1"), "names the holder: {said}");
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let two = after.nodes[0]
+            .responsibilities
+            .iter()
+            .find(|r| r.id == "resp-2")
+            .unwrap();
+        assert_eq!(
+            two.title.as_deref(),
+            Some("ordering"),
+            "refused, so unmoved"
+        );
+    }
+
+    #[test]
+    fn resp_sxkqnz_a_retitle_is_a_reword_in_the_plan_diff() {
+        // The title is what a reader points at the claim with, so a claim
+        // renamed under their feet has changed in the way that matters most to
+        // them. A retitle that folded invisibly would leave the committed model
+        // saying a name nobody agreed to.
+        let mut before = ScryModel::new();
+        let mut c = node("comp", Kind::Component, "Change Statement", None);
+        let mut one = resp("resp-1");
+        one.title = Some("headings".into());
+        c.responsibilities = vec![one];
+        before.nodes.push(c);
+        let mut after = before.clone();
+        after.nodes[0].responsibilities[0].title = Some("seeded headings".into());
+
+        let d = scryer_core::diff::diff(&before, &after);
+        let entry = d
+            .changes
+            .iter()
+            .find(|c| c.id == "resp-1")
+            .expect("the retitle is in the diff");
+        assert!(
+            entry.changes.iter().any(|c| matches!(
+                c,
+                scryer_core::diff::Change::Reworded { field, from, to }
+                    if field == "title" && from == "headings" && to == "seeded headings"
+            )),
+            "{:?}",
+            entry.changes
+        );
+    }
+
+    #[test]
+    fn resp_sxkqnz_add_component_refuses_a_claim_with_no_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        m.nodes.push(node("cont", Kind::Container, "Host", None));
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        // The PLAIN string form of a responsibility carries no title, so the
+        // road that adds a claim refuses it: a claim joining the model joins it
+        // for a reader, and no reader can point at `resp-a1b2c3`.
+        let bare = server
+            .add_component(Parameters(AddComponentRequest {
+                basis: None,
+                project: Some(project.clone()),
+                items: vec![ComponentItem {
+                    parent_id: "cont".into(),
+                    name: "Interaction Tools".into(),
+                    description: None,
+                    responsibilities: vec!["**Answers** a session".into()],
+                }],
+            }))
+            .unwrap();
+        let said = tool_text(&bare);
+        assert_eq!(bare.is_error, Some(true), "{said}");
+        assert!(said.contains("names no `title`"), "{said}");
+
+        // With a title it lands, and the title is stored beside the id.
+        let named = server
+            .add_component(Parameters(AddComponentRequest {
+                basis: None,
+                project: Some(project),
+                items: vec![ComponentItem {
+                    parent_id: "cont".into(),
+                    name: "Interaction Tools".into(),
+                    description: None,
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "**Answers** a session".into(),
+                        title: Some("answering".into()),
+                        concern: None,
+                    }],
+                }],
+            }))
+            .unwrap();
+        assert_ne!(named.is_error, Some(true), "{}", tool_text(&named));
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let comp = after
+            .nodes
+            .iter()
+            .find(|n| n.name == "Interaction Tools")
+            .expect("the component landed");
+        assert_eq!(
+            comp.responsibilities[0].title.as_deref(),
+            Some("answering"),
+            "the title is stored beside the id"
+        );
     }
 }

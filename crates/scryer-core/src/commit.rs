@@ -1409,6 +1409,7 @@ mod tests {
 
     fn mk_resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: id.into(),

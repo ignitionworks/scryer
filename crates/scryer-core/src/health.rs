@@ -773,6 +773,7 @@ mod tests {
 
     fn resp(id: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: id.into(),

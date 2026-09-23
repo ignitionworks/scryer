@@ -372,6 +372,7 @@ mod tests {
             responsibilities: resp
                 .map(|rid| {
                     vec![Responsibility {
+                        title: None,
                         cites: Vec::new(),
                         concern: None,
                         id: rid.into(),

@@ -536,22 +536,25 @@ fn reject_property_at(
 
 /// Remove a responsibility wherever it lives (a node or a group), returning
 /// (host_id, statement) and GC'ing its source anchor. None if absent.
+/// The host, the statement AND the title of the claim taken out — the title
+/// because a claim reconstructed into the plan below has to come back under
+/// the name people have been calling it, not nameless.
 fn take_responsibility(
     model: &mut scryer_core::ScryModel,
     resp_id: &str,
-) -> Option<(String, String)> {
+) -> Option<(String, String, Option<String>)> {
     for n in &mut model.nodes {
         if let Some(pos) = n.responsibilities.iter().position(|r| r.id == resp_id) {
             let r = n.responsibilities.remove(pos);
             model.source_map.remove(resp_id);
-            return Some((n.id.clone(), r.statement));
+            return Some((n.id.clone(), r.statement, r.title));
         }
     }
     for g in &mut model.groups {
         if let Some(pos) = g.responsibilities.iter().position(|r| r.id == resp_id) {
             let r = g.responsibilities.remove(pos);
             model.source_map.remove(resp_id);
-            return Some((g.id.clone(), r.statement));
+            return Some((g.id.clone(), r.statement, r.title));
         }
     }
     None
@@ -627,7 +630,7 @@ fn drop_responsibility_at(
 
     let from_c = take_responsibility(&mut committed, &resp_id);
     let from_p = take_responsibility(&mut planned, &resp_id);
-    let (host_id, statement) = from_c
+    let (host_id, statement, _title) = from_c
         .or(from_p)
         .ok_or_else(|| format!("Responsibility '{resp_id}' not found"))?;
 
@@ -690,13 +693,16 @@ fn reimplement_responsibility_at(
         r.stale_proposal = None;
         host_id = Some(hid);
         statement = Some(r.statement.clone());
-    } else if let Some((chost, cstmt)) = &removed {
+    } else if let Some((chost, cstmt, ctitle)) = &removed {
         // The plan had dropped it — reconstruct from committed so the to-do exists.
         if let Some(n) = planned.nodes.iter_mut().find(|n| &n.id == chost) {
             n.responsibilities.push(scryer_core::Responsibility {
                 cites: Vec::new(),
                 concern: None,
                 id: resp_id.clone(),
+                // Back under the name it had: a claim that returns nameless is
+                // a claim nobody can point at with the words they used before.
+                title: ctitle.clone(),
                 statement: cstmt.clone(),
                 vagrant: None,
                 stale: None,

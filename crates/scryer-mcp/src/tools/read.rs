@@ -1016,18 +1016,22 @@ impl ScryerServer {
             scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
             for (score, n) in scored.iter().take(3) {
                 finest.insert(n.id.clone());
-                // Each matched claim answers its ID and its CITATIONS beside
-                // the statement (resp-b10631): the id is what a caller needs to
-                // reach the claim with a write, and the citations are the why a
-                // host hands the session beside the what. `cites` is absent
-                // wherever a claim cites nothing — the compacting strip below
-                // drops the empty array.
+                // Each matched claim answers its ID, its TITLE and its
+                // CITATIONS beside the statement (resp-b10631): the id is what
+                // a caller needs to reach the claim with a write, the title is
+                // what it says back to a person — "the <title> responsibility
+                // of <node name>" places the claim where the id only labels it
+                // — and the citations are the why a host hands the session
+                // beside the what. `title` is absent on a claim nobody has
+                // named, `cites` wherever a claim cites nothing: the compacting
+                // strip below drops both.
                 let resps: Vec<serde_json::Value> = n
                     .responsibilities
                     .iter()
                     .map(|r| {
                         serde_json::json!({
                             "id": r.id,
+                            "title": r.title,
                             "statement": r.statement,
                             "cites": r.cites,
                         })
@@ -2328,6 +2332,7 @@ mod tests {
 
     fn resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: id.into(),
@@ -3182,6 +3187,7 @@ mod tests {
         let mut m = ScryModel::new();
         let mut sys = node("sys", Kind::System, "Sys", None);
         sys.responsibilities.push(Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: "r-sys".into(),
@@ -3197,6 +3203,7 @@ mod tests {
         m.nodes.push(sys);
         let mut leaf = node("leaf", Kind::Symbol, "leafFn", Some("sys"));
         leaf.responsibilities.push(Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: "r-leaf".into(),

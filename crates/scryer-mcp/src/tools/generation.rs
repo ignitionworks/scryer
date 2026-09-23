@@ -74,6 +74,10 @@ impl IdMinter {
             cites: Vec::new(),
             concern: concern.map(Into::into),
             id,
+            // A claim READ OUT of code carries no title: nobody has named it
+            // yet. It is titled when a person first edits it, and until then
+            // its id is its reference, like every claim written before titles.
+            title: None,
             statement: statement.trim().to_string(),
             vagrant: None,
             stale: None,

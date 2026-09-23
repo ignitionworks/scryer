@@ -208,6 +208,29 @@ pub fn directives_rendered(directives: &[Directive]) -> String {
 )]
 pub struct Responsibility {
     pub id: String,
+    /// The claim's HUMAN NAME: one or two words, beside the id, unique among
+    /// the titles of the responsibilities on ITS OWN node.
+    ///
+    /// An id identifies; a title lets a person SAY which claim is meant. The
+    /// two are not rivals — the id stays the server-minted key the model links
+    /// by and the reference that can never collide, and the title is the
+    /// preferred reference a reader is given: a claim is pointed at as "the
+    /// <title> responsibility of <node name>", which places it in the model as
+    /// well as naming it.
+    ///
+    /// ABSENT IS ALLOWED on a responsibility that already exists — every claim
+    /// written before this field carries none, and a reader falls back to the
+    /// id for those. It is REQUIRED on a responsibility NEW to a write, so
+    /// nothing new joins the model unnamed. Node-scoped, so a short word can be
+    /// reused across the model wherever its node keeps it unambiguous; a
+    /// collision on one node is refused, never silently renamed.
+    ///
+    /// Retitleable: nothing stores a title as a reference, so changing one
+    /// breaks nothing. Truth-bearing beside the statement — a retitle is a
+    /// REWORD in the plan diff and re-dates `last_touched_at`.
+    #[schemars(description = "One or two words naming this claim, unique on its node.")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Verb-led business statement of accountability. No mechanism words.
     /// EARS-shaped (condition first, response last) and may carry display
     /// markup — `**bold**` on the keyword and response verb — which the UI

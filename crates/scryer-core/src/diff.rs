@@ -595,6 +595,17 @@ fn diff_responsibilities(from: &ScryModel, to: &ScryModel, out: &mut ModelDiff) 
                         to: Some(owned.owner_id.clone()),
                     });
                 }
+                // A RETITLE is a reword. The title is what a reader is given
+                // to point at the claim with, so a claim renamed under a
+                // reader's feet has changed in the way that matters most to
+                // them — and a retitle that folded invisibly would leave the
+                // committed model saying a name nobody agreed to.
+                reword(
+                    &mut changes,
+                    "title",
+                    prev.resp.title.as_deref().unwrap_or_default(),
+                    owned.resp.title.as_deref().unwrap_or_default(),
+                );
                 reword(
                     &mut changes,
                     "statement",
@@ -817,6 +828,7 @@ mod tests {
 
     fn resp(id: &str, statement: &str) -> Responsibility {
         Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: id.to_string(),

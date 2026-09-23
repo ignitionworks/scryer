@@ -593,6 +593,7 @@ mod tests {
         m.nodes.push(node("sys", Kind::System, None));
         let mut sa = node("syma", Kind::Symbol, Some("sys"));
         sa.responsibilities.push(Responsibility {
+            title: None,
             cites: Vec::new(),
             concern: None,
             id: "r1".into(),

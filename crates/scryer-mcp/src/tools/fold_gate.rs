@@ -428,6 +428,12 @@ pub(crate) fn gate(
                         n.responsibilities.push(Responsibility {
                             cites: Vec::new(),
                             id: rid.clone(),
+                            // The approval record keeps the statement that was
+                            // signed off, not the title — so a claim restored
+                            // from it comes back untitled and is named again by
+                            // whoever next edits it. Inventing one here would
+                            // put a name on the claim that nobody approved.
+                            title: None,
                             statement: stmt.clone(),
                             concern: None,
                             vagrant: None,
