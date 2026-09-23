@@ -832,13 +832,6 @@ impl ScryerServer {
                 }
                 n.responsibilities = next;
                 n.responsibilities.extend(kept);
-                // Judged on the shape the node would be LEFT in: a title has to
-                // pick out one claim on its node, and a write that adds two
-                // claims under one title is refused by this and by nothing
-                // else. Before the write, so a refusal costs nothing.
-                if let Err(e) = crate::helpers::check_node_titles(n) {
-                    return Ok(e);
-                }
             }
             if let Some(v) = &u.properties {
                 let kept: Vec<_> = n
@@ -2434,39 +2427,17 @@ impl ScryerServer {
         // untitled, and a subtree replacement is not the moment to make a
         // person name forty of them — but a claim arriving for the first time
         // arrives with a name a reader can say.
+        // `replace_subtree` writes BOTH layers itself rather than through
+        // `write_planned_tagged`, so the seam that asks every other road for a
+        // title never runs here — it asks the same question, through the same
+        // function, rather than keeping a second copy of the rule that could
+        // drift from it. Judged on the payload spliced onto the plan, against
+        // the plan as it stands.
         {
-            let known: std::collections::HashSet<&str> = model
-                .nodes
-                .iter()
-                .chain(committed_floor.nodes.iter())
-                .flat_map(|n| n.responsibilities.iter())
-                .chain(
-                    model
-                        .groups
-                        .iter()
-                        .chain(committed_floor.groups.iter())
-                        .flat_map(|g| g.responsibilities.iter()),
-                )
-                .map(|r| r.id.as_str())
-                .collect();
-            for n in &payload.nodes {
-                for r in &n.responsibilities {
-                    if !known.contains(r.id.as_str())
-                        && r.title.as_deref().map(str::trim).unwrap_or("").is_empty()
-                    {
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            scryer_core::titles::required(&r.id),
-                        )]));
-                    }
-                }
-                if let Err(e) = scryer_core::titles::check_node(
-                    &n.name,
-                    n.responsibilities
-                        .iter()
-                        .map(|r| (r.id.as_str(), r.title.as_deref())),
-                ) {
-                    return Ok(CallToolResult::error(vec![Content::text(e)]));
-                }
+            let mut would_be = model.clone();
+            splice_subtree(&mut would_be, &req.node_id, &payload.nodes, &payload.links);
+            if let Err(e) = scryer_core::titles::check_write(&model, &would_be) {
+                return Ok(CallToolResult::error(vec![Content::text(e)]));
             }
         }
 
@@ -8290,6 +8261,95 @@ mod tests {
             comp.responsibilities[0].title.as_deref(),
             Some("answering"),
             "the title is stored beside the id"
+        );
+    }
+
+    #[test]
+    fn resp_sxkqnz_every_door_asks_for_a_title_not_just_the_one() {
+        // THE RULE HAS NO DOOR COUNT. The first version of this enforced
+        // `add_component` and left seven other roads open, which is a rule with
+        // as many holes as doors somebody adds later. It is asked once now, at
+        // the seam every plan write passes through, so a road written tomorrow
+        // inherits it without anybody remembering to.
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        m.nodes.push(node("sys", Kind::System, "Ledger", None));
+        let mut a = node("a", Kind::Component, "Alpha", Some("sys"));
+        a.responsibilities = vec![resp("resp-a1")];
+        let mut b = node("b", Kind::Component, "Beta", Some("sys"));
+        b.responsibilities = vec![resp("resp-b1")];
+        m.nodes.push(a);
+        m.nodes.push(b);
+        m.groups.push(scryer_core::Group {
+            id: "group-1".into(),
+            name: "The pair".into(),
+            description: None,
+            member_ids: vec!["a".into(), "b".into()],
+            parent_group_id: None,
+            parent_node_id: Some("sys".into()),
+            responsibilities: Vec::new(),
+            icon: None,
+        });
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        // A DOOR THAT IS NOT `add_component`: the C4 ladder's container road,
+        // whose plain-string claim carries no title.
+        let bare = server
+            .add_container(Parameters(AddContainerRequest {
+                basis: None,
+                project: Some(project.clone()),
+                items: vec![ContainerItem {
+                    parent_id: "sys".into(),
+                    name: "Host".into(),
+                    technology: None,
+                    description: None,
+                    external: false,
+                    boundary_dir: None,
+                    responsibilities: vec!["**Serve** the API".into()],
+                }],
+            }))
+            .unwrap();
+        assert_eq!(bare.is_error, Some(true), "{}", tool_text(&bare));
+        assert!(
+            tool_text(&bare).contains("names no `title`"),
+            "{}",
+            tool_text(&bare)
+        );
+
+        // A GROUP IS A DOOR TOO. It holds claims exactly as a node does, so a
+        // claim entering through it is a claim entering the model — no
+        // carve-out, however much it looks like a side road.
+        let req: UpdateGroupRequest = serde_json::from_value(serde_json::json!({
+            "project": project,
+            "items": [{
+                "group_id": "group-1",
+                "responsibilities": [
+                    { "id": "new", "statement": "**Hold** the pair together." },
+                ],
+            }],
+        }))
+        .unwrap();
+        let grouped = server.update_group(Parameters(req)).unwrap();
+        assert_eq!(grouped.is_error, Some(true), "{}", tool_text(&grouped));
+        assert!(
+            tool_text(&grouped).contains("names no `title`"),
+            "a group's door asks the same question: {}",
+            tool_text(&grouped)
+        );
+
+        // And nothing landed on either road.
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert!(
+            !after.nodes.iter().any(|n| n.name == "Host"),
+            "the refused container did not land"
+        );
+        assert_eq!(
+            after.groups[0].responsibilities.len(),
+            0,
+            "the refused group claim did not land"
         );
     }
 }

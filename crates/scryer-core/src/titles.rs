@@ -139,10 +139,76 @@ pub fn check_node<'a>(
     Ok(())
 }
 
+/// EVERY ROAD'S CHECK, at the one seam every plan write passes through.
+///
+/// The rule is "nothing NEW joins the model unnamed, by any door", and a rule
+/// written per door is a rule with as many holes as doors somebody adds later:
+/// the first version of this enforced only `add_component` and left seven other
+/// roads open, which is exactly the shape the claim was widened to close.
+///
+/// So it is asked ONCE, of the model a write is about to leave behind, against
+/// the model it started from:
+///
+/// * a responsibility whose id is NOT already in `before` is NEW, and needs a
+///   title — whichever tool put it there, including one written tomorrow;
+/// * a responsibility already in `before` may have none, and a write that says
+///   nothing about its title leaves it alone;
+/// * every host whose claims this write touched keeps its titles well-shaped
+///   and distinct from each other.
+///
+/// Hosts are nodes AND groups: a group holds claims exactly as a node does, so
+/// a claim entering through `update_group` is a claim entering the model.
+pub fn check_write(before: &crate::ScryModel, after: &crate::ScryModel) -> Result<(), String> {
+    let known: std::collections::HashSet<&str> = hosts(before)
+        .flat_map(|(_, claims)| claims.iter().map(|r| r.id.as_str()))
+        .collect();
+    for (name, claims) in hosts(after) {
+        let mut touched = false;
+        for claim in claims {
+            if !known.contains(claim.id.as_str()) {
+                touched = true;
+                if claim
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    return Err(required(&claim.id));
+                }
+            }
+        }
+        // A host this write did not add a claim to is not re-judged: a model
+        // that already holds two claims under one title (nothing stops one
+        // written before this rule) must not refuse every unrelated write
+        // until somebody fixes it.
+        if touched {
+            check_node(
+                name,
+                claims.iter().map(|r| (r.id.as_str(), r.title.as_deref())),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Every claim-holding thing in the model, by the name a refusal should say.
+fn hosts(model: &crate::ScryModel) -> impl Iterator<Item = (&str, &Vec<crate::Responsibility>)> {
+    model
+        .nodes
+        .iter()
+        .map(|n| (n.name.as_str(), &n.responsibilities))
+        .chain(
+            model
+                .groups
+                .iter()
+                .map(|g| (g.name.as_str(), &g.responsibilities)),
+        )
+}
+
 /// The sentence a write is refused with when a claim NEW to it carries no
-/// title. One place, because four roads say it (`update_nodes`,
-/// `add_component`, `replace_subtree`, `update_claim`) and a reader who meets
-/// it on one should recognise it on the next.
+/// title. One place, because every road says it and a reader who meets it on
+/// one should recognise it on the next.
 pub fn required(id: &str) -> String {
     format!(
         "claim '{id}' is new and names no `title` — a claim joining the model is given a human \

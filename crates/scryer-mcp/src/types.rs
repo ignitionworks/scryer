@@ -426,26 +426,16 @@ impl ClaimWrite {
     pub fn onto(&self, prior: Option<&Responsibility>) -> Result<Responsibility, String> {
         let Some(prior) = prior else {
             // Nothing to patch onto: a claim new to this host is the one case
-            // where the statement is not optional — it is the claim. It is
-            // also the one case where the TITLE is not optional: a claim that
-            // already exists may carry none (every claim written before titles
-            // does, and a write that says nothing about it leaves it alone),
-            // but nothing NEW joins the model without a name a person can say.
+            // where the statement is not optional — it is the claim. Whether it also
+            // needs a TITLE is not asked here: that rule belongs to every road
+            // equally, so it is asked once at the plan-write seam
+            // (`titles::check_write`) rather than by each road that happens to
+            // use this patch.
             if !self.sent.contains_key("statement") {
                 return Err(format!(
                     "claim '{}' is new to this host and names no `statement` — a claim IS its                      statement, so there is nothing to add. Send the statement, or name the id                      of the claim you meant to patch.",
                     self.claim.id
                 ));
-            }
-            if self
-                .claim
-                .title
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty()
-            {
-                return Err(scryer_core::titles::required(&self.claim.id));
             }
             return Ok(self.claim.clone());
         };

@@ -28,33 +28,6 @@ use scryer_core::{
 };
 use std::collections::HashMap;
 
-/// Every claim a road ADDS is named: it carries a title, and no two on the node
-/// carry the same one.
-///
-/// A claim that already EXISTS may have none — every claim written before
-/// titles does, and a write that leaves it alone must not be refused on its
-/// account. But a claim joining the model is joining it for a reader, and no
-/// reader can point at `resp-a1b2c3`. So the requirement falls exactly here, on
-/// the roads that add, and the plain-string form of a responsibility input —
-/// which carries no title — is refused by it.
-fn require_titles(node_name: &str, claims: &[Responsibility]) -> Result<(), String> {
-    for claim in claims {
-        if claim
-            .title
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("")
-            .is_empty()
-        {
-            return Err(scryer_core::titles::required(&claim.id));
-        }
-    }
-    scryer_core::titles::check_node(
-        node_name,
-        claims.iter().map(|r| (r.id.as_str(), r.title.as_deref())),
-    )
-}
-
 /// Mints `resp-…` ids across a single tool call, clear of every existing
 /// responsibility id (on nodes AND groups, so it can't collide with a
 /// group-owned id) and of every id minted earlier in the same call.
@@ -575,9 +548,6 @@ impl ScryerServer {
             );
             node.description = item.description.clone();
             node.responsibilities = minter.build(&item.responsibilities);
-            if let Err(e) = require_titles(&node.name, &node.responsibilities) {
-                return Ok(CallToolResult::error(vec![Content::text(e)]));
-            }
             model.nodes.push(node);
             minted.push(id);
         }
@@ -1516,7 +1486,11 @@ mod tests {
                     technology: None,
                     description: None,
                     external: false,
-                    responsibilities: vec!["does the new thing".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "does the new thing".into(),
+                        title: Some("the thing".into()),
+                        concern: None,
+                    }],
                     boundary_dir: None,
                 }],
             }))
@@ -1557,7 +1531,11 @@ mod tests {
                     technology: Some(prose.into()),
                     description: None,
                     external: false,
-                    responsibilities: vec!["runs the chat in the prospect's browser".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "runs the chat in the prospect's browser".into(),
+                        title: Some("chat".into()),
+                        concern: None,
+                    }],
                     boundary_dir: None,
                 }],
             }))
@@ -1633,7 +1611,11 @@ mod tests {
                     technology: None,
                     description: None,
                     external: false,
-                    responsibilities: vec!["does the new thing".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "does the new thing".into(),
+                        title: Some("the thing".into()),
+                        concern: None,
+                    }],
                     boundary_dir: None,
                 }],
             }))
@@ -1717,7 +1699,14 @@ mod tests {
                     technology: Some("Axum".into()),
                     description: None,
                     external: false,
-                    responsibilities: vec!["serves the public API".into(), "  ".into()],
+                    responsibilities: vec![
+                        StatementInput::Rich {
+                            statement: "serves the public API".into(),
+                            title: Some("serving".into()),
+                            concern: None,
+                        },
+                        StatementInput::Plain("  ".into()),
+                    ],
                     boundary_dir: Some("crates/api".into()),
                 }],
             }))
@@ -1767,7 +1756,7 @@ mod tests {
                     line: Some(10),
                     end_line: Some(20),
                     responsibilities: vec![ResponsibilityInput::Rich {
-                        title: None,
+                        title: Some("session".into()),
                         statement: "holds the logged-in session".into(),
                         concern: None,
                         line: Some(12),
@@ -1820,7 +1809,11 @@ mod tests {
                         technology: None,
                         description: None,
                         external: false,
-                        responsibilities: vec!["serves the site".into()],
+                        responsibilities: vec![StatementInput::Rich {
+                            statement: "serves the site".into(),
+                            title: Some("serving".into()),
+                            concern: None,
+                        }],
                         boundary_dir: Some("web".into()),
                     },
                     ContainerItem {
@@ -1829,7 +1822,11 @@ mod tests {
                         technology: None,
                         description: None,
                         external: false,
-                        responsibilities: vec!["runs jobs".into()],
+                        responsibilities: vec![StatementInput::Rich {
+                            statement: "runs jobs".into(),
+                            title: Some("jobs".into()),
+                            concern: None,
+                        }],
                         boundary_dir: Some("worker".into()),
                     },
                 ],
@@ -1854,7 +1851,11 @@ mod tests {
                     name: "Backend".into(),
                     description: None,
                     member_ids: ids.clone(),
-                    responsibilities: vec!["deploys atomically".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "deploys atomically".into(),
+                        title: Some("deploying".into()),
+                        concern: None,
+                    }],
                 }],
             }))
             .unwrap();
@@ -1899,7 +1900,11 @@ mod tests {
                     technology: None,
                     description: None,
                     external: false,
-                    responsibilities: vec!["serves the public API".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "serves the public API".into(),
+                        title: Some("serving".into()),
+                        concern: None,
+                    }],
                     boundary_dir: Some("api".into()),
                 }],
             }))
@@ -2000,7 +2005,11 @@ mod tests {
                     technology: None,
                     description: None,
                     external: false,
-                    responsibilities: vec!["charges the card in USD".into()],
+                    responsibilities: vec![StatementInput::Rich {
+                        statement: "charges the card in USD".into(),
+                        title: Some("charging".into()),
+                        concern: None,
+                    }],
                     boundary_dir: Some("api".into()),
                 }],
             }))

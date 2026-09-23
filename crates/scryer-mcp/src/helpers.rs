@@ -520,26 +520,6 @@ fn basis_switch_reads(raw: Option<&str>) -> bool {
     )
 }
 
-/// Every title on ONE node is well-shaped and no two are the same — checked
-/// after a write has assembled the node's claims, so what is judged is the
-/// shape the model would be left in and not the one it started from.
-///
-/// The node is the scope because the reference a reader is given is "the
-/// <title> responsibility of <node name>": the node is already half of it, so
-/// two nodes may both have a claim titled `render` without a reader ever being
-/// in doubt. Untitled claims are passed over — every claim written before
-/// titles carries none, and a write that does not touch them must not be
-/// refused on their account.
-pub(crate) fn check_node_titles(node: &Node) -> Result<(), CallToolResult> {
-    scryer_core::titles::check_node(
-        &node.name,
-        node.responsibilities
-            .iter()
-            .map(|r| (r.id.as_str(), r.title.as_deref())),
-    )
-    .map_err(|e| CallToolResult::error(vec![Content::text(e)]))
-}
-
 #[cfg(test)]
 thread_local! {
     /// The tests' handle on the switch: per-thread, so a test that turns it on
@@ -962,6 +942,18 @@ pub(crate) fn write_planned_tagged(
     {
         {
             let before = scryer_core::read_planned_at(model_ref).unwrap_or_default();
+
+            // NOTHING NEW JOINS THE MODEL UNNAMED, BY ANY DOOR. Asked here
+            // because here is where every road meets: update_nodes and
+            // update_group's array writes, update_claim's reword, and the six
+            // add_* roads, which all reach the plan through this one call. The
+            // first version of this rule was written per road, enforced one of
+            // eight, and the other seven were open — a rule with a door count
+            // is a rule with a hole count. Before `tag` mutates anything and
+            // before `write_planned` persists, so a refusal leaves the plan
+            // exactly as it found it.
+            scryer_core::titles::check_write(&before, model)?;
+
             let keys: Vec<String> = scryer_core::diff::diff(&before, model)
                 .changes
                 .iter()
