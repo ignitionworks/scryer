@@ -887,9 +887,13 @@ pub(crate) fn remint_colliding_node_ids(
 /// between the plan on disk and the model being written, so every authoring
 /// tool gets attribution without bespoke bookkeeping, deletions included. No
 /// current change (or one this plan's registry doesn't know) writes unfiled,
-/// exactly as before. Returns conflict warnings for the tool's response: a key
-/// already tagged by a DIFFERENT change is two tasks touching the same element
-/// — the collision the ledger exists to catch before the code merges.
+/// exactly as before.
+///
+/// A key already tagged by a DIFFERENT, LIVE change is two tasks touching the
+/// same element — the collision the ledger exists to catch before the code
+/// merges — and the write is REFUSED naming the change that holds the entry
+/// (resp-jvz3ge). Only the collisions that name nobody live remain warnings:
+/// a dead tag, and a binned holder, whose entries are not pending work.
 /// A plan write's answer: the tag warnings, and the basis the write leaves
 /// behind for the caller's next write against the same set.
 pub(crate) struct TaggedWrite {
@@ -943,6 +947,65 @@ pub(crate) fn write_planned_tagged(
                 .iter()
                 .map(scryer_core::changes::key_for)
                 .collect();
+
+            // AN ENTRY ANOTHER CHANGE HOLDS IS NOT THIS WRITE'S TO TAKE.
+            // Tagging is last-writer-wins, so before this refusal a write that
+            // touched a neighbouring change's entry simply re-tagged it to the
+            // writer's change and said so in a warning nobody had to read:
+            // the entry left the change that was doing the work, and the
+            // silence is what made it invisible (judgement 1216 — four silent
+            // re-tags and two wiped citation lists in one day, none with an
+            // error). Refused HERE, before `tag` mutates anything and before
+            // `write_planned` persists, so a refused write leaves the plan
+            // exactly as it found it.
+            //
+            // Not refused: the writer's OWN entries, an untagged entry, an
+            // entry whose holder the ledger no longer knows (a dead tag names
+            // nobody), and an entry held by a BINNED change — the bin's
+            // entries are deliberately not pending work (`diff::open_plan`),
+            // so a live change is not blocked by abandoned work. Those still
+            // warn, as every collision did.
+            let held: Vec<(String, String, String)> = keys
+                .iter()
+                .filter_map(|k| {
+                    let prev = model.change_map.get(k)?;
+                    if prev == cid {
+                        return None;
+                    }
+                    let meta = model.changes.iter().find(|c| &c.id == prev)?;
+                    meta.binned.is_none().then(|| {
+                        (
+                            k.clone(),
+                            prev.clone(),
+                            scryer_core::changes::title_of(meta).to_string(),
+                        )
+                    })
+                })
+                .collect();
+            if !held.is_empty() {
+                let entries = held
+                    .iter()
+                    .map(|(key, prev, title)| {
+                        format!("\n  - {key} is held by {prev} (\"{title}\")")
+                    })
+                    .collect::<String>();
+                let holders: Vec<&str> = held
+                    .iter()
+                    .map(|(_, prev, _)| prev.as_str())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                return Err(format!(
+                    "REFUSED: this write would move plan entries that another change already \
+                     holds into {cid}, and nothing was written. Two changes editing one entry \
+                     is the collision the ledger exists to catch — moving it silently is how \
+                     one change's work disappears into another's.{entries}\n\
+                     Either resume the change that holds them ({}) and write there, or move \
+                     those entries deliberately with refile, then repeat this write.",
+                    holders.join(", ")
+                ));
+            }
+
             for (key, prev) in scryer_core::changes::tag(model, &keys, cid) {
                 let rationale = model
                     .changes
@@ -950,8 +1013,13 @@ pub(crate) fn write_planned_tagged(
                     .find(|c| c.id == prev)
                     .map(|c| c.rationale.clone())
                     .unwrap_or_default();
+                let binned = model
+                    .changes
+                    .iter()
+                    .any(|c| c.id == prev && c.binned.is_some());
+                let bin = if binned { ", which the bin holds" } else { "" };
                 warnings.push(format!(
-                    "conflict: {key} was tagged by {prev} (\"{rationale}\") and is now \
+                    "conflict: {key} was tagged by {prev} (\"{rationale}\"){bin} and is now \
                      retagged to {cid} — two changes are touching the same element"
                 ));
             }

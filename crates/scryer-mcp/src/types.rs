@@ -361,6 +361,133 @@ pub struct SetModelRequest {
     pub data: String,
 }
 
+/// A claim AS THE CALLER SENT IT: the parsed claim beside the RAW object the
+/// write carried, so the engine can tell a field the caller OMITTED from one
+/// it sent empty. Deserialisation alone cannot — `concern` is an `Option` and
+/// `cites` a `Vec` with serde defaults, so an absent key and an explicit
+/// `null` / `[]` both arrive as the same value, and a caller resending a claim
+/// it read (and meant only to reword) silently wipes the citations and the
+/// concern it never mentioned.
+///
+/// THE KEY'S PRESENCE IS THE SIGNAL, NOT ITS VALUE. A claim the host already
+/// holds keeps every field this write did not name, and still clears one the
+/// write named as `null` or `[]` — so there is a deliberate way to clear, and
+/// no accidental one. A claim the host does not hold is stored exactly as sent.
+///
+/// Whole-ARRAY semantics are untouched: a claim ABSENT from the array is still
+/// deleted, which is how a claim is dropped. The patch is per-claim.
+#[derive(Debug, Clone)]
+pub struct ClaimWrite {
+    /// The claim as serde read it — the fields the caller omitted carry their
+    /// type's default here, which is why `sent` exists.
+    claim: Responsibility,
+    /// The keys the caller's JSON object actually named.
+    sent: serde_json::Map<String, serde_json::Value>,
+}
+
+impl ClaimWrite {
+    pub fn claim(&self) -> &Responsibility {
+        &self.claim
+    }
+
+    /// Mutable for the id re-mint alone — a caller-invented id is replaced
+    /// before the claim is matched against the one the host holds.
+    pub fn claim_mut(&mut self) -> &mut Responsibility {
+        &mut self.claim
+    }
+
+    pub fn id(&self) -> &str {
+        &self.claim.id
+    }
+
+    /// The claim to store: `prior` with ONLY the fields this write named
+    /// replaced, or the claim as sent when the host holds none by that id.
+    /// Merged through the serialized form so a field added to `Responsibility`
+    /// later is carried by the same rule, without a list here to forget it.
+    pub fn onto(&self, prior: Option<&Responsibility>) -> Result<Responsibility, String> {
+        let Some(prior) = prior else {
+            // Nothing to patch onto: a claim new to this host is the one case
+            // where the statement is not optional — it is the claim.
+            if !self.sent.contains_key("statement") {
+                return Err(format!(
+                    "claim '{}' is new to this host and names no `statement` — a claim IS its                      statement, so there is nothing to add. Send the statement, or name the id                      of the claim you meant to patch.",
+                    self.claim.id
+                ));
+            }
+            return Ok(self.claim.clone());
+        };
+        let serde_json::Value::Object(mut merged) = serde_json::to_value(prior)
+            .map_err(|e| format!("claim '{}' could not be read back: {e}", self.claim.id))?
+        else {
+            return Err(format!(
+                "claim '{}' could not be read back as an object",
+                self.claim.id
+            ));
+        };
+        for (k, v) in &self.sent {
+            merged.insert(k.clone(), v.clone());
+        }
+        let mut out: Responsibility = serde_json::from_value(serde_json::Value::Object(merged))
+            .map_err(|e| {
+                format!(
+                    "claim '{}' cannot be merged onto the one the plan holds: {e}",
+                    self.claim.id
+                )
+            })?;
+        // Identity is the parsed claim's, which the re-mint may have replaced
+        // since the raw object was read.
+        out.id = self.claim.id.clone();
+        Ok(out)
+    }
+}
+
+/// A claim built in Rust rather than sent as JSON behaves as if the caller had
+/// sent that claim's serialized form — every field it carries is named.
+impl From<Responsibility> for ClaimWrite {
+    fn from(claim: Responsibility) -> Self {
+        let sent = match serde_json::to_value(&claim) {
+            Ok(serde_json::Value::Object(o)) => o,
+            _ => serde_json::Map::new(),
+        };
+        Self { claim, sent }
+    }
+}
+
+impl<'de> Deserialize<'de> for ClaimWrite {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let sent = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
+        // `statement` is the one required field of a claim, and a PATCH may
+        // legitimately leave it alone — a caller adding a citation should not
+        // have to resend the wording (resending it is how a wording gets
+        // clobbered). Parsed with a placeholder the merge then discards;
+        // `onto` refuses a claim that is new AND wordless.
+        let mut parseable = sent.clone();
+        parseable
+            .entry("statement")
+            .or_insert_with(|| serde_json::Value::String(String::new()));
+        let claim = Responsibility::deserialize(serde_json::Value::Object(parseable))
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self { claim, sent })
+    }
+}
+
+/// The wire shape is a `Responsibility` — the presence tracking is how the
+/// engine READS that shape, not a different one for the caller to learn.
+impl schemars::JsonSchema for ClaimWrite {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        Responsibility::schema_name()
+    }
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        Responsibility::schema_id()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        Responsibility::json_schema(generator)
+    }
+    fn inline_schema() -> bool {
+        Responsibility::inline_schema()
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateGroupItem {
     pub group_id: String,
@@ -368,8 +495,10 @@ pub struct UpdateGroupItem {
     pub description: Option<String>,
     /// Replacement member ids (2+ children of the group's parent).
     pub member_ids: Option<Vec<String>>,
-    /// Replacement responsibilities; empty clears.
-    pub responsibilities: Option<Vec<Responsibility>>,
+    // Per-claim patch, per-array replace — see `ClaimWrite`.
+    /// Replacement responsibilities; empty clears; a claim in it keeps fields
+    /// you do not name.
+    pub responsibilities: Option<Vec<ClaimWrite>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -399,8 +528,13 @@ pub struct UpdateNodeItem {
     pub technology: Option<String>,
     /// Pass false to clear the external marking.
     pub external: Option<bool>,
-    /// Full replacement of responsibilities; empty clears. Vagrant claims survive omission.
-    pub responsibilities: Option<Vec<Responsibility>>,
+    // The ARRAY replaces — a claim left out of it is deleted, which is how a
+    // claim is dropped — but each claim IN it patches the one the node holds:
+    // a field the caller did not name keeps its value, and one named as
+    // `null` / `[]` is cleared. See `ClaimWrite`.
+    /// Full replacement of responsibilities; empty clears. Vagrant claims survive
+    /// omission; a claim in it keeps fields you do not name.
+    pub responsibilities: Option<Vec<ClaimWrite>>,
     /// Full replacement of a data-shape symbol's fields; empty clears.
     pub properties: Option<Vec<SchemaProperty>>,
     /// New parent node id (reparent).

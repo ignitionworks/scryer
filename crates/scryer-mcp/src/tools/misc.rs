@@ -389,12 +389,12 @@ impl ScryerServer {
         let mut reminter = RespIdReminter::new(&[&model, &committed_floor]);
         for item in &req.items {
             if let Some(v) = &item.responsibilities {
-                reminter.absorb(v.iter());
+                reminter.absorb(v.iter().map(ClaimWrite::claim));
             }
         }
         for item in &mut req.items {
             if let Some(v) = &mut item.responsibilities {
-                reminter.remint(&item.group_id, v.iter_mut());
+                reminter.remint(&item.group_id, v.iter_mut().map(ClaimWrite::claim_mut));
             }
         }
 
@@ -453,7 +453,17 @@ impl ScryerServer {
                 g.member_ids = v.clone();
             }
             if let Some(v) = &item.responsibilities {
-                g.responsibilities = v.clone();
+                // Per-claim patch, per-array replace — the same rule
+                // `update_nodes` writes by (see `ClaimWrite`).
+                let mut next = Vec::with_capacity(v.len());
+                for w in v {
+                    let prior = g.responsibilities.iter().find(|r| r.id == w.id());
+                    match w.onto(prior) {
+                        Ok(r) => next.push(r),
+                        Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+                    }
+                }
+                g.responsibilities = next;
             }
             updated += 1;
         }
@@ -1489,7 +1499,7 @@ mod tests {
                     name: None,
                     description: None,
                     member_ids: None,
-                    responsibilities: Some(vec![resp("new")]),
+                    responsibilities: Some(vec![resp("new").into()]),
                 }],
             }))
             .unwrap();

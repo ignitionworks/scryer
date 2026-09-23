@@ -682,12 +682,12 @@ impl ScryerServer {
         let mut reminter = RespIdReminter::new(&[&model, &committed_floor]);
         for u in &req.nodes {
             if let Some(v) = &u.responsibilities {
-                reminter.absorb(v.iter());
+                reminter.absorb(v.iter().map(ClaimWrite::claim));
             }
         }
         for u in &mut req.nodes {
             if let Some(v) = &mut u.responsibilities {
-                reminter.remint(&u.node_id, v.iter_mut());
+                reminter.remint(&u.node_id, v.iter_mut().map(ClaimWrite::claim_mut));
             }
         }
 
@@ -808,11 +808,25 @@ impl ScryerServer {
                 let kept: Vec<_> = n
                     .responsibilities
                     .iter()
-                    .filter(|r| r.vagrant == Some(true) && !v.iter().any(|nv| nv.id == r.id))
+                    .filter(|r| r.vagrant == Some(true) && !v.iter().any(|nv| nv.id() == r.id))
                     .cloned()
                     .collect();
                 preserved_vagrants += kept.len();
-                n.responsibilities = v.clone();
+                // The ARRAY replaces (a claim left out is deleted — that is how
+                // a claim is dropped), but each claim in it PATCHES the one the
+                // node already holds: a field the caller did not name keeps
+                // what the plan has. Without this a resend meant to reword one
+                // claim wipes the citations and concern of every claim beside
+                // it, and says nothing.
+                let mut next = Vec::with_capacity(v.len());
+                for w in v {
+                    let prior = n.responsibilities.iter().find(|r| r.id == w.id());
+                    match w.onto(prior) {
+                        Ok(r) => next.push(r),
+                        Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+                    }
+                }
+                n.responsibilities = next;
                 n.responsibilities.extend(kept);
             }
             if let Some(v) = &u.properties {
@@ -3994,7 +4008,7 @@ mod tests {
                     node_id: "comp".into(),
                     description: Some(String::new()),
                     technology: Some(String::new()),
-                    responsibilities: Some(vec![resp("r-keep")]),
+                    responsibilities: Some(vec![resp("r-keep").into()]),
                     kind: None,
                     name: None,
                     external: None,
@@ -4015,6 +4029,161 @@ mod tests {
         );
         assert!(comp.responsibilities.iter().any(|r| r.id == "r-keep"));
         assert_eq!(comp.responsibilities.len(), 2);
+    }
+
+    /// resp-jvz3ge: A PLAN WRITE CHANGES ONLY THE FIELDS THE CALLER SENT.
+    ///
+    /// The array still REPLACES — a claim left out of it is deleted, which is
+    /// how a claim is dropped — but each claim IN it is a patch: resending one
+    /// without `cites` or `concern` keeps them. On 23 September three parties
+    /// planning at once wiped citations twice this way, with no error; the
+    /// caller had read the claim, reworded its statement, and sent back the
+    /// shape it happened to have in hand.
+    ///
+    /// The whole distinction is the KEY'S PRESENCE, which is why this test
+    /// goes through the JSON the caller actually sends: `concern: null` and
+    /// `cites: []` deserialize to exactly what an omitted field does, so a
+    /// request built in Rust cannot tell the two apart and cannot prove this.
+    #[test]
+    fn resp_jvz3ge_a_resend_keeps_the_fields_it_did_not_name_and_still_deletes_what_it_omits() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        let mut c = node("comp", Kind::Component, "Comp", None);
+        let mut keep = resp("resp-keep");
+        keep.concern = Some("auth".into());
+        keep.cites = vec!["doc-7".into()];
+        let mut cleared = resp("resp-cleared");
+        cleared.concern = Some("idempotency".into());
+        cleared.cites = vec!["doc-9".into()];
+        c.responsibilities = vec![keep, cleared, resp("resp-dropped")];
+        m.nodes.push(c);
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        // The caller rewords one claim, clears the other's metadata on purpose,
+        // and leaves the third out of the array.
+        let req: UpdateNodeRequest = serde_json::from_value(serde_json::json!({
+            "project": project,
+            "nodes": [{
+                "node_id": "comp",
+                "responsibilities": [
+                    { "id": "resp-keep", "statement": "**Answers** the probe" },
+                    { "id": "resp-cleared", "statement": "does resp-cleared",
+                      "concern": null, "cites": [] },
+                ],
+            }],
+        }))
+        .unwrap();
+        let r = server.update_nodes(Parameters(req)).unwrap();
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let comp = after.nodes.iter().find(|n| n.id == "comp").unwrap();
+        let claim = |id: &str| comp.responsibilities.iter().find(|r| r.id == id);
+
+        let kept = claim("resp-keep").expect("the reworded claim is still there");
+        assert_eq!(kept.statement, "**Answers** the probe", "the reword landed");
+        assert_eq!(
+            kept.concern.as_deref(),
+            Some("auth"),
+            "a concern the write never named survives it"
+        );
+        assert_eq!(
+            kept.cites,
+            vec!["doc-7".to_string()],
+            "and so do the citations"
+        );
+
+        let cleared = claim("resp-cleared").expect("still there");
+        assert_eq!(cleared.concern, None, "`null` still clears, deliberately");
+        assert!(cleared.cites.is_empty(), "and so does `[]`");
+
+        assert!(
+            claim("resp-dropped").is_none(),
+            "the ARRAY still replaces: a claim omitted from it is deleted"
+        );
+        assert_eq!(comp.responsibilities.len(), 2);
+    }
+
+    /// resp-jvz3ge, the other half of the array's contract: a claim the node
+    /// does NOT hold lands exactly as sent — the patch merges onto a prior, and
+    /// invents nothing where there is none.
+    #[test]
+    fn resp_jvz3ge_a_claim_new_to_the_node_lands_as_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
+        let mut m = ScryModel::new();
+        let mut c = node("comp", Kind::Component, "Comp", None);
+        let mut held = resp("resp-held");
+        held.concern = Some("auth".into());
+        c.responsibilities = vec![held];
+        m.nodes.push(c);
+        scryer_core::write_planned_at(&model_ref, &m).unwrap();
+        let server = ScryerServer::with_change(dir.path());
+        let project = dir.path().to_string_lossy().to_string();
+
+        let req: UpdateNodeRequest = serde_json::from_value(serde_json::json!({
+            "project": project,
+            "nodes": [{
+                "node_id": "comp",
+                "responsibilities": [
+                    { "id": "resp-held", "concern": "billing" },
+                    { "id": "new", "statement": "**Records** the receipt" },
+                ],
+            }],
+        }))
+        .unwrap();
+        let r = server.update_nodes(Parameters(req)).unwrap();
+        assert_ne!(r.is_error, Some(true), "{}", tool_text(&r));
+
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        let comp = after.nodes.iter().find(|n| n.id == "comp").unwrap();
+        let held = comp
+            .responsibilities
+            .iter()
+            .find(|r| r.id == "resp-held")
+            .unwrap();
+        assert_eq!(
+            held.statement, "does resp-held",
+            "an unnamed statement held"
+        );
+        assert_eq!(
+            held.concern.as_deref(),
+            Some("billing"),
+            "the named one moved"
+        );
+        let fresh = comp
+            .responsibilities
+            .iter()
+            .find(|r| r.id != "resp-held")
+            .expect("the new claim landed");
+        assert_eq!(fresh.statement, "**Records** the receipt");
+        assert_eq!(fresh.concern, None);
+        assert!(fresh.cites.is_empty());
+
+        // And a claim that is new AND wordless is refused by name rather than
+        // landing as an empty statement — the one field a patch cannot omit
+        // when there is nothing to patch onto.
+        let req: UpdateNodeRequest = serde_json::from_value(serde_json::json!({
+            "project": project,
+            "nodes": [{
+                "node_id": "comp",
+                "responsibilities": [{ "id": "new", "concern": "billing" }],
+            }],
+        }))
+        .unwrap();
+        let r = server.update_nodes(Parameters(req)).unwrap();
+        let text = tool_text(&r);
+        assert_eq!(r.is_error, Some(true), "{text}");
+        assert!(text.contains("names no `statement`"), "{text}");
+        let after = scryer_core::read_planned_at(&model_ref).unwrap();
+        assert_eq!(
+            after.nodes[0].responsibilities.len(),
+            2,
+            "the refusal left the plan as it found it"
+        );
     }
 
     /// property_labels partial-folds data fields the way responsibility_ids
@@ -6113,11 +6282,18 @@ mod tests {
         );
     }
 
-    /// Two changes touching the same element is the collision the ledger
-    /// exists to catch: the second session's write wins the tag, but the
-    /// response says so out loud.
+    /// resp-jvz3ge: A WRITE THAT WOULD MOVE ANOTHER CHANGE'S PENDING ENTRY IS
+    /// REFUSED, naming the change that holds it and the entry it holds.
+    ///
+    /// This used to be a warning: the second session's write won the tag and
+    /// the response said so, in a line nobody had to read. On 23 September
+    /// that happened four times in one day on a shared plan — each time an
+    /// entry left the change doing the work and joined the change that
+    /// happened to write last, and not once was there an error. The write is
+    /// refused whole, before anything is persisted: the tag stays with its
+    /// holder and the edit does not land.
     #[test]
-    fn cross_change_retag_warns_about_the_collision() {
+    fn resp_jvz3ge_a_write_over_another_changes_entry_is_refused_naming_the_holder() {
         let dir = tempfile::tempdir().unwrap();
         let model_ref = ModelRef::ProjectLocal(dir.path().to_path_buf());
         let project = dir.path().to_string_lossy().to_string();
@@ -6181,20 +6357,84 @@ mod tests {
             }))
             .unwrap();
         let text = tool_text(&r);
+        assert_eq!(r.is_error, Some(true), "{text}");
         assert!(
-            text.contains(&format!(
-                "conflict: node:{rl} was tagged by {chg1} (\"rate limiting\")"
-            )),
-            "{text}"
+            text.contains(&format!("node:{rl} is held by {chg1} (\"rate limiting\")")),
+            "the refusal names the entry AND the change that holds it: {text}"
         );
+        assert!(
+            text.contains(&chg2),
+            "and the change the write would have moved it to: {text}"
+        );
+        assert!(
+            text.contains("refile"),
+            "and how to move it on purpose: {text}"
+        );
+
+        // Nothing was written: the tag stays with its holder and the rename
+        // the write carried did not land.
         let planned = scryer_core::read_planned_at(&model_ref).unwrap();
         assert_eq!(
             planned
                 .change_map
                 .get(&format!("node:{rl}"))
                 .map(String::as_str),
-            Some(chg2.as_str()),
-            "last writer wins the tag"
+            Some(chg1.as_str()),
+            "the entry stays with the change that holds it"
+        );
+        assert_eq!(
+            planned.nodes.iter().find(|n| n.id == rl).unwrap().name,
+            "RateLimiter",
+            "and the write was not half-applied"
+        );
+
+        // Session 1 writing its OWN entry is not a collision, and neither is
+        // an entry no change holds.
+        let own = session1
+            .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
+                project: Some(project.clone()),
+                nodes: vec![UpdateNodeItem {
+                    node_id: rl.clone(),
+                    name: Some("Throttler".into()),
+                    kind: None,
+                    description: None,
+                    technology: None,
+                    external: None,
+                    responsibilities: None,
+                    properties: None,
+                    parent_id: None,
+                }],
+            }))
+            .unwrap();
+        assert_ne!(own.is_error, Some(true), "{}", tool_text(&own));
+
+        // An entry the BIN's change holds still warns and still retags: a
+        // binned change's entries are deliberately not pending work
+        // (diff::open_plan), so abandoned work never blocks a live change.
+        scryer_core::changes::bin_change(&model_ref, &chg1, None, None, None).unwrap();
+        let after_bin = session2
+            .update_nodes(Parameters(UpdateNodeRequest {
+                basis: None,
+                project: Some(project.clone()),
+                nodes: vec![UpdateNodeItem {
+                    node_id: rl.clone(),
+                    description: Some("throttles".into()),
+                    kind: None,
+                    name: None,
+                    technology: None,
+                    external: None,
+                    responsibilities: None,
+                    properties: None,
+                    parent_id: None,
+                }],
+            }))
+            .unwrap();
+        let text = tool_text(&after_bin);
+        assert_ne!(after_bin.is_error, Some(true), "{text}");
+        assert!(
+            text.contains("conflict:") && text.contains("the bin holds"),
+            "{text}"
         );
     }
 
@@ -6233,10 +6473,10 @@ mod tests {
                     technology: None,
                     external: None,
                     responsibilities: Some(vec![
-                        resp("resp-1"),
-                        resp("new"),
-                        resp("resp-9"),
-                        resp("new"),
+                        resp("resp-1").into(),
+                        resp("new").into(),
+                        resp("resp-9").into(),
+                        resp("new").into(),
                     ]),
                     properties: None,
                     parent_id: None,
@@ -6304,7 +6544,7 @@ mod tests {
                     description: None,
                     technology: None,
                     external: None,
-                    responsibilities: Some(vec![resp("resp-1"), resp("resp-2")]),
+                    responsibilities: Some(vec![resp("resp-1").into(), resp("resp-2").into()]),
                     properties: None,
                     parent_id: None,
                 }],
@@ -6641,7 +6881,7 @@ mod tests {
                     description: None,
                     technology: None,
                     external: None,
-                    responsibilities: Some(claims),
+                    responsibilities: Some(claims.into_iter().map(Into::into).collect()),
                     properties: None,
                     parent_id: None,
                 }],
